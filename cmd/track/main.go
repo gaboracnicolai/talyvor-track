@@ -26,6 +26,7 @@ import (
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
+	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/milestone"
 	"github.com/talyvor/track/internal/notification"
@@ -62,15 +63,31 @@ func main() {
 	notifier := realtime.NewNotifier(hub)
 
 	workflowEngine := workflow.New(pool)
-	wsHandler := workspace.NewHandler(workspace.NewStore(pool))
+	workspaceStore := workspace.NewStore(pool)
+	issueStore := issue.NewStore(pool)
+	notificationStore := notification.NewStore(pool)
+
+	wsHandler := workspace.NewHandler(workspaceStore)
 	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
 	projectHandler := project.NewHandler(project.NewStore(pool))
-	issueHandler := issue.NewHandler(issue.NewStore(pool)).WithNotifier(notifier)
+	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycle.NewStore(pool))
 	milestoneHandler := milestone.NewHandler(milestone.NewStore(pool))
-	notificationHandler := notification.NewHandler(notification.NewStore(pool))
+	notificationHandler := notification.NewHandler(notificationStore)
+
+	// Lens integration: read side (client + AI cost endpoints), sync
+	// loop (15-minute interval), and webhook receiver. Lens config is
+	// optional — empty URL keeps every endpoint reachable but Lens
+	// data is just absent.
+	lensClient := lensintegration.New(cfg.LensURL, cfg.LensAPIKey)
+	lensHandler := lensintegration.NewHandler(lensClient, issueStore)
+	lensWebhook := lensintegration.NewWebhookHandler(cfg.LensWebhookSecret, issueStore, notificationStore, notifier)
+	if lensClient.IsConfigured() {
+		lensSyncer := lensintegration.NewSyncer(lensClient, issueStore, workspaceStore)
+		go lensSyncer.StartSync(ctx, 15*time.Minute)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -96,6 +113,13 @@ func main() {
 		cycleHandler.Mount(r)
 		milestoneHandler.Mount(r)
 		notificationHandler.Mount(r)
+		lensHandler.Mount(r)
+
+		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
+		// request body with the shared secret — see
+		// internal/lensintegration/webhook.go for the verification
+		// path.
+		r.Post("/lens/webhook", lensWebhook.ServeHTTP)
 
 		// WebSocket upgrade — clients connect here and receive live
 		// events for the issues / comments / cycles they subscribe to.

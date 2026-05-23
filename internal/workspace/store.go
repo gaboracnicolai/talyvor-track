@@ -137,3 +137,23 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM workspaces WHERE id = $1`, id)
 	return err
 }
+
+// ListIDs returns just the workspace IDs. Used by the Lens syncer to
+// iterate every workspace on its tick without paying for the full
+// row scan.
+func (s *Store) ListIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM workspaces`)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: list ids: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}

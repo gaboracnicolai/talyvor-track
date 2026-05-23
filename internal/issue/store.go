@@ -357,6 +357,37 @@ func (s *Store) UpdateAICost(ctx context.Context, lensFeature string, costUSD fl
 	return err
 }
 
+// TopByAICost returns the workspace's most expensive issues in
+// descending cost order. Powers the "top spenders" panel on the
+// /v1/workspaces/{wsID}/ai-costs dashboard.
+func (s *Store) TopByAICost(ctx context.Context, workspaceID string, limit int) ([]model.Issue, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+issueColumns+` FROM issues
+        WHERE workspace_id = $1 AND ai_cost_usd > 0
+        ORDER BY ai_cost_usd DESC LIMIT $2`,
+		workspaceID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("issue: top by ai cost: %w", err)
+	}
+	defer rows.Close()
+	var out []model.Issue
+	for rows.Next() {
+		i, err := scanIssue(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *i)
+	}
+	return out, rows.Err()
+}
+
 // Search runs Postgres full-text search across title + description.
 // Uses websearch_to_tsquery so callers can pass natural-language
 // queries with quoted phrases ("foo bar") and negation (-baz).
