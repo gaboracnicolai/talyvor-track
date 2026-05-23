@@ -1,0 +1,395 @@
+// Package issue owns the database operations for issue records.
+//
+// The store is intentionally low-magic: hand-rolled SQL with positional
+// args, dynamic-but-allowlisted UPDATE, and one struct-scanner helper
+// that every read path reuses. No ORM, no reflection, no struct tag
+// parsing at runtime — easier to debug, easier to reason about under
+// concurrency.
+package issue
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/model"
+)
+
+// pgxDB is the subset of *pgxpool.Pool the store uses. Decoupled so
+// pgxmock can stand in for the real pool inside unit tests.
+type pgxDB interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+type Store struct {
+	pool pgxDB
+}
+
+func NewStore(pool *pgxpool.Pool) *Store {
+	var db pgxDB
+	if pool != nil {
+		db = pool
+	}
+	return newStore(db)
+}
+
+func newStore(db pgxDB) *Store { return &Store{pool: db} }
+
+// IssueFilter drives the List query. Empty / zero fields are ignored
+// (no WHERE clause emitted) — every field is independently optional.
+type IssueFilter struct {
+	WorkspaceID string
+	TeamID      string
+	ProjectID   string
+	CycleID     string
+	Status      string
+	AssigneeID  string
+	Priority    int
+	Labels      []string
+	Limit       int
+	Offset      int
+	OrderBy     string
+	OrderDir    string
+}
+
+// issueColumns is the SELECT projection. Declared once so every read
+// path scans the same column order — adding a new column means
+// touching one constant + one scan helper.
+const issueColumns = `id, workspace_id, team_id, project_id, number, identifier,
+    title, description, status, priority,
+    assignee_id, creator_id, cycle_id, parent_id,
+    due_date, completed_at,
+    lens_feature, ai_cost_usd, ai_tokens,
+    labels, sort_order, created_at, updated_at`
+
+// scanIssue reads a single row into model.Issue. The row is whatever
+// the caller gets from QueryRow or rows.Next + rows.Scan.
+func scanIssue(scanner interface {
+	Scan(...any) error
+}) (*model.Issue, error) {
+	// Status is the typed alias IssueStatus; pgx won't auto-cast a
+	// driver string into a custom string type, so we land it in a
+	// regular string first and convert.
+	var (
+		i        model.Issue
+		status   string
+		priority int
+	)
+	err := scanner.Scan(
+		&i.ID, &i.WorkspaceID, &i.TeamID, &i.ProjectID, &i.Number, &i.Identifier,
+		&i.Title, &i.Description, &status, &priority,
+		&i.AssigneeID, &i.CreatorID, &i.CycleID, &i.ParentID,
+		&i.DueDate, &i.CompletedAt,
+		&i.LensFeature, &i.AICostUSD, &i.AITokens,
+		&i.Labels, &i.SortOrder, &i.CreatedAt, &i.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	i.Status = model.IssueStatus(status)
+	i.Priority = model.IssuePriority(priority)
+	return &i, nil
+}
+
+// Create allocates the next per-team issue number, formats the
+// identifier (TEAM-N), and inserts the row. Three queries: look up
+// the team prefix, compute the next number, INSERT … RETURNING.
+//
+// The (team_id, number) UNIQUE constraint catches the race between
+// two concurrent Creates picking the same number. Callers can retry
+// the operation on a unique-violation error.
+func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, error) {
+	if s.pool == nil {
+		return nil, errors.New("issue: store has no pool")
+	}
+	if issue.WorkspaceID == "" || issue.TeamID == "" || issue.Title == "" || issue.CreatorID == "" {
+		return nil, errors.New("issue: WorkspaceID, TeamID, Title, and CreatorID are required")
+	}
+	if issue.Status == "" {
+		issue.Status = model.StatusBacklog
+	}
+	if issue.Labels == nil {
+		issue.Labels = []string{}
+	}
+
+	var teamIdentifier string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT identifier FROM teams WHERE id = $1`,
+		issue.TeamID,
+	).Scan(&teamIdentifier); err != nil {
+		return nil, fmt.Errorf("issue: lookup team identifier: %w", err)
+	}
+
+	var nextNumber int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`,
+		issue.TeamID,
+	).Scan(&nextNumber); err != nil {
+		return nil, fmt.Errorf("issue: compute next number: %w", err)
+	}
+	issue.Number = nextNumber
+	issue.Identifier = fmt.Sprintf("%s-%d", teamIdentifier, nextNumber)
+
+	const insertSQL = `INSERT INTO issues
+        (workspace_id, team_id, project_id, number, identifier,
+         title, description, status, priority,
+         assignee_id, creator_id, cycle_id, parent_id,
+         due_date, lens_feature, labels, sort_order)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    RETURNING ` + issueColumns
+	return scanIssue(s.pool.QueryRow(ctx, insertSQL,
+		issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier,
+		issue.Title, issue.Description, string(issue.Status), int(issue.Priority),
+		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID,
+		issue.DueDate, issue.LensFeature, issue.Labels, issue.SortOrder,
+	))
+}
+
+func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
+	return scanIssue(s.pool.QueryRow(ctx,
+		`SELECT `+issueColumns+` FROM issues WHERE id = $1`,
+		id,
+	))
+}
+
+func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error) {
+	return scanIssue(s.pool.QueryRow(ctx,
+		`SELECT `+issueColumns+` FROM issues WHERE identifier = $1`,
+		identifier,
+	))
+}
+
+// List composes a WHERE-clause set dynamically from the filter. Each
+// filter field that's non-zero produces one $N placeholder. Ordering
+// and pagination are validated against allowlists to keep the SQL
+// safely composed.
+func (s *Store) List(ctx context.Context, filter IssueFilter) ([]model.Issue, error) {
+	if s.pool == nil {
+		return nil, nil
+	}
+	var (
+		where []string
+		args  []any
+		argN  int
+	)
+	add := func(clause string, val any) {
+		argN++
+		where = append(where, fmt.Sprintf(clause, argN))
+		args = append(args, val)
+	}
+	if filter.WorkspaceID != "" {
+		add("workspace_id = $%d", filter.WorkspaceID)
+	}
+	if filter.TeamID != "" {
+		add("team_id = $%d", filter.TeamID)
+	}
+	if filter.ProjectID != "" {
+		add("project_id = $%d", filter.ProjectID)
+	}
+	if filter.CycleID != "" {
+		add("cycle_id = $%d", filter.CycleID)
+	}
+	if filter.Status != "" {
+		add("status = $%d", filter.Status)
+	}
+	if filter.AssigneeID != "" {
+		add("assignee_id = $%d", filter.AssigneeID)
+	}
+	if filter.Priority > 0 {
+		add("priority = $%d", filter.Priority)
+	}
+	if len(filter.Labels) > 0 {
+		add("labels && $%d", filter.Labels)
+	}
+
+	limit := filter.Limit
+	switch {
+	case limit <= 0:
+		limit = 50
+	case limit > 250:
+		limit = 250
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Order column allowlist: anything else falls back to created_at DESC
+	// so a malformed query never breaks pagination.
+	orderBy := "created_at"
+	switch filter.OrderBy {
+	case "created_at", "updated_at", "priority", "sort_order":
+		orderBy = filter.OrderBy
+	}
+	orderDir := "DESC"
+	if strings.EqualFold(filter.OrderDir, "asc") {
+		orderDir = "ASC"
+	}
+
+	args = append(args, limit, offset)
+	limitPos := argN + 1
+	offsetPos := argN + 2
+
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = " WHERE " + strings.Join(where, " AND ")
+	}
+	sql := `SELECT ` + issueColumns + ` FROM issues` + whereClause +
+		fmt.Sprintf(" ORDER BY %s %s LIMIT $%d OFFSET $%d", orderBy, orderDir, limitPos, offsetPos)
+
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("issue: list: %w", err)
+	}
+	defer rows.Close()
+
+	var out []model.Issue
+	for rows.Next() {
+		issue, err := scanIssue(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *issue)
+	}
+	return out, rows.Err()
+}
+
+// updatableFields is the allowlist of columns Update will touch. Any
+// key in the map argument that isn't in this set is silently dropped
+// — protects against SQL injection via map keys.
+var updatableFields = map[string]struct{}{
+	"title":        {},
+	"description":  {},
+	"status":       {},
+	"priority":     {},
+	"assignee_id":  {},
+	"project_id":   {},
+	"cycle_id":     {},
+	"parent_id":    {},
+	"due_date":     {},
+	"labels":       {},
+	"sort_order":   {},
+	"lens_feature": {},
+}
+
+// Update applies the supplied field map and returns the materialised
+// row. Status transitions to "done" stamp completed_at; transitions
+// away from "done" clear it — both happen server-side so the API
+// caller never has to set completed_at by hand.
+func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error) {
+	if len(updates) == 0 {
+		return s.GetByID(ctx, id)
+	}
+
+	// Stamp completed_at based on the incoming status, if any.
+	if rawStatus, ok := updates["status"]; ok {
+		if str, isStr := rawStatus.(string); isStr {
+			if str == string(model.StatusDone) {
+				updates["completed_at"] = time.Now().UTC()
+			} else {
+				updates["completed_at"] = nil
+			}
+		}
+	}
+
+	var (
+		setClauses []string
+		args       []any
+		argN       int
+	)
+	for k, v := range updates {
+		if _, ok := updatableFields[k]; !ok && k != "completed_at" {
+			continue
+		}
+		argN++
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", k, argN))
+		args = append(args, v)
+	}
+	if len(setClauses) == 0 {
+		return s.GetByID(ctx, id)
+	}
+	// updated_at is always bumped — never trust the caller's value.
+	argN++
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argN))
+	args = append(args, time.Now().UTC())
+	// id is the final positional arg for the WHERE clause.
+	argN++
+	args = append(args, id)
+
+	sql := fmt.Sprintf(
+		`UPDATE issues SET %s WHERE id = $%d RETURNING %s`,
+		strings.Join(setClauses, ", "), argN, issueColumns,
+	)
+	return scanIssue(s.pool.QueryRow(ctx, sql, args...))
+}
+
+// Delete is a soft delete: the row stays but the status becomes
+// "cancelled" so historical reports can still see the identifier.
+// updated_at is bumped so audit trails record the transition.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE issues SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
+		id,
+	)
+	return err
+}
+
+// UpdateAICost is the Lens-side reconciliation hook: when the proxy
+// records a spend row with X-Talyvor-Feature=<feat>, the Track
+// recorder calls here to accumulate the cost on every issue that
+// declared the same lens_feature within the same workspace.
+func (s *Store) UpdateAICost(ctx context.Context, lensFeature string, costUSD float64, tokens int, workspaceID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE issues SET
+        ai_cost_usd = ai_cost_usd + $2,
+        ai_tokens = ai_tokens + $3,
+        updated_at = NOW()
+    WHERE lens_feature = $1 AND workspace_id = $4`,
+		lensFeature, costUSD, tokens, workspaceID,
+	)
+	return err
+}
+
+// Search runs Postgres full-text search across title + description.
+// Uses websearch_to_tsquery so callers can pass natural-language
+// queries with quoted phrases ("foo bar") and negation (-baz).
+func (s *Store) Search(ctx context.Context, workspaceID, query string, limit int) ([]model.Issue, error) {
+	if s.pool == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+issueColumns+` FROM issues
+        WHERE workspace_id = $1
+          AND to_tsvector('english', title || ' ' || description)
+              @@ websearch_to_tsquery('english', $2)
+        ORDER BY updated_at DESC
+        LIMIT $3`,
+		workspaceID, query, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("issue: search: %w", err)
+	}
+	defer rows.Close()
+	var out []model.Issue
+	for rows.Next() {
+		issue, err := scanIssue(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *issue)
+	}
+	return out, rows.Err()
+}
