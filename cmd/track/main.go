@@ -30,6 +30,7 @@ import (
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/lensintegration"
+	"github.com/talyvor/track/internal/mcp"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/milestone"
 	"github.com/talyvor/track/internal/model"
@@ -69,15 +70,17 @@ func main() {
 	workflowEngine := workflow.New(pool)
 	workspaceStore := workspace.NewStore(pool)
 	issueStore := issue.NewStore(pool)
+	projectStore := project.NewStore(pool)
+	cycleStore := cycle.NewStore(pool)
 	notificationStore := notification.NewStore(pool)
 
 	wsHandler := workspace.NewHandler(workspaceStore)
 	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
-	projectHandler := project.NewHandler(project.NewStore(pool))
+	projectHandler := project.NewHandler(projectStore)
 	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
-	cycleHandler := cycle.NewHandler(cycle.NewStore(pool))
+	cycleHandler := cycle.NewHandler(cycleStore)
 	milestoneHandler := milestone.NewHandler(milestone.NewStore(pool))
 	notificationHandler := notification.NewHandler(notificationStore)
 
@@ -115,6 +118,15 @@ func main() {
 	analyticsEngine := analytics.New(pool)
 	analyticsHandler := analytics.NewHandler(analyticsEngine)
 
+	// MCP server: JSON-RPC + SSE surface for agent integrations. Mounts
+	// on the public router (no auth, no /v1 prefix) so MCP clients can
+	// find /mcp at a stable path. The get_ai_costs tool is unique to
+	// Track — no other tracker exposes LLM spend through MCP.
+	mcpServer := mcp.New(
+		issueStore, projectStore, cycleStore,
+		aiEngine, analyticsEngine, "0.1.0",
+	).WithMembersPool(pool)
+
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
 	if ids, err := workspaceStore.ListIDs(ctx); err == nil {
@@ -136,6 +148,13 @@ func main() {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	r.Handle("/metrics", metrics.Handler())
+
+	// MCP endpoints. Mounted on the public router so they bypass any
+	// future auth middleware — MCP clients authenticate via the
+	// Track-issued workspace API key embedded in tool arguments, not
+	// HTTP headers.
+	r.Post("/mcp", mcpServer.HandleRPC)
+	r.Get("/mcp/sse", mcpServer.HandleSSE)
 
 	r.Route("/v1", func(r chi.Router) {
 		wsHandler.Mount(r)
