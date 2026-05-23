@@ -77,6 +77,25 @@ var ErrNotConfigured = errors.New("lensintegration: Lens URL not configured")
 // and rely on this returning false everywhere.
 func (c *Client) IsConfigured() bool { return c != nil && c.lensURL != "" }
 
+// BaseURL returns the configured Lens URL. Used by the AI engine to
+// build its own POST requests to the Lens proxy endpoints (which
+// aren't part of this Client's GET-only API).
+func (c *Client) BaseURL() string {
+	if c == nil {
+		return ""
+	}
+	return c.lensURL
+}
+
+// APIKey returns the configured Lens API key. The AI engine sets it
+// as the Authorization header on every proxy call.
+func (c *Client) APIKey() string {
+	if c == nil {
+		return ""
+	}
+	return c.apiKey
+}
+
 func (c *Client) do(ctx context.Context, path string, out any) error {
 	if !c.IsConfigured() {
 		return ErrNotConfigured

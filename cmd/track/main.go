@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/talyvor/track/internal/ai"
 	"github.com/talyvor/track/internal/config"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
@@ -89,6 +90,12 @@ func main() {
 		go lensSyncer.StartSync(ctx, 15*time.Minute)
 	}
 
+	// AI engine: every Track AI feature routes through Lens via this
+	// engine. issueStore doubles as the full-text fallback for
+	// semantic search; pool is needed for the issue_embeddings table.
+	aiEngine := ai.New(lensClient, issueStore, pool)
+	aiHandler := ai.NewHandler(aiEngine, issueStore)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -114,6 +121,7 @@ func main() {
 		milestoneHandler.Mount(r)
 		notificationHandler.Mount(r)
 		lensHandler.Mount(r)
+		aiHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see
