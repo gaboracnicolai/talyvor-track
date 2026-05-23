@@ -26,10 +26,20 @@ type notifier interface {
 	CommentDeleted(ctx context.Context, wsID, issueID, commentID, actorID string)
 }
 
+// automationFirer is the subset of internal/automation.Engine the
+// issue handler calls. The local interface keeps the issue package
+// from importing automation directly. The trigger argument is a
+// string to avoid pulling the automation.RuleTrigger type into the
+// issue package's API.
+type automationFirer interface {
+	Fire(ctx context.Context, trigger string, workspaceID string, issue model.Issue, changes map[string]any) error
+}
+
 // Handler is the HTTP surface for /workspaces/{wsID}/issues/*.
 type Handler struct {
-	store    *Store
-	notifier notifier
+	store      *Store
+	notifier   notifier
+	automation automationFirer
 }
 
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
@@ -39,6 +49,14 @@ func NewHandler(store *Store) *Handler { return &Handler{store: store} }
 // it, the handler is fully functional but no live updates fire.
 func (h *Handler) WithNotifier(n notifier) *Handler {
 	h.notifier = n
+	return h
+}
+
+// WithAutomation wires the automation engine. Issue lifecycle events
+// fire matching rules synchronously after the DB write completes.
+// Rule failures never fail the triggering request.
+func (h *Handler) WithAutomation(a automationFirer) *Handler {
+	h.automation = a
 	return h
 }
 
@@ -96,6 +114,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	metrics.IssuesCreated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
 	if h.notifier != nil {
 		h.notifier.IssueCreated(r.Context(), out.WorkspaceID, out.TeamID, out.CreatorID, *out)
+	}
+	if h.automation != nil {
+		_ = h.automation.Fire(r.Context(), "issue.created", out.WorkspaceID, *out, nil)
 	}
 	writeJSON(w, http.StatusCreated, out)
 }
@@ -173,6 +194,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if h.notifier != nil {
 		actorID := r.Header.Get("X-Member-Id")
 		h.notifier.IssueUpdated(r.Context(), out.WorkspaceID, out.TeamID, out.ID, actorID, updates)
+	}
+	if h.automation != nil {
+		// Fire the generic issue.updated trigger plus any specific
+		// triggers implied by the changed fields. This lets users
+		// write narrow rules like "fire only when status changes".
+		_ = h.automation.Fire(r.Context(), "issue.updated", out.WorkspaceID, *out, updates)
+		if _, ok := updates["status"]; ok {
+			_ = h.automation.Fire(r.Context(), "status.changed", out.WorkspaceID, *out, updates)
+		}
+		if _, ok := updates["assignee_id"]; ok {
+			_ = h.automation.Fire(r.Context(), "assignee.changed", out.WorkspaceID, *out, updates)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

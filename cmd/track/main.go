@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/talyvor/track/internal/ai"
+	"github.com/talyvor/track/internal/automation"
 	"github.com/talyvor/track/internal/config"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
@@ -30,6 +31,7 @@ import (
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/milestone"
+	"github.com/talyvor/track/internal/model"
 	"github.com/talyvor/track/internal/notification"
 	"github.com/talyvor/track/internal/project"
 	"github.com/talyvor/track/internal/realtime"
@@ -96,6 +98,25 @@ func main() {
 	aiEngine := ai.New(lensClient, issueStore, pool)
 	aiHandler := ai.NewHandler(aiEngine, issueStore)
 
+	// Automation engine. Slack notifier is the only side-channel —
+	// every other action mutates issues through issueStore directly.
+	slackNotifier := automation.NewSlackNotifier()
+	automationEngine := automation.New(pool, issueStore, slackNotifier)
+	automationHandler := automation.NewHandler(automationEngine)
+	githubHandler := automation.NewGitHubHandler(automationEngine, issueStore, os.Getenv("TRACK_GITHUB_WEBHOOK_SECRET"))
+
+	// Adapter bridges the issue handler's string-typed automation
+	// interface to the engine's typed RuleTrigger.
+	issueHandler.WithAutomation(automationAdapter{engine: automationEngine})
+
+	// Preload rules for every workspace at startup so the first
+	// matching event doesn't pay for an on-demand DB read.
+	if ids, err := workspaceStore.ListIDs(ctx); err == nil {
+		for _, ws := range ids {
+			_ = automationEngine.LoadRules(ctx, ws)
+		}
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -122,12 +143,18 @@ func main() {
 		notificationHandler.Mount(r)
 		lensHandler.Mount(r)
 		aiHandler.Mount(r)
+		automationHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see
 		// internal/lensintegration/webhook.go for the verification
 		// path.
 		r.Post("/lens/webhook", lensWebhook.ServeHTTP)
+
+		// GitHub webhook: PR merged → close referenced issues,
+		// PR opened → leave a tracking comment. HMAC validated via
+		// X-Hub-Signature-256.
+		r.Post("/webhooks/github", githubHandler.ServeHTTP)
 
 		// WebSocket upgrade — clients connect here and receive live
 		// events for the issues / comments / cycles they subscribe to.
@@ -182,4 +209,17 @@ func metricsMiddleware(next http.Handler) http.Handler {
 		metrics.APIRequests.WithLabelValues(r.Method, path, strconv.Itoa(ww.Status())).Inc()
 		metrics.APILatency.WithLabelValues(r.Method, path).Observe(time.Since(start).Seconds())
 	})
+}
+
+// automationAdapter bridges issue.Handler's string-typed
+// automationFirer interface to automation.Engine.Fire's typed
+// RuleTrigger. The conversion is a no-op at runtime — RuleTrigger
+// is itself a string — but the type wrapper keeps each package's
+// public surface free of cross-imports.
+type automationAdapter struct {
+	engine *automation.Engine
+}
+
+func (a automationAdapter) Fire(ctx context.Context, trigger string, workspaceID string, issue model.Issue, changes map[string]any) error {
+	return a.engine.Fire(ctx, automation.RuleTrigger(trigger), workspaceID, issue, changes)
 }
