@@ -28,7 +28,9 @@ import (
 	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/milestone"
+	"github.com/talyvor/track/internal/notification"
 	"github.com/talyvor/track/internal/project"
+	"github.com/talyvor/track/internal/realtime"
 	"github.com/talyvor/track/internal/team"
 	"github.com/talyvor/track/internal/workflow"
 	"github.com/talyvor/track/internal/workspace"
@@ -55,15 +57,20 @@ func main() {
 	defer pool.Close()
 
 	// Stores own the SQL; handlers own the JSON; main wires them.
+	hub := realtime.NewHub()
+	go hub.Run(ctx)
+	notifier := realtime.NewNotifier(hub)
+
 	workflowEngine := workflow.New(pool)
 	wsHandler := workspace.NewHandler(workspace.NewStore(pool))
 	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
 	projectHandler := project.NewHandler(project.NewStore(pool))
-	issueHandler := issue.NewHandler(issue.NewStore(pool))
+	issueHandler := issue.NewHandler(issue.NewStore(pool)).WithNotifier(notifier)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycle.NewStore(pool))
 	milestoneHandler := milestone.NewHandler(milestone.NewStore(pool))
+	notificationHandler := notification.NewHandler(notification.NewStore(pool))
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -88,6 +95,11 @@ func main() {
 		labelHandler.Mount(r)
 		cycleHandler.Mount(r)
 		milestoneHandler.Mount(r)
+		notificationHandler.Mount(r)
+
+		// WebSocket upgrade — clients connect here and receive live
+		// events for the issues / comments / cycles they subscribe to.
+		r.Get("/ws", hub.ServeWS)
 	})
 
 	srv := &http.Server{
