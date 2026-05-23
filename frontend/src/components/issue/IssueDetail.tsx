@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useIssue, useUpdateIssue } from "~/hooks/useIssues";
+import { useCustomFields, useSetCustomFieldValue } from "~/hooks/useCustomFields";
 import { Dialog } from "~/components/ui/Dialog";
 import { Input } from "~/components/ui/Input";
 import { Button } from "~/components/ui/Button";
 import { StatusBadge } from "./StatusBadge";
 import { PriorityIcon } from "./PriorityIcon";
 import { AICostBadge } from "./AICostBadge";
+import { CustomFieldRow } from "./CustomFieldRow";
 import { Badge } from "~/components/ui/Badge";
 import type { IssueStatus, IssuePriority } from "~/api/types";
 
@@ -27,6 +29,8 @@ const allPriorities: IssuePriority[] = [0, 1, 2, 3, 4];
 export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
   const { data: issue, isLoading } = useIssue(issueId);
   const updateMutation = useUpdateIssue();
+  const setFieldValue = useSetCustomFieldValue();
+  const fields = useCustomFields(issue?.team_id);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
 
   if (!issueId) return null;
@@ -115,6 +119,26 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
               <span className="text-xs text-muted">{issue.assignee_id ?? "Unassigned"}</span>
             </Field>
           </div>
+
+          {fields.data && fields.data.length > 0 ? (
+            <div className="border-t border-border pt-4">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                Custom fields
+              </div>
+              <div className="space-y-1">
+                {fields.data.map((f) => (
+                  <CustomFieldRow
+                    key={f.id}
+                    field={f}
+                    value={issue.field_values?.[f.id]}
+                    onChange={(v) =>
+                      setFieldValue.mutate({ issueID: issue.id, fieldID: f.id, value: v })
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex justify-end gap-2 border-t border-border pt-4">
             <Button variant="ghost" onClick={onClose}>

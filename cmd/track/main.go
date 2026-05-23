@@ -25,6 +25,7 @@ import (
 	"github.com/talyvor/track/internal/analytics"
 	"github.com/talyvor/track/internal/automation"
 	"github.com/talyvor/track/internal/config"
+	"github.com/talyvor/track/internal/customfield"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/importer"
@@ -70,7 +71,11 @@ func main() {
 
 	workflowEngine := workflow.New(pool)
 	workspaceStore := workspace.NewStore(pool)
-	issueStore := issue.NewStore(pool)
+	customFieldStore := customfield.NewStore(pool)
+	// issueStore reads custom-field values when serving issues so the
+	// REST + MCP responses always include the FieldValues map without
+	// callers having to stitch the data.
+	issueStore := issue.NewStore(pool).WithFieldFetcher(customFieldStore)
 	projectStore := project.NewStore(pool)
 	cycleStore := cycle.NewStore(pool)
 	notificationStore := notification.NewStore(pool)
@@ -78,7 +83,8 @@ func main() {
 	wsHandler := workspace.NewHandler(workspaceStore)
 	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
 	projectHandler := project.NewHandler(projectStore)
-	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier)
+	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier).WithCustomFields(customFieldStore)
+	customFieldHandler := customfield.NewHandler(customFieldStore)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycleStore)
@@ -177,6 +183,7 @@ func main() {
 		automationHandler.Mount(r)
 		analyticsHandler.Mount(r)
 		importerHandler.Mount(r)
+		customFieldHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see

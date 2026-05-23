@@ -35,11 +35,21 @@ type automationFirer interface {
 	Fire(ctx context.Context, trigger string, workspaceID string, issue model.Issue, changes map[string]any) error
 }
 
+// customFields is the subset of customfield.Store the issue handler
+// uses on Create: validate required fields and persist any values
+// supplied in the request body. Kept local to avoid importing the
+// customfield package directly into issue.
+type customFields interface {
+	ValidateRequired(ctx context.Context, workspaceID string, teamID *string, provided map[string]string) error
+	SetValue(ctx context.Context, issueID, fieldID, value string) error
+}
+
 // Handler is the HTTP surface for /workspaces/{wsID}/issues/*.
 type Handler struct {
-	store      *Store
-	notifier   notifier
-	automation automationFirer
+	store        *Store
+	notifier     notifier
+	automation   automationFirer
+	customFields customFields
 }
 
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
@@ -57,6 +67,14 @@ func (h *Handler) WithNotifier(n notifier) *Handler {
 // Rule failures never fail the triggering request.
 func (h *Handler) WithAutomation(a automationFirer) *Handler {
 	h.automation = a
+	return h
+}
+
+// WithCustomFields wires the custom-field bridge. When set, Create
+// enforces required-field validation and persists the values present
+// in the POST body's field_values map.
+func (h *Handler) WithCustomFields(c customFields) *Handler {
+	h.customFields = c
 	return h
 }
 
@@ -106,11 +124,46 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.WorkspaceID = wsID
+
+	// Custom-field required-field validation runs before the issue is
+	// inserted so a missing value fails fast and doesn't leave half-
+	// stamped state behind. Skipped when no bridge is wired.
+	if h.customFields != nil {
+		var teamID *string
+		if in.TeamID != "" {
+			t := in.TeamID
+			teamID = &t
+		}
+		if err := h.customFields.ValidateRequired(r.Context(), wsID, teamID, in.FieldValues); err != nil {
+			writeErr(w, http.StatusBadRequest, "REQUIRED_FIELD_MISSING", err.Error())
+			return
+		}
+	}
+
+	// Strip FieldValues from the Issue before insert — they belong in
+	// issue_field_values, not the issues row. We re-attach below.
+	provided := in.FieldValues
+	in.FieldValues = nil
+
 	out, err := h.store.Create(r.Context(), in)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return
 	}
+
+	// Persist supplied field values. Per-field failure aborts so the
+	// caller sees the first validation problem instead of silent
+	// drops; the issue itself stays — the user can retry SetValue.
+	if h.customFields != nil && len(provided) > 0 {
+		for fieldID, value := range provided {
+			if err := h.customFields.SetValue(r.Context(), out.ID, fieldID, value); err != nil {
+				writeErr(w, http.StatusBadRequest, "FIELD_VALUE_FAILED", err.Error())
+				return
+			}
+		}
+		out.FieldValues = provided
+	}
+
 	metrics.IssuesCreated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
 	if h.notifier != nil {
 		h.notifier.IssueCreated(r.Context(), out.WorkspaceID, out.TeamID, out.CreatorID, *out)

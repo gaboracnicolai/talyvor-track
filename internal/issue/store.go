@@ -29,8 +29,20 @@ type pgxDB interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// fieldFetcher loads custom-field values for one or many issues.
+// The issue store calls into it from GetByID / List so the issue
+// JSON payload includes field_values without callers having to
+// stitch the data together. It's optional — without a fetcher the
+// store behaves exactly as before, returning issues with no
+// FieldValues populated.
+type fieldFetcher interface {
+	GetValues(ctx context.Context, issueID string) (map[string]string, error)
+	GetValuesBulk(ctx context.Context, issueIDs []string) (map[string]map[string]string, error)
+}
+
 type Store struct {
-	pool pgxDB
+	pool    pgxDB
+	fetcher fieldFetcher
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -42,6 +54,14 @@ func NewStore(pool *pgxpool.Pool) *Store {
 }
 
 func newStore(db pgxDB) *Store { return &Store{pool: db} }
+
+// WithFieldFetcher attaches a custom-field reader so List + GetByID
+// populate the FieldValues map on every returned issue. Optional —
+// callers that don't wire it get the original behaviour.
+func (s *Store) WithFieldFetcher(f fieldFetcher) *Store {
+	s.fetcher = f
+	return s
+}
 
 // IssueFilter drives the List query. Empty / zero fields are ignored
 // (no WHERE clause emitted) — every field is independently optional.
@@ -154,17 +174,43 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 }
 
 func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
-	return scanIssue(s.pool.QueryRow(ctx,
+	out, err := scanIssue(s.pool.QueryRow(ctx,
 		`SELECT `+issueColumns+` FROM issues WHERE id = $1`,
 		id,
 	))
+	if err != nil {
+		return nil, err
+	}
+	s.attachFieldValues(ctx, out)
+	return out, nil
 }
 
 func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error) {
-	return scanIssue(s.pool.QueryRow(ctx,
+	out, err := scanIssue(s.pool.QueryRow(ctx,
 		`SELECT `+issueColumns+` FROM issues WHERE identifier = $1`,
 		identifier,
 	))
+	if err != nil {
+		return nil, err
+	}
+	s.attachFieldValues(ctx, out)
+	return out, nil
+}
+
+// attachFieldValues populates FieldValues on an issue if a fetcher is
+// wired. Errors from the fetcher are intentionally swallowed: a
+// transient failure reading custom fields shouldn't 500 the core
+// issue read. The issue still comes back, just without its
+// custom-field payload.
+func (s *Store) attachFieldValues(ctx context.Context, i *model.Issue) {
+	if s.fetcher == nil || i == nil {
+		return
+	}
+	vals, err := s.fetcher.GetValues(ctx, i.ID)
+	if err != nil || len(vals) == 0 {
+		return
+	}
+	i.FieldValues = vals
 }
 
 // List composes a WHERE-clause set dynamically from the filter. Each
@@ -259,7 +305,33 @@ func (s *Store) List(ctx context.Context, filter IssueFilter) ([]model.Issue, er
 		}
 		out = append(out, *issue)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.attachFieldValuesBulk(ctx, out)
+	return out, nil
+}
+
+// attachFieldValuesBulk decorates every issue in the slice with its
+// custom-field values using one bulk SELECT instead of N. Same
+// error-swallowing policy as the per-issue variant.
+func (s *Store) attachFieldValuesBulk(ctx context.Context, issues []model.Issue) {
+	if s.fetcher == nil || len(issues) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(issues))
+	for i := range issues {
+		ids = append(ids, issues[i].ID)
+	}
+	byIssue, err := s.fetcher.GetValuesBulk(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range issues {
+		if v, ok := byIssue[issues[i].ID]; ok && len(v) > 0 {
+			issues[i].FieldValues = v
+		}
+	}
 }
 
 // updatableFields is the allowlist of columns Update will touch. Any

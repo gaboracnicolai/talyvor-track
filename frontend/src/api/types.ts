@@ -36,6 +36,9 @@ export interface Issue {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  // Custom-field values keyed by field ID. Optional because the
+  // backend omits the key when empty.
+  field_values?: Record<string, string>;
 }
 
 export interface Team {
@@ -119,6 +122,33 @@ export interface MemberWorkload {
   in_progress: number;
   overdue: number;
   ai_cost_usd: number;
+}
+
+// ─── Custom fields ──────────────────────────────────────
+// Mirrors internal/customfield/store.go's CustomField struct. Values
+// flow as `string` on the wire; multi-select is JSON-encoded
+// `"[\"a\",\"b\"]"` so the column type stays uniform.
+
+export type CustomFieldType =
+  | "text"
+  | "number"
+  | "date"
+  | "select"
+  | "multi"
+  | "url"
+  | "member"
+  | "checkbox";
+
+export interface CustomField {
+  id: string;
+  workspace_id: string;
+  team_id?: string;
+  name: string;
+  type: CustomFieldType;
+  options: string[];
+  required: boolean;
+  position: number;
+  created_at: string;
 }
 
 // Event shape that flows over the WebSocket.

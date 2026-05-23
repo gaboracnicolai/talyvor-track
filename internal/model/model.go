@@ -105,6 +105,12 @@ type Issue struct {
 	SortOrder float64   `json:"sort_order" db:"sort_order"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+
+	// FieldValues holds custom-field values (field_id → value) for the
+	// issue. Populated by the read paths in issue.Store when a
+	// customfield fetcher is wired via WithFieldFetcher. omitempty so
+	// existing JSON shapes that never set the field stay byte-stable.
+	FieldValues map[string]string `json:"field_values,omitempty"`
 }
 
 // Comment is markdown-formatted user content attached to an issue.
