@@ -22,11 +22,15 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/talyvor/track/internal/config"
+	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/issue"
+	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/metrics"
+	"github.com/talyvor/track/internal/milestone"
 	"github.com/talyvor/track/internal/project"
 	"github.com/talyvor/track/internal/team"
+	"github.com/talyvor/track/internal/workflow"
 	"github.com/talyvor/track/internal/workspace"
 )
 
@@ -51,10 +55,15 @@ func main() {
 	defer pool.Close()
 
 	// Stores own the SQL; handlers own the JSON; main wires them.
+	workflowEngine := workflow.New(pool)
 	wsHandler := workspace.NewHandler(workspace.NewStore(pool))
-	teamHandler := team.NewHandler(team.NewStore(pool))
+	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
 	projectHandler := project.NewHandler(project.NewStore(pool))
 	issueHandler := issue.NewHandler(issue.NewStore(pool))
+	workflowHandler := workflow.NewHandler(workflowEngine)
+	labelHandler := label.NewHandler(label.NewStore(pool))
+	cycleHandler := cycle.NewHandler(cycle.NewStore(pool))
+	milestoneHandler := milestone.NewHandler(milestone.NewStore(pool))
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -75,6 +84,10 @@ func main() {
 		teamHandler.Mount(r)
 		projectHandler.Mount(r)
 		issueHandler.Mount(r)
+		workflowHandler.Mount(r)
+		labelHandler.Mount(r)
+		cycleHandler.Mount(r)
+		milestoneHandler.Mount(r)
 	})
 
 	srv := &http.Server{

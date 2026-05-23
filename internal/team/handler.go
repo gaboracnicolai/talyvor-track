@@ -1,7 +1,9 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -9,9 +11,29 @@ import (
 	"github.com/talyvor/track/internal/model"
 )
 
-type Handler struct{ store *Store }
+// workflowSeeder is the subset of workflow.Engine the team handler
+// uses to bootstrap default statuses on team creation. Defined
+// locally as an interface so the team package doesn't depend on the
+// workflow package directly (would risk an import cycle later).
+type workflowSeeder interface {
+	SeedDefaults(ctx context.Context, teamID string) error
+}
+
+type Handler struct {
+	store  *Store
+	seeder workflowSeeder
+}
 
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
+
+// WithSeeder attaches a workflow seeder so every new team comes up
+// with the six default statuses already configured. Without it, the
+// team is created with an empty status set and callers must populate
+// it explicitly via the workflow API.
+func (h *Handler) WithSeeder(s workflowSeeder) *Handler {
+	h.seeder = s
+	return h
+}
 
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/workspaces/{wsID}/teams", func(r chi.Router) {
@@ -49,6 +71,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return
+	}
+	// Seed default workflow statuses. Best-effort: if seeding fails
+	// the team is still created — operators can populate statuses
+	// manually via the workflow API.
+	if h.seeder != nil {
+		if err := h.seeder.SeedDefaults(r.Context(), out.ID); err != nil {
+			slog.Warn("team: seed default statuses failed",
+				slog.String("team_id", out.ID),
+				slog.String("err", err.Error()),
+			)
+		}
 	}
 	writeJSON(w, http.StatusCreated, out)
 }

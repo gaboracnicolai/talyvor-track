@@ -1,0 +1,114 @@
+package cycle
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/model"
+)
+
+type Handler struct{ store *Store }
+
+func NewHandler(store *Store) *Handler { return &Handler{store: store} }
+
+func (h *Handler) Mount(r chi.Router) {
+	r.Route("/workspaces/{wsID}/teams/{teamID}/cycles", func(r chi.Router) {
+		r.Post("/", h.Create)
+		r.Get("/", h.List)
+		r.Get("/active", h.GetActive)
+		r.Patch("/{id}", h.Update)
+		r.Post("/{id}/complete", h.Complete)
+		r.Get("/{id}/progress", h.Progress)
+		r.Get("/{id}/burndown", h.Burndown)
+	})
+}
+
+type apiError struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+func writeErr(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, apiError{Error: msg, Code: code})
+}
+
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	var in model.Cycle
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+		return
+	}
+	in.WorkspaceID = chi.URLParam(r, "wsID")
+	in.TeamID = chi.URLParam(r, "teamID")
+	out, err := h.store.Create(r.Context(), in)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	out, err := h.store.ListByTeam(r.Context(), chi.URLParam(r, "teamID"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
+		return
+	}
+	if out == nil {
+		out = []model.Cycle{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) GetActive(w http.ResponseWriter, r *http.Request) {
+	out, err := h.store.GetActive(r.Context(), chi.URLParam(r, "teamID"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "ACTIVE_FAILED", err.Error())
+		return
+	}
+	if out == nil {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "no active cycle", Code: "NO_ACTIVE_CYCLE"})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	// Cycle updates are limited to name/status/end_date; a future
+	// phase can grow this. For now we return 501 so the route shape
+	// is documented but no caller can corrupt cycle metadata.
+	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "cycle PATCH not implemented in phase 2")
+}
+
+func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
+	if err := h.store.Complete(r.Context(), chi.URLParam(r, "id")); err != nil {
+		writeErr(w, http.StatusInternalServerError, "COMPLETE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *Handler) Progress(w http.ResponseWriter, r *http.Request) {
+	p, err := h.store.GetProgress(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "PROGRESS_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
+	pts, err := h.store.GetBurndown(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "BURNDOWN_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, pts)
+}
