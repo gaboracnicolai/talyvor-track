@@ -1,10 +1,12 @@
 import clsx from "clsx";
+import { AlertCircle } from "lucide-react";
 import type { Issue } from "~/api/types";
 import { StatusBadge } from "./StatusBadge";
 import { PriorityIcon } from "./PriorityIcon";
 import { AICostBadge } from "./AICostBadge";
 import { Avatar } from "~/components/ui/Avatar";
 import { Badge } from "~/components/ui/Badge";
+import { Tooltip } from "~/components/ui/Tooltip";
 
 interface IssueRowProps {
   issue: Issue;
@@ -36,6 +38,13 @@ export function IssueRow({ issue, focused, selected, onClick }: IssueRowProps) {
       <PriorityIcon priority={issue.priority} />
       <span className="w-20 shrink-0 font-mono text-xs text-muted">{issue.identifier}</span>
       <StatusBadge status={issue.status} />
+      {issue.is_blocked ? (
+        <Tooltip content="Blocked by other issues">
+          <span className="inline-flex">
+            <AlertCircle size={12} className="text-priority-urgent" />
+          </span>
+        </Tooltip>
+      ) : null}
       <span className="flex-1 truncate text-sm">{issue.title}</span>
       <AICostBadge costUSD={issue.ai_cost_usd ?? 0} tokens={issue.ai_tokens ?? 0} />
       <div className="hidden gap-1 md:flex">

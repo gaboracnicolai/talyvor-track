@@ -111,6 +111,18 @@ type Issue struct {
 	// customfield fetcher is wired via WithFieldFetcher. omitempty so
 	// existing JSON shapes that never set the field stay byte-stable.
 	FieldValues map[string]string `json:"field_values,omitempty"`
+
+	// IsBlocked is populated by GetByID when a blocked-checker is wired
+	// via issue.Store.WithBlockedChecker. true means the issue has at
+	// least one open blocker (a "blocks" relation from an issue whose
+	// status is not done/cancelled). omitempty keeps the JSON terse
+	// when the field isn't populated (e.g. on bulk reads).
+	IsBlocked bool `json:"is_blocked,omitempty"`
+
+	// Relations is a placeholder list of relation IDs attached to the
+	// issue. Reserved for future bulk-relation prefetch; not populated
+	// by current read paths.
+	Relations []string `json:"relations,omitempty"`
 }
 
 // Comment is markdown-formatted user content attached to an issue.

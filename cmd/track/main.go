@@ -28,6 +28,7 @@ import (
 	"github.com/talyvor/track/internal/customfield"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
+	"github.com/talyvor/track/internal/dependency"
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
@@ -72,10 +73,14 @@ func main() {
 	workflowEngine := workflow.New(pool)
 	workspaceStore := workspace.NewStore(pool)
 	customFieldStore := customfield.NewStore(pool)
-	// issueStore reads custom-field values when serving issues so the
-	// REST + MCP responses always include the FieldValues map without
-	// callers having to stitch the data.
-	issueStore := issue.NewStore(pool).WithFieldFetcher(customFieldStore)
+	dependencyStore := dependency.NewStore(pool)
+	// issueStore reads custom-field values and the blocked indicator
+	// when serving issues so REST + MCP responses always include the
+	// FieldValues map and IsBlocked flag without callers having to
+	// stitch data from multiple stores.
+	issueStore := issue.NewStore(pool).
+		WithFieldFetcher(customFieldStore).
+		WithBlockedChecker(dependencyStore)
 	projectStore := project.NewStore(pool)
 	cycleStore := cycle.NewStore(pool)
 	notificationStore := notification.NewStore(pool)
@@ -85,6 +90,7 @@ func main() {
 	projectHandler := project.NewHandler(projectStore)
 	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier).WithCustomFields(customFieldStore)
 	customFieldHandler := customfield.NewHandler(customFieldStore)
+	dependencyHandler := dependency.NewHandler(dependencyStore)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycleStore)
@@ -184,6 +190,7 @@ func main() {
 		analyticsHandler.Mount(r)
 		importerHandler.Mount(r)
 		customFieldHandler.Mount(r)
+		dependencyHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see

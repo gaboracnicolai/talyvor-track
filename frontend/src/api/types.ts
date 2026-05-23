@@ -39,6 +39,53 @@ export interface Issue {
   // Custom-field values keyed by field ID. Optional because the
   // backend omits the key when empty.
   field_values?: Record<string, string>;
+  // True when the backend determined the issue has at least one
+  // open blocker. Populated on detail reads; omitted from list rows
+  // to avoid the per-row blocked check on bulk fetches.
+  is_blocked?: boolean;
+}
+
+// ─── Relations / dependencies ───────────────────────────
+// Mirrors internal/dependency/store.go's RelationType union.
+
+export type RelationType =
+  | "blocks"
+  | "blocked_by"
+  | "relates_to"
+  | "duplicates"
+  | "clones";
+
+export interface Relation {
+  id: string;
+  source_id: string;
+  target_id: string;
+  type: RelationType;
+  workspace_id: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface RelationWithIssue extends Relation {
+  issue: Issue;
+}
+
+export interface GraphNode {
+  id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  is_blocked?: boolean;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: RelationType;
+}
+
+export interface DependencyGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
 }
 
 export interface Team {

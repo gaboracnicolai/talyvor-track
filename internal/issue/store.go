@@ -40,9 +40,17 @@ type fieldFetcher interface {
 	GetValuesBulk(ctx context.Context, issueIDs []string) (map[string]map[string]string, error)
 }
 
+// blockedChecker reports whether an issue has open blockers. Wired
+// at boot from dependency.Store; the issue store doesn't import
+// dependency directly to keep the package graph one-way.
+type blockedChecker interface {
+	IsBlocked(ctx context.Context, issueID string) (bool, error)
+}
+
 type Store struct {
 	pool    pgxDB
 	fetcher fieldFetcher
+	blocked blockedChecker
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -60,6 +68,15 @@ func newStore(db pgxDB) *Store { return &Store{pool: db} }
 // callers that don't wire it get the original behaviour.
 func (s *Store) WithFieldFetcher(f fieldFetcher) *Store {
 	s.fetcher = f
+	return s
+}
+
+// WithBlockedChecker attaches a dependency-aware blocker so GetByID
+// populates Issue.IsBlocked. Skipped on List to avoid an N×1 query
+// in the common list path; UIs surface the badge via the per-issue
+// detail fetch.
+func (s *Store) WithBlockedChecker(b blockedChecker) *Store {
+	s.blocked = b
 	return s
 }
 
@@ -182,6 +199,7 @@ func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
 		return nil, err
 	}
 	s.attachFieldValues(ctx, out)
+	s.attachBlocked(ctx, out)
 	return out, nil
 }
 
@@ -194,6 +212,7 @@ func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*model.
 		return nil, err
 	}
 	s.attachFieldValues(ctx, out)
+	s.attachBlocked(ctx, out)
 	return out, nil
 }
 
@@ -211,6 +230,20 @@ func (s *Store) attachFieldValues(ctx context.Context, i *model.Issue) {
 		return
 	}
 	i.FieldValues = vals
+}
+
+// attachBlocked populates IsBlocked if a checker is wired. Same
+// swallow-on-error policy as attachFieldValues — the blocker badge
+// is informational, not load-bearing.
+func (s *Store) attachBlocked(ctx context.Context, i *model.Issue) {
+	if s.blocked == nil || i == nil {
+		return
+	}
+	blocked, err := s.blocked.IsBlocked(ctx, i.ID)
+	if err != nil {
+		return
+	}
+	i.IsBlocked = blocked
 }
 
 // List composes a WHERE-clause set dynamically from the filter. Each

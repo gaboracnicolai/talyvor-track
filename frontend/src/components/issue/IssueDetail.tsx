@@ -8,6 +8,8 @@ import { StatusBadge } from "./StatusBadge";
 import { PriorityIcon } from "./PriorityIcon";
 import { AICostBadge } from "./AICostBadge";
 import { CustomFieldRow } from "./CustomFieldRow";
+import { RelationsSection } from "./RelationsSection";
+import { DependencyGraph } from "./DependencyGraph";
 import { Badge } from "~/components/ui/Badge";
 import type { IssueStatus, IssuePriority } from "~/api/types";
 
@@ -32,6 +34,7 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
   const setFieldValue = useSetCustomFieldValue();
   const fields = useCustomFields(issue?.team_id);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const [showGraph, setShowGraph] = useState(false);
 
   if (!issueId) return null;
 
@@ -44,6 +47,11 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
           <div className="flex items-center gap-2 text-xs text-muted">
             <span className="font-mono">{issue.identifier}</span>
             <AICostBadge costUSD={issue.ai_cost_usd ?? 0} tokens={issue.ai_tokens ?? 0} />
+            {issue.is_blocked ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-priority-urgent/30 bg-priority-urgent/10 px-2 py-0.5 text-[10px] font-medium text-priority-urgent">
+                Blocked
+              </span>
+            ) : null}
           </div>
           {editingTitle === issue.id ? (
             <Input
@@ -140,11 +148,18 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
             </div>
           ) : null}
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <RelationsSection issueID={issue.id} />
+
+          <div className="flex justify-between gap-2 border-t border-border pt-4">
+            <Button variant="ghost" onClick={() => setShowGraph((v) => !v)}>
+              {showGraph ? "Hide dependency graph" : "Show dependency graph"}
+            </Button>
             <Button variant="ghost" onClick={onClose}>
               Close
             </Button>
           </div>
+
+          {showGraph ? <DependencyGraph issueID={issue.id} /> : null}
         </div>
       )}
     </Dialog>
