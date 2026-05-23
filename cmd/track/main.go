@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/talyvor/track/internal/ai"
+	"github.com/talyvor/track/internal/analytics"
 	"github.com/talyvor/track/internal/automation"
 	"github.com/talyvor/track/internal/config"
 	"github.com/talyvor/track/internal/cycle"
@@ -109,6 +110,11 @@ func main() {
 	// interface to the engine's typed RuleTrigger.
 	issueHandler.WithAutomation(automationAdapter{engine: automationEngine})
 
+	// Analytics engine: pure-read reports over the same tables every
+	// other store touches. No mutations, no state of its own.
+	analyticsEngine := analytics.New(pool)
+	analyticsHandler := analytics.NewHandler(analyticsEngine)
+
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
 	if ids, err := workspaceStore.ListIDs(ctx); err == nil {
@@ -144,6 +150,7 @@ func main() {
 		lensHandler.Mount(r)
 		aiHandler.Mount(r)
 		automationHandler.Mount(r)
+		analyticsHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see
