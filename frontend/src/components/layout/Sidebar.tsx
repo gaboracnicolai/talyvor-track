@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Inbox,
-  LayoutGrid,
   Calendar,
   BarChart3,
   Settings,
@@ -19,9 +18,10 @@ interface SidebarProps {
   onNavigate: (route: Route) => void;
 }
 
+// List/Board toggle lives inside the Issues page header now, so the
+// sidebar only carries top-level destinations.
 const sections: { route: Route; label: string; Icon: typeof Inbox }[] = [
   { route: "issues", label: "Issues", Icon: Inbox },
-  { route: "board", label: "Board", Icon: LayoutGrid },
   { route: "cycles", label: "Cycles", Icon: Calendar },
   { route: "analytics", label: "Analytics", Icon: BarChart3 },
   { route: "settings", label: "Settings", Icon: Settings },

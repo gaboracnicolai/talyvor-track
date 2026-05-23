@@ -4,7 +4,6 @@ import { Header } from "./components/layout/Header";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { Toaster } from "./components/ui/Toaster";
 import { IssuesPage } from "./pages/Issues";
-import { ProjectBoardPage } from "./pages/ProjectBoard";
 import { CyclesPage } from "./pages/Cycles";
 import { AnalyticsPage } from "./pages/Analytics";
 import { SettingsPage } from "./pages/Settings";
@@ -12,15 +11,13 @@ import { useUIStore } from "./stores/ui";
 import { useWorkspaceStore } from "./stores/workspace";
 import { useWebSocket } from "./hooks/useWebSocket";
 
-// Top-level pages enumerated explicitly. Phase 8 ships a small set
-// without a full router — each entry maps to one component. Phase 9
-// can swap in TanStack Router's file-based routing once we have
-// more pages with nested params.
-export type Route = "issues" | "board" | "cycles" | "analytics" | "settings";
+// Top-level pages enumerated explicitly. The Issues page hosts both
+// the list and the kanban board behind an in-page view toggle, so
+// "board" no longer needs its own top-level route.
+export type Route = "issues" | "cycles" | "analytics" | "settings";
 
 const titleByRoute: Record<Route, string> = {
   issues: "Issues",
-  board: "Board",
   cycles: "Cycles",
   analytics: "Analytics",
   settings: "Settings",
@@ -66,7 +63,6 @@ export function App() {
           {route === "issues" && (
             <IssuesPage createOpen={createOpen} setCreateOpen={setCreateOpen} />
           )}
-          {route === "board" && <ProjectBoardPage />}
           {route === "cycles" && <CyclesPage />}
           {route === "analytics" && <AnalyticsPage />}
           {route === "settings" && <SettingsPage />}

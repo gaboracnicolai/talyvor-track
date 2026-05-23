@@ -27,6 +27,7 @@ type pgxDB interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // fieldFetcher loads custom-field values for one or many issues.
@@ -528,4 +529,103 @@ func (s *Store) Search(ctx context.Context, workspaceID, query string, limit int
 		out = append(out, *issue)
 	}
 	return out, rows.Err()
+}
+
+// ─── BulkUpdate ────────────────────────────────────────────
+
+// BulkUpdateItem is one row in the PATCH /issues/bulk-update payload.
+// SortOrder of 0 is treated as "not provided" — the kanban drop
+// algorithm never produces 0.0 because it averages neighbouring
+// sort_orders (which start at ±1.0). Use Update for the rare case a
+// caller really does want to set sort_order to exactly zero.
+type BulkUpdateItem struct {
+	ID        string  `json:"id"`
+	Status    string  `json:"status,omitempty"`
+	SortOrder float64 `json:"sort_order,omitempty"`
+}
+
+// BulkUpdate applies many status / sort_order patches in a single
+// transaction. Powers the kanban drag-and-drop: when a card moves
+// columns, the moved card AND every card whose sort_order shifted
+// land in one round-trip so the board never looks half-applied.
+//
+// Mid-batch failures abort the whole transaction — the kanban UI
+// rolls back its optimistic state and refetches. Returns the total
+// rows affected.
+func (s *Store) BulkUpdate(ctx context.Context, updates []BulkUpdateItem) (int, error) {
+	if s.pool == nil {
+		return 0, errors.New("issue: store has no pool")
+	}
+	if len(updates) == 0 {
+		return 0, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("issue: bulk update begin: %w", err)
+	}
+	defer func() {
+		// Rollback on any path that returns before Commit. Calling
+		// Rollback after a successful Commit is a documented no-op
+		// in pgx, so this defer is safe.
+		_ = tx.Rollback(ctx)
+	}()
+
+	updated := 0
+	now := time.Now().UTC()
+
+	for _, u := range updates {
+		var (
+			set  []string
+			args []any
+			argN int
+		)
+		// SET-clause order: status, sort_order, completed_at,
+		// updated_at, id-in-WHERE. The fixed order keeps the SQL
+		// query plan cache-friendly and the test fixtures readable.
+		if u.Status != "" {
+			argN++
+			set = append(set, fmt.Sprintf("status = $%d", argN))
+			args = append(args, u.Status)
+		}
+		// SortOrder: treat 0.0 as "not provided" — see BulkUpdateItem.
+		if u.SortOrder != 0 {
+			argN++
+			set = append(set, fmt.Sprintf("sort_order = $%d", argN))
+			args = append(args, u.SortOrder)
+		}
+		// completed_at follows status — when status is set we always
+		// touch completed_at (stamping it on transitions into "done"
+		// and clearing it on transitions out). Mirrors Update().
+		if u.Status != "" {
+			argN++
+			set = append(set, fmt.Sprintf("completed_at = $%d", argN))
+			if u.Status == string(model.StatusDone) {
+				args = append(args, now)
+			} else {
+				args = append(args, (*time.Time)(nil))
+			}
+		}
+		if len(set) == 0 {
+			continue
+		}
+		// updated_at is always bumped so the realtime layer can fan a
+		// change event out to subscribers.
+		argN++
+		set = append(set, fmt.Sprintf("updated_at = $%d", argN))
+		args = append(args, now)
+		argN++
+		args = append(args, u.ID)
+
+		sql := fmt.Sprintf(`UPDATE issues SET %s WHERE id = $%d`, strings.Join(set, ", "), argN)
+		tag, err := tx.Exec(ctx, sql, args...)
+		if err != nil {
+			return 0, fmt.Errorf("issue: bulk update %s: %w", u.ID, err)
+		}
+		updated += int(tag.RowsAffected())
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("issue: bulk update commit: %w", err)
+	}
+	return updated, nil
 }

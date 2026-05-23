@@ -260,3 +260,91 @@ func TestCreate_PropagatesTeamNotFound(t *testing.T) {
 		t.Error("Create should error when team not found")
 	}
 }
+
+// ─── BulkUpdate ────────────────────────────────────────────
+
+func TestBulkUpdate_AppliesUpdatesAtomically(t *testing.T) {
+	store, pool := newMockStore(t)
+
+	// Two rows, both changing status + sort_order. The implementation
+	// wraps the per-row UPDATEs in a single transaction so a mid-batch
+	// failure rolls everything back.
+	pool.ExpectBegin()
+	pool.ExpectExec(`UPDATE issues SET status`).
+		WithArgs("in_progress", float64(1.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectExec(`UPDATE issues SET status`).
+		WithArgs("in_progress", float64(2.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-2").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectCommit()
+
+	count, err := store.BulkUpdate(context.Background(), []BulkUpdateItem{
+		{ID: "i-1", Status: "in_progress", SortOrder: 1.5},
+		{ID: "i-2", Status: "in_progress", SortOrder: 2.5},
+	})
+	if err != nil {
+		t.Fatalf("BulkUpdate: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("updated count = %d, want 2", count)
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+func TestBulkUpdate_RollsBackOnFailure(t *testing.T) {
+	store, pool := newMockStore(t)
+	pool.ExpectBegin()
+	pool.ExpectExec(`UPDATE issues SET status`).
+		WithArgs("done", float64(1.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectExec(`UPDATE issues SET status`).
+		WithArgs("done", float64(2.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-bad").
+		WillReturnError(errors.New("constraint violation"))
+	pool.ExpectRollback()
+
+	_, err := store.BulkUpdate(context.Background(), []BulkUpdateItem{
+		{ID: "i-1", Status: "done", SortOrder: 1.0},
+		{ID: "i-bad", Status: "done", SortOrder: 2.0},
+	})
+	if err == nil {
+		t.Fatal("expected error from second UPDATE to surface")
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+func TestBulkUpdate_EmptyInputReturnsZero(t *testing.T) {
+	store, _ := newMockStore(t)
+	count, err := store.BulkUpdate(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BulkUpdate(nil): %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestBulkUpdate_SortOrderOnly(t *testing.T) {
+	store, pool := newMockStore(t)
+	pool.ExpectBegin()
+	// Drag-within-column case: status omitted, only sort_order changes.
+	// The implementation should build a SET clause that skips the
+	// status column entirely.
+	pool.ExpectExec(`UPDATE issues SET sort_order`).
+		WithArgs(float64(3.5), pgxmock.AnyArg(), "i-1").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectCommit()
+
+	count, err := store.BulkUpdate(context.Background(), []BulkUpdateItem{
+		{ID: "i-1", SortOrder: 3.5},
+	})
+	if err != nil {
+		t.Fatalf("BulkUpdate: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want 1", count)
+	}
+}

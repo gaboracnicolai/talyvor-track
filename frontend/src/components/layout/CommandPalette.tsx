@@ -58,7 +58,6 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
   const navCommands: Command[] = useMemo(
     () => [
       { id: "go-issues", group: "Go to", label: "Issues", perform: () => onNavigate("issues") },
-      { id: "go-board", group: "Go to", label: "Board", perform: () => onNavigate("board") },
       { id: "go-cycles", group: "Go to", label: "Cycles", perform: () => onNavigate("cycles") },
       { id: "go-analytics", group: "Go to", label: "Analytics", perform: () => onNavigate("analytics") },
       { id: "go-settings", group: "Go to", label: "Settings", perform: () => onNavigate("settings") },

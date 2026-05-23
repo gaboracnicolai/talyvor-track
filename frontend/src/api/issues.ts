@@ -46,4 +46,19 @@ export const issuesApi = {
       `/v1/workspaces/${wsID}/issues/semantic-search${qs({ q, limit })}`,
     );
   },
+  bulkUpdate(wsID: string, updates: BulkUpdateItem[]) {
+    return apiRequest<{ updated: number }>(
+      `/v1/workspaces/${wsID}/issues/bulk-update`,
+      { method: "PATCH", body: { updates } },
+    );
+  },
 };
+
+// BulkUpdateItem mirrors the Go BulkUpdateItem struct one-for-one.
+// SortOrder=0 is treated as "no change" by the backend, matching the
+// `omitempty` behaviour on the wire.
+export interface BulkUpdateItem {
+  id: string;
+  status?: string;
+  sort_order?: number;
+}

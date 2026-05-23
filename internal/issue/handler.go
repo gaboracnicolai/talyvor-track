@@ -87,6 +87,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/", h.Create)
 		r.Get("/", h.List)
 		r.Get("/search", h.Search)
+		// bulk-update sits above the {id} pattern so chi resolves the
+		// literal path before the wildcard. Reorder with care: kanban
+		// drag-and-drop relies on this endpoint to apply column moves
+		// atomically.
+		r.Patch("/bulk-update", h.BulkUpdate)
 		r.Get("/{id}", h.Get)
 		r.Patch("/{id}", h.Update)
 		r.Delete("/{id}", h.Delete)
@@ -372,6 +377,39 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		out = []model.Issue{}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// BulkUpdate applies many status / sort_order patches in one tx.
+// The kanban board calls this on every drop: every card whose
+// position shifts ships in one request so the board never renders
+// half-applied state across a network round-trip.
+func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Updates []BulkUpdateItem `json:"updates"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+		return
+	}
+	if len(in.Updates) == 0 {
+		writeJSON(w, http.StatusOK, map[string]int{"updated": 0})
+		return
+	}
+	// Sanity-check the batch size. A single drag should produce at
+	// most a column's worth of sort_order shifts; anything over 500
+	// is almost certainly a misuse.
+	const maxBatch = 500
+	if len(in.Updates) > maxBatch {
+		writeErr(w, http.StatusBadRequest, "BATCH_TOO_LARGE",
+			"updates array exceeds max size")
+		return
+	}
+	count, err := h.store.BulkUpdate(r.Context(), in.Updates)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "BULK_UPDATE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"updated": count})
 }
 
 // avoid unused import warnings while we wire ancillary error types
