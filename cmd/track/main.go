@@ -27,6 +27,7 @@ import (
 	"github.com/talyvor/track/internal/config"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
+	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/lensintegration"
@@ -127,6 +128,11 @@ func main() {
 		aiEngine, analyticsEngine, "0.1.0",
 	).WithMembersPool(pool)
 
+	// CSV importer: lets new customers migrate from Linear or Jira in
+	// one curl call. Mounted under /v1/import/* so it inherits the
+	// auth surface every other /v1 endpoint sits behind.
+	importerHandler := importer.NewHandler(importer.New(issueStore))
+
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
 	if ids, err := workspaceStore.ListIDs(ctx); err == nil {
@@ -170,6 +176,7 @@ func main() {
 		aiHandler.Mount(r)
 		automationHandler.Mount(r)
 		analyticsHandler.Mount(r)
+		importerHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see
