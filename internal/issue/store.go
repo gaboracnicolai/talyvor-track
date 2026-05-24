@@ -55,11 +55,21 @@ type timeSummariser interface {
 	IssueTotalSec(ctx context.Context, issueID string) (int, error)
 }
 
+// scoreReader returns RICE / ICE scores for an issue. Wired from
+// scoring.Store via a tiny adapter in main.go so the issue package
+// stays free of a scoring import. Pointer returns: nil means
+// "unscored", a non-nil zero means "scored as 0" — the two states
+// are visually distinct in the UI.
+type scoreReader interface {
+	IssueScores(ctx context.Context, issueID string) (rice, ice *float64, err error)
+}
+
 type Store struct {
 	pool    pgxDB
 	fetcher fieldFetcher
 	blocked blockedChecker
 	timer   timeSummariser
+	scorer  scoreReader
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -94,6 +104,14 @@ func (s *Store) WithBlockedChecker(b blockedChecker) *Store {
 // blocked checker — list reads stay cheap.
 func (s *Store) WithTimeTracker(t timeSummariser) *Store {
 	s.timer = t
+	return s
+}
+
+// WithScorer attaches a RICE/ICE score reader so GetByID populates
+// Issue.RICEScore / Issue.ICEScore. List reads stay unscored — the
+// dedicated prioritised-backlog endpoint covers list-time ranking.
+func (s *Store) WithScorer(sr scoreReader) *Store {
+	s.scorer = sr
 	return s
 }
 
@@ -218,6 +236,7 @@ func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
 	s.attachFieldValues(ctx, out)
 	s.attachBlocked(ctx, out)
 	s.attachTimeTracked(ctx, out)
+	s.attachScores(ctx, out)
 	return out, nil
 }
 
@@ -232,6 +251,7 @@ func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*model.
 	s.attachFieldValues(ctx, out)
 	s.attachBlocked(ctx, out)
 	s.attachTimeTracked(ctx, out)
+	s.attachScores(ctx, out)
 	return out, nil
 }
 
@@ -277,6 +297,22 @@ func (s *Store) attachTimeTracked(ctx context.Context, i *model.Issue) {
 		return
 	}
 	i.TimeTracked = sec
+}
+
+// attachScores populates RICEScore / ICEScore if a scorer is wired.
+// Each is set independently — an issue scored with RICE only gets
+// RICEScore filled and leaves ICEScore nil, matching the optional
+// per-method storage in issue_scores.
+func (s *Store) attachScores(ctx context.Context, i *model.Issue) {
+	if s.scorer == nil || i == nil {
+		return
+	}
+	rice, ice, err := s.scorer.IssueScores(ctx, i.ID)
+	if err != nil {
+		return
+	}
+	i.RICEScore = rice
+	i.ICEScore = ice
 }
 
 // List composes a WHERE-clause set dynamically from the filter. Each

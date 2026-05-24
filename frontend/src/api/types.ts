@@ -50,6 +50,10 @@ export interface Issue {
   // of the request body and merges the template's defaults before
   // the row is inserted. Never returned on reads.
   template_id?: string;
+  // Cached score values populated by GetByID — pointers on the
+  // backend so we mirror nullable wire shapes here.
+  rice_score?: number;
+  ice_score?: number;
 }
 
 // ─── Relations / dependencies ───────────────────────────
@@ -251,6 +255,54 @@ export interface AcceptInviteResponse {
   project_id?: string;
   role: GuestRole;
   access_token: string;
+}
+
+// ─── Scoring (RICE / ICE) ────────────────────────────────
+// Mirrors internal/scoring/store.go.
+
+export type ScoringMethod = "rice" | "ice";
+
+export interface RICEScore {
+  reach: number;
+  impact: number;
+  confidence: number;
+  effort: number;
+  score: number;
+}
+
+export interface ICEScore {
+  impact: number;
+  confidence: number;
+  ease: number;
+  score: number;
+}
+
+export interface IssueScoreRecord {
+  id: string;
+  issue_id: string;
+  workspace_id: string;
+  method: ScoringMethod;
+  rice?: RICEScore;
+  ice?: ICEScore;
+  notes: string;
+  scored_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScoredIssue extends Issue {
+  score: number;
+  scoring_method: ScoringMethod;
+  score_rank: number;
+}
+
+export interface ScoreSummary {
+  total_scored: number;
+  total_issues: number;
+  coverage_pct: number;
+  avg_rice_score: number;
+  avg_ice_score: number;
+  top_issue_id: string;
 }
 
 export interface Team {

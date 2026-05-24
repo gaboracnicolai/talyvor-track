@@ -11,8 +11,10 @@ import { CustomFieldRow } from "./CustomFieldRow";
 import { RelationsSection } from "./RelationsSection";
 import { DependencyGraph } from "./DependencyGraph";
 import { TimeTracker } from "./TimeTracker";
+import { ScorePanel } from "./ScorePanel";
 import { formatDuration } from "~/hooks/useTimeTracking";
-import { Clock } from "lucide-react";
+import { formatScore } from "~/hooks/useScoring";
+import { Clock, BarChart3 } from "lucide-react";
 import { Badge } from "~/components/ui/Badge";
 import type { IssueStatus, IssuePriority } from "~/api/types";
 
@@ -38,6 +40,7 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
   const fields = useCustomFields(issue?.team_id);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const [showGraph, setShowGraph] = useState(false);
+  const [showScore, setShowScore] = useState(false);
 
   if (!issueId) return null;
 
@@ -63,6 +66,26 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
                 <Clock size={10} />
                 {formatDuration(issue.time_tracked_sec)}
               </span>
+            ) : null}
+            {issue.rice_score !== undefined && issue.rice_score !== null ? (
+              <button
+                onClick={() => setShowScore(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent"
+                title="RICE score — click to edit"
+              >
+                <BarChart3 size={10} />
+                RICE {formatScore(issue.rice_score, "rice")}
+              </button>
+            ) : null}
+            {issue.ice_score !== undefined && issue.ice_score !== null ? (
+              <button
+                onClick={() => setShowScore(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent"
+                title="ICE score — click to edit"
+              >
+                <BarChart3 size={10} />
+                ICE {formatScore(issue.ice_score, "ice")}
+              </button>
             ) : null}
           </div>
           {editingTitle === issue.id ? (
@@ -161,6 +184,26 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
           ) : null}
 
           <RelationsSection issueID={issue.id} />
+
+          <div className="border-t border-border pt-4">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                <BarChart3 size={12} />
+                Prioritisation
+              </div>
+              {!showScore ? (
+                <button
+                  onClick={() => setShowScore(true)}
+                  className="text-xs text-muted hover:text-text"
+                >
+                  Set priority score
+                </button>
+              ) : null}
+            </div>
+            {showScore ? (
+              <ScorePanel issueID={issue.id} onClose={() => setShowScore(false)} />
+            ) : null}
+          </div>
 
           <TimeTracker issueID={issue.id} />
 

@@ -27,6 +27,7 @@ const sections: { route: Route; label: string; Icon: typeof Inbox }[] = [
   { route: "issues", label: "Issues", Icon: Inbox },
   { route: "cycles", label: "Cycles", Icon: Calendar },
   { route: "roadmap", label: "Roadmap", Icon: Map },
+  { route: "prioritize", label: "Prioritize", Icon: BarChart3 },
   { route: "time", label: "Time", Icon: Clock },
   { route: "analytics", label: "Analytics", Icon: BarChart3 },
   { route: "templates", label: "Templates", Icon: FileText },

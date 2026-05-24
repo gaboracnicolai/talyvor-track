@@ -129,6 +129,12 @@ type Issue struct {
 	// time-tracking summariser is wired via WithTimeTracker. omitempty
 	// so the JSON stays terse on bulk reads.
 	TimeTracked int `json:"time_tracked_sec,omitempty"`
+
+	// RICEScore / ICEScore are populated by GetByID when a scoring
+	// store is wired via WithScorer. Pointers so "unset" is
+	// distinguishable from "0" — a deliberately-zero score is valid.
+	RICEScore *float64 `json:"rice_score,omitempty"`
+	ICEScore  *float64 `json:"ice_score,omitempty"`
 }
 
 // Comment is markdown-formatted user content attached to an issue.

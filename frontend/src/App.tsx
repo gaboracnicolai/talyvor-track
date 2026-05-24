@@ -8,6 +8,7 @@ import { CyclesPage } from "./pages/Cycles";
 import { RoadmapPage } from "./pages/Roadmap";
 import { TimeReportPage } from "./pages/TimeReport";
 import { TemplatesPage } from "./pages/Templates";
+import { PrioritizedBacklogPage } from "./pages/PrioritizedBacklog";
 import { AnalyticsPage } from "./pages/Analytics";
 import { SettingsPage } from "./pages/Settings";
 import { InviteAcceptPage, useInviteToken } from "./pages/InviteAccept";
@@ -23,6 +24,7 @@ export type Route =
   | "issues"
   | "cycles"
   | "roadmap"
+  | "prioritize"
   | "time"
   | "analytics"
   | "templates"
@@ -32,6 +34,7 @@ const titleByRoute: Record<Route, string> = {
   issues: "Issues",
   cycles: "Cycles",
   roadmap: "Roadmap",
+  prioritize: "Prioritize",
   time: "Time",
   analytics: "Analytics",
   templates: "Templates",
@@ -129,6 +132,7 @@ function AdminApp() {
           )}
           {route === "cycles" && <CyclesPage />}
           {route === "roadmap" && <RoadmapPage />}
+          {route === "prioritize" && <PrioritizedBacklogPage />}
           {route === "time" && <TimeReportPage />}
           {route === "templates" && <TemplatesPage />}
           {route === "analytics" && <AnalyticsPage />}

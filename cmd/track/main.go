@@ -41,6 +41,7 @@ import (
 	"github.com/talyvor/track/internal/notification"
 	"github.com/talyvor/track/internal/project"
 	"github.com/talyvor/track/internal/realtime"
+	"github.com/talyvor/track/internal/scoring"
 	"github.com/talyvor/track/internal/team"
 	"github.com/talyvor/track/internal/template"
 	"github.com/talyvor/track/internal/timetracking"
@@ -82,14 +83,16 @@ func main() {
 	customFieldStore := customfield.NewStore(pool)
 	dependencyStore := dependency.NewStore(pool)
 	timeStore := timetracking.NewStore(pool)
-	// issueStore reads custom-field values, blocked indicator, and
-	// tracked time when serving issues so REST + MCP responses always
-	// include those fields without callers having to stitch data
-	// from multiple stores.
+	scoringStore := scoring.NewStore(pool)
+	// issueStore reads custom-field values, blocked indicator,
+	// tracked time, and RICE/ICE scores when serving issues so REST
+	// + MCP responses always include those fields without callers
+	// having to stitch data from multiple stores.
 	issueStore := issue.NewStore(pool).
 		WithFieldFetcher(customFieldStore).
 		WithBlockedChecker(dependencyStore).
-		WithTimeTracker(timeStore)
+		WithTimeTracker(timeStore).
+		WithScorer(scoringStore)
 	projectStore := project.NewStore(pool)
 	cycleStore := cycle.NewStore(pool)
 	notificationStore := notification.NewStore(pool)
@@ -105,6 +108,7 @@ func main() {
 	dependencyHandler := dependency.NewHandler(dependencyStore)
 	timeHandler := timetracking.NewHandler(timeStore)
 	templateHandler := template.NewHandler(templateStore)
+	scoringHandler := scoring.NewHandler(scoringStore)
 	// Guest store: invite + accept lives here; the access tokens are
 	// stateless HMAC-signed. GUEST_SECRET seeds the HMAC key; empty
 	// generates a per-process random key (fine for dev, never prod).
@@ -213,6 +217,7 @@ func main() {
 		dependencyHandler.Mount(r)
 		timeHandler.Mount(r)
 		templateHandler.Mount(r)
+		scoringHandler.Mount(r)
 		guestHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
