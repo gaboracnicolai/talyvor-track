@@ -111,6 +111,56 @@ export interface BlockingIssue extends Issue {
   blocked_issue_ids: string[];
 }
 
+// ─── Feature boards ──────────────────────────────────────
+// Mirrors internal/featureboard/store.go.
+
+export type FeaturePostStatus =
+  | "open"
+  | "planned"
+  | "in_progress"
+  | "completed"
+  | "declined";
+
+export interface FeatureBoard {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string;
+  slug: string;
+  public: boolean;
+  allow_anonymous: boolean;
+  created_at: string;
+}
+
+export interface FeaturePost {
+  id: string;
+  workspace_id: string;
+  board_id: string;
+  title: string;
+  description: string;
+  status: FeaturePostStatus;
+  vote_count: number;
+  issue_id?: string;
+  author_name: string;
+  author_email: string;
+  created_at: string;
+  updated_at: string;
+  // Decorated by the public endpoint when X-Voter-Email is provided.
+  has_voted?: boolean;
+}
+
+export interface BoardStats {
+  total_posts: number;
+  total_votes: number;
+  by_status: Record<string, number>;
+  top_post?: FeaturePost;
+}
+
+export interface PublicBoardResponse {
+  board: FeatureBoard;
+  stats?: BoardStats;
+}
+
 // ─── Roadmap ────────────────────────────────────────────
 // Mirrors internal/project/roadmap.go.
 

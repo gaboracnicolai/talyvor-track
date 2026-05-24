@@ -64,6 +64,7 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
       { id: "go-time", group: "Go to", label: "Time", perform: () => onNavigate("time") },
       { id: "go-analytics", group: "Go to", label: "Analytics", perform: () => onNavigate("analytics") },
       { id: "go-templates", group: "Go to", label: "Templates", perform: () => onNavigate("templates") },
+      { id: "go-feedback", group: "Go to", label: "Feedback", perform: () => onNavigate("feedback") },
       { id: "go-settings", group: "Go to", label: "Settings", perform: () => onNavigate("settings") },
     ],
     [onNavigate],

@@ -29,6 +29,7 @@ import (
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/dependency"
+	"github.com/talyvor/track/internal/featureboard"
 	"github.com/talyvor/track/internal/guest"
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
@@ -109,6 +110,10 @@ func main() {
 	timeHandler := timetracking.NewHandler(timeStore)
 	templateHandler := template.NewHandler(templateStore)
 	scoringHandler := scoring.NewHandler(scoringStore)
+	// Public feature boards. issueStore is wired so the "Convert to
+	// issue" admin action can spawn a Track issue from a post.
+	featureBoardStore := featureboard.NewStore(pool)
+	featureBoardHandler := featureboard.NewHandler(featureBoardStore, issueStore)
 	// Guest store: invite + accept lives here; the access tokens are
 	// stateless HMAC-signed. GUEST_SECRET seeds the HMAC key; empty
 	// generates a per-process random key (fine for dev, never prod).
@@ -219,6 +224,7 @@ func main() {
 		templateHandler.Mount(r)
 		scoringHandler.Mount(r)
 		guestHandler.Mount(r)
+		featureBoardHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see

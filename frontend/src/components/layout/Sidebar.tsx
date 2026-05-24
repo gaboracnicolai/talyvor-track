@@ -6,6 +6,7 @@ import {
   Clock,
   FileText,
   BarChart3,
+  MessageSquare,
   Settings,
   Plus,
 } from "lucide-react";
@@ -31,6 +32,7 @@ const sections: { route: Route; label: string; Icon: typeof Inbox }[] = [
   { route: "time", label: "Time", Icon: Clock },
   { route: "analytics", label: "Analytics", Icon: BarChart3 },
   { route: "templates", label: "Templates", Icon: FileText },
+  { route: "feedback", label: "Feedback", Icon: MessageSquare },
   { route: "settings", label: "Settings", Icon: Settings },
 ];
 

@@ -13,6 +13,8 @@ import { AnalyticsPage } from "./pages/Analytics";
 import { SettingsPage } from "./pages/Settings";
 import { InviteAcceptPage, useInviteToken } from "./pages/InviteAccept";
 import { GuestViewPage } from "./pages/GuestView";
+import { PublicBoardPage, usePublicBoardRoute } from "./pages/PublicBoard";
+import { FeatureBoardsPage } from "./pages/FeatureBoards";
 import { useUIStore } from "./stores/ui";
 import { useWorkspaceStore } from "./stores/workspace";
 import { useWebSocket } from "./hooks/useWebSocket";
@@ -28,6 +30,7 @@ export type Route =
   | "time"
   | "analytics"
   | "templates"
+  | "feedback"
   | "settings";
 
 const titleByRoute: Record<Route, string> = {
@@ -38,6 +41,7 @@ const titleByRoute: Record<Route, string> = {
   time: "Time",
   analytics: "Analytics",
   templates: "Templates",
+  feedback: "Feedback",
   settings: "Settings",
 };
 
@@ -61,11 +65,20 @@ function writeGuestSession(s: { workspaceID: string; projectID?: string }) {
 
 export function App() {
   const inviteToken = useInviteToken();
+  const publicBoardRoute = usePublicBoardRoute();
   const [guestSession, setGuestSession] = useState<{
     workspaceID: string;
     projectID?: string;
   } | null>(() => readGuestSession());
 
+  if (publicBoardRoute) {
+    return (
+      <PublicBoardPage
+        wsSlug={publicBoardRoute.wsSlug}
+        boardSlug={publicBoardRoute.boardSlug}
+      />
+    );
+  }
   if (inviteToken) {
     return (
       <InviteAcceptPage
@@ -135,6 +148,7 @@ function AdminApp() {
           {route === "prioritize" && <PrioritizedBacklogPage />}
           {route === "time" && <TimeReportPage />}
           {route === "templates" && <TemplatesPage />}
+          {route === "feedback" && <FeatureBoardsPage />}
           {route === "analytics" && <AnalyticsPage />}
           {route === "settings" && <SettingsPage />}
         </main>
