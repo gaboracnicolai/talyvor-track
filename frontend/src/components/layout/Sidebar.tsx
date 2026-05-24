@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Inbox,
   Calendar,
+  Map,
   BarChart3,
   Settings,
   Plus,
@@ -23,6 +24,7 @@ interface SidebarProps {
 const sections: { route: Route; label: string; Icon: typeof Inbox }[] = [
   { route: "issues", label: "Issues", Icon: Inbox },
   { route: "cycles", label: "Cycles", Icon: Calendar },
+  { route: "roadmap", label: "Roadmap", Icon: Map },
   { route: "analytics", label: "Analytics", Icon: BarChart3 },
   { route: "settings", label: "Settings", Icon: Settings },
 ];

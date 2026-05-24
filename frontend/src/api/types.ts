@@ -88,6 +88,51 @@ export interface DependencyGraph {
   edges: GraphEdge[];
 }
 
+// ─── Roadmap ────────────────────────────────────────────
+// Mirrors internal/project/roadmap.go.
+
+export interface RoadmapMilestone {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  status: string;
+  target_date?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+  issue_count: number;
+  completed_count: number;
+  ai_cost_usd: number;
+}
+
+export interface RoadmapProject {
+  id: string;
+  workspace_id: string;
+  team_id: string;
+  team_name: string;
+  name: string;
+  identifier: string;
+  description: string;
+  status: string;
+  priority: number;
+  start_date?: string;
+  target_date?: string;
+  created_at: string;
+  updated_at: string;
+  milestones: RoadmapMilestone[];
+  issue_count: number;
+  completed_count: number;
+  completion_pct: number;
+  ai_cost_usd: number;
+}
+
+export interface RoadmapResponse {
+  projects: RoadmapProject[];
+  date_range: { start: string; end: string };
+}
+
 export interface Team {
   id: string;
   workspace_id: string;

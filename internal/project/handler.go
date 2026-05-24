@@ -3,6 +3,7 @@ package project
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -21,6 +22,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Patch("/{id}", h.Update)
 		r.Delete("/{id}", h.Delete)
 	})
+
+	// Roadmap query lives at /workspaces/{wsID}/roadmap so the URL
+	// matches the resource concept (timeline-of-projects) rather than
+	// being buried under /projects/roadmap.
+	r.Get("/workspaces/{wsID}/roadmap", h.Roadmap)
 }
 
 type apiError struct {
@@ -94,4 +100,44 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// Roadmap drives the timeline page. Defaults: today → today+6mo. Both
+// dates may be overridden via ?start_date= and ?end_date= as RFC3339;
+// ?team_id= scopes the roadmap to a single team.
+func (h *Handler) Roadmap(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "wsID")
+	now := time.Now().UTC()
+	start := now
+	end := now.AddDate(0, 6, 0)
+	if v := r.URL.Query().Get("start_date"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			start = t
+		}
+	}
+	if v := r.URL.Query().Get("end_date"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			end = t
+		}
+	}
+	var teamID *string
+	if v := r.URL.Query().Get("team_id"); v != "" {
+		teamID = &v
+	}
+
+	projects, err := h.store.GetRoadmap(r.Context(), wsID, teamID, start, end)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "ROADMAP_FAILED", err.Error())
+		return
+	}
+	if projects == nil {
+		projects = []RoadmapProject{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"projects": projects,
+		"date_range": map[string]string{
+			"start": start.Format(time.RFC3339),
+			"end":   end.Format(time.RFC3339),
+		},
+	})
 }

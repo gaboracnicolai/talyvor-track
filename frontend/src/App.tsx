@@ -5,6 +5,7 @@ import { CommandPalette } from "./components/layout/CommandPalette";
 import { Toaster } from "./components/ui/Toaster";
 import { IssuesPage } from "./pages/Issues";
 import { CyclesPage } from "./pages/Cycles";
+import { RoadmapPage } from "./pages/Roadmap";
 import { AnalyticsPage } from "./pages/Analytics";
 import { SettingsPage } from "./pages/Settings";
 import { useUIStore } from "./stores/ui";
@@ -14,11 +15,12 @@ import { useWebSocket } from "./hooks/useWebSocket";
 // Top-level pages enumerated explicitly. The Issues page hosts both
 // the list and the kanban board behind an in-page view toggle, so
 // "board" no longer needs its own top-level route.
-export type Route = "issues" | "cycles" | "analytics" | "settings";
+export type Route = "issues" | "cycles" | "roadmap" | "analytics" | "settings";
 
 const titleByRoute: Record<Route, string> = {
   issues: "Issues",
   cycles: "Cycles",
+  roadmap: "Roadmap",
   analytics: "Analytics",
   settings: "Settings",
 };
@@ -64,6 +66,7 @@ export function App() {
             <IssuesPage createOpen={createOpen} setCreateOpen={setCreateOpen} />
           )}
           {route === "cycles" && <CyclesPage />}
+          {route === "roadmap" && <RoadmapPage />}
           {route === "analytics" && <AnalyticsPage />}
           {route === "settings" && <SettingsPage />}
         </main>

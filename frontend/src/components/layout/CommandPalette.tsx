@@ -59,6 +59,7 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
     () => [
       { id: "go-issues", group: "Go to", label: "Issues", perform: () => onNavigate("issues") },
       { id: "go-cycles", group: "Go to", label: "Cycles", perform: () => onNavigate("cycles") },
+      { id: "go-roadmap", group: "Go to", label: "Roadmap", perform: () => onNavigate("roadmap") },
       { id: "go-analytics", group: "Go to", label: "Analytics", perform: () => onNavigate("analytics") },
       { id: "go-settings", group: "Go to", label: "Settings", perform: () => onNavigate("settings") },
     ],
