@@ -3,6 +3,7 @@ import {
   Inbox,
   Calendar,
   Map,
+  Clock,
   BarChart3,
   Settings,
   Plus,
@@ -25,6 +26,7 @@ const sections: { route: Route; label: string; Icon: typeof Inbox }[] = [
   { route: "issues", label: "Issues", Icon: Inbox },
   { route: "cycles", label: "Cycles", Icon: Calendar },
   { route: "roadmap", label: "Roadmap", Icon: Map },
+  { route: "time", label: "Time", Icon: Clock },
   { route: "analytics", label: "Analytics", Icon: BarChart3 },
   { route: "settings", label: "Settings", Icon: Settings },
 ];

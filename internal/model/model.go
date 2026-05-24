@@ -123,6 +123,12 @@ type Issue struct {
 	// issue. Reserved for future bulk-relation prefetch; not populated
 	// by current read paths.
 	Relations []string `json:"relations,omitempty"`
+
+	// TimeTracked is the total tracked time in seconds across every
+	// member who has worked on the issue. Populated by GetByID when a
+	// time-tracking summariser is wired via WithTimeTracker. omitempty
+	// so the JSON stays terse on bulk reads.
+	TimeTracked int `json:"time_tracked_sec,omitempty"`
 }
 
 // Comment is markdown-formatted user content attached to an issue.

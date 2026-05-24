@@ -48,10 +48,18 @@ type blockedChecker interface {
 	IsBlocked(ctx context.Context, issueID string) (bool, error)
 }
 
+// timeSummariser returns total tracked seconds for an issue. Wired
+// from timetracking.Store at boot — same package-graph reasoning as
+// blockedChecker.
+type timeSummariser interface {
+	IssueTotalSec(ctx context.Context, issueID string) (int, error)
+}
+
 type Store struct {
 	pool    pgxDB
 	fetcher fieldFetcher
 	blocked blockedChecker
+	timer   timeSummariser
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -78,6 +86,14 @@ func (s *Store) WithFieldFetcher(f fieldFetcher) *Store {
 // detail fetch.
 func (s *Store) WithBlockedChecker(b blockedChecker) *Store {
 	s.blocked = b
+	return s
+}
+
+// WithTimeTracker attaches a time-tracking summariser so GetByID
+// populates Issue.TimeTracked. Same one-shot read policy as the
+// blocked checker — list reads stay cheap.
+func (s *Store) WithTimeTracker(t timeSummariser) *Store {
+	s.timer = t
 	return s
 }
 
@@ -201,6 +217,7 @@ func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
 	}
 	s.attachFieldValues(ctx, out)
 	s.attachBlocked(ctx, out)
+	s.attachTimeTracked(ctx, out)
 	return out, nil
 }
 
@@ -214,6 +231,7 @@ func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*model.
 	}
 	s.attachFieldValues(ctx, out)
 	s.attachBlocked(ctx, out)
+	s.attachTimeTracked(ctx, out)
 	return out, nil
 }
 
@@ -245,6 +263,20 @@ func (s *Store) attachBlocked(ctx context.Context, i *model.Issue) {
 		return
 	}
 	i.IsBlocked = blocked
+}
+
+// attachTimeTracked populates TimeTracked if a tracker is wired.
+// Same error-swallow policy as the other attach helpers — total time
+// is a UX hint, not a correctness invariant.
+func (s *Store) attachTimeTracked(ctx context.Context, i *model.Issue) {
+	if s.timer == nil || i == nil {
+		return
+	}
+	sec, err := s.timer.IssueTotalSec(ctx, i.ID)
+	if err != nil || sec <= 0 {
+		return
+	}
+	i.TimeTracked = sec
 }
 
 // List composes a WHERE-clause set dynamically from the filter. Each

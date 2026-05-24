@@ -6,6 +6,7 @@ import { Toaster } from "./components/ui/Toaster";
 import { IssuesPage } from "./pages/Issues";
 import { CyclesPage } from "./pages/Cycles";
 import { RoadmapPage } from "./pages/Roadmap";
+import { TimeReportPage } from "./pages/TimeReport";
 import { AnalyticsPage } from "./pages/Analytics";
 import { SettingsPage } from "./pages/Settings";
 import { useUIStore } from "./stores/ui";
@@ -15,12 +16,19 @@ import { useWebSocket } from "./hooks/useWebSocket";
 // Top-level pages enumerated explicitly. The Issues page hosts both
 // the list and the kanban board behind an in-page view toggle, so
 // "board" no longer needs its own top-level route.
-export type Route = "issues" | "cycles" | "roadmap" | "analytics" | "settings";
+export type Route =
+  | "issues"
+  | "cycles"
+  | "roadmap"
+  | "time"
+  | "analytics"
+  | "settings";
 
 const titleByRoute: Record<Route, string> = {
   issues: "Issues",
   cycles: "Cycles",
   roadmap: "Roadmap",
+  time: "Time",
   analytics: "Analytics",
   settings: "Settings",
 };
@@ -67,6 +75,7 @@ export function App() {
           )}
           {route === "cycles" && <CyclesPage />}
           {route === "roadmap" && <RoadmapPage />}
+          {route === "time" && <TimeReportPage />}
           {route === "analytics" && <AnalyticsPage />}
           {route === "settings" && <SettingsPage />}
         </main>

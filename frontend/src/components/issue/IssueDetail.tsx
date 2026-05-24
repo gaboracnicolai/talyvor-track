@@ -10,6 +10,9 @@ import { AICostBadge } from "./AICostBadge";
 import { CustomFieldRow } from "./CustomFieldRow";
 import { RelationsSection } from "./RelationsSection";
 import { DependencyGraph } from "./DependencyGraph";
+import { TimeTracker } from "./TimeTracker";
+import { formatDuration } from "~/hooks/useTimeTracking";
+import { Clock } from "lucide-react";
 import { Badge } from "~/components/ui/Badge";
 import type { IssueStatus, IssuePriority } from "~/api/types";
 
@@ -50,6 +53,15 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
             {issue.is_blocked ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-priority-urgent/30 bg-priority-urgent/10 px-2 py-0.5 text-[10px] font-medium text-priority-urgent">
                 Blocked
+              </span>
+            ) : null}
+            {issue.time_tracked_sec && issue.time_tracked_sec > 0 ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-bg px-2 py-0.5 text-[10px] font-medium text-muted"
+                title="Total tracked time"
+              >
+                <Clock size={10} />
+                {formatDuration(issue.time_tracked_sec)}
               </span>
             ) : null}
           </div>
@@ -149,6 +161,8 @@ export function IssueDetail({ issueId, onClose }: IssueDetailProps) {
           ) : null}
 
           <RelationsSection issueID={issue.id} />
+
+          <TimeTracker issueID={issue.id} />
 
           <div className="flex justify-between gap-2 border-t border-border pt-4">
             <Button variant="ghost" onClick={() => setShowGraph((v) => !v)}>

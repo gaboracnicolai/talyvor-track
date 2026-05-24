@@ -41,6 +41,7 @@ import (
 	"github.com/talyvor/track/internal/project"
 	"github.com/talyvor/track/internal/realtime"
 	"github.com/talyvor/track/internal/team"
+	"github.com/talyvor/track/internal/timetracking"
 	"github.com/talyvor/track/internal/workflow"
 	"github.com/talyvor/track/internal/workspace"
 )
@@ -74,13 +75,15 @@ func main() {
 	workspaceStore := workspace.NewStore(pool)
 	customFieldStore := customfield.NewStore(pool)
 	dependencyStore := dependency.NewStore(pool)
-	// issueStore reads custom-field values and the blocked indicator
-	// when serving issues so REST + MCP responses always include the
-	// FieldValues map and IsBlocked flag without callers having to
-	// stitch data from multiple stores.
+	timeStore := timetracking.NewStore(pool)
+	// issueStore reads custom-field values, blocked indicator, and
+	// tracked time when serving issues so REST + MCP responses always
+	// include those fields without callers having to stitch data
+	// from multiple stores.
 	issueStore := issue.NewStore(pool).
 		WithFieldFetcher(customFieldStore).
-		WithBlockedChecker(dependencyStore)
+		WithBlockedChecker(dependencyStore).
+		WithTimeTracker(timeStore)
 	projectStore := project.NewStore(pool)
 	cycleStore := cycle.NewStore(pool)
 	notificationStore := notification.NewStore(pool)
@@ -91,6 +94,7 @@ func main() {
 	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier).WithCustomFields(customFieldStore)
 	customFieldHandler := customfield.NewHandler(customFieldStore)
 	dependencyHandler := dependency.NewHandler(dependencyStore)
+	timeHandler := timetracking.NewHandler(timeStore)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycleStore)
@@ -191,6 +195,7 @@ func main() {
 		importerHandler.Mount(r)
 		customFieldHandler.Mount(r)
 		dependencyHandler.Mount(r)
+		timeHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see

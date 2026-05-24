@@ -43,6 +43,9 @@ export interface Issue {
   // open blocker. Populated on detail reads; omitted from list rows
   // to avoid the per-row blocked check on bulk fetches.
   is_blocked?: boolean;
+  // Total tracked seconds across every time entry on the issue.
+  // Populated by GetByID; omitted from list payloads.
+  time_tracked_sec?: number;
 }
 
 // ─── Relations / dependencies ───────────────────────────
@@ -131,6 +134,58 @@ export interface RoadmapProject {
 export interface RoadmapResponse {
   projects: RoadmapProject[];
   date_range: { start: string; end: string };
+}
+
+// ─── Time tracking ──────────────────────────────────────
+// Mirrors internal/timetracking/store.go.
+
+export interface TimeEntryRecord {
+  id: string;
+  issue_id: string;
+  workspace_id: string;
+  member_id: string;
+  description: string;
+  started_at: string;
+  stopped_at?: string;
+  duration_sec: number;
+  billable: boolean;
+  created_at: string;
+}
+
+export interface TimerState {
+  running: boolean;
+  issue_id?: string;
+  started_at?: string;
+  elapsed_sec: number;
+}
+
+export interface TimeSummary {
+  issue_id: string;
+  total_sec: number;
+  billable_sec: number;
+  member_count: number;
+  entry_count: number;
+}
+
+export interface MemberTime {
+  member_id: string;
+  name: string;
+  total_sec: number;
+  billable_sec: number;
+}
+
+export interface ProjectTime {
+  project_id: string;
+  name: string;
+  total_sec: number;
+  billable_sec: number;
+}
+
+export interface WorkspaceTimeSummary {
+  total_sec: number;
+  billable_sec: number;
+  by_member: MemberTime[];
+  by_project: ProjectTime[];
 }
 
 export interface Team {
