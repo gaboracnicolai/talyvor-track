@@ -517,3 +517,169 @@ func dedupeEdges(in []GraphEdge) []GraphEdge {
 	}
 	return out
 }
+
+// ─── GetRelationStats ──────────────────────────────────────
+
+// RelationStats is the dashboard-style rollup the workspace settings
+// + sprint planning views read. One query, four aggregates.
+type RelationStats struct {
+	TotalRelations int `json:"total_relations"`
+	BlockingChains int `json:"blocking_chains"`
+	BlockedIssues  int `json:"blocked_issues"`
+	DuplicatePairs int `json:"duplicate_pairs"`
+}
+
+// GetRelationStats counts the relation rows once and projects four
+// metrics out of the same CTE: total relations, the number of
+// "blocking chains" (sources that block ≥ 2 distinct targets — they
+// drive the sprint-planner UI's "biggest blockers" highlight), how
+// many issues are currently the target of a "blocks" relation, and
+// the number of duplicate pairs (rows are stored in both directions,
+// so /2 to get pair count).
+func (s *Store) GetRelationStats(ctx context.Context, workspaceID string) (*RelationStats, error) {
+	if s.pool == nil {
+		return &RelationStats{}, nil
+	}
+	var total, chains, blocked, dupes int64
+	err := s.pool.QueryRow(ctx,
+		`WITH r AS (SELECT * FROM issue_relations WHERE workspace_id = $1)
+        SELECT
+            (SELECT COUNT(*) FROM r)                                            AS total_relations,
+            (SELECT COUNT(*) FROM (
+                SELECT source_id FROM r WHERE type = 'blocks'
+                GROUP BY source_id HAVING COUNT(DISTINCT target_id) >= 2) c)    AS blocking_chains,
+            (SELECT COUNT(DISTINCT target_id) FROM r WHERE type = 'blocks')     AS blocked_issues,
+            (SELECT COUNT(*) / 2 FROM r WHERE type = 'duplicates')              AS duplicate_pairs`,
+		workspaceID,
+	).Scan(&total, &chains, &blocked, &dupes)
+	if err != nil {
+		return nil, fmt.Errorf("dependency: stats: %w", err)
+	}
+	return &RelationStats{
+		TotalRelations: int(total),
+		BlockingChains: int(chains),
+		BlockedIssues:  int(blocked),
+		DuplicatePairs: int(dupes),
+	}, nil
+}
+
+// ─── GetBlockingIssues ─────────────────────────────────────
+
+// BlockingIssue is one row in the sprint-planner "biggest blockers"
+// list. BlocksCount + BlockedIssues are derived per-issue and only
+// produced for source-of-blocks rows.
+type BlockingIssue struct {
+	model.Issue
+	BlocksCount   int      `json:"blocks_count"`
+	BlockedIssues []string `json:"blocked_issue_ids"`
+}
+
+// GetBlockingIssues returns issues that block at least one other
+// issue, sorted blocks-count-DESC. cycleID narrows to a specific
+// cycle so sprint planning can highlight "what's slowing this
+// sprint". The aggregated target IDs travel back as a TEXT[] which
+// pgx scans straight into []string.
+func (s *Store) GetBlockingIssues(ctx context.Context, workspaceID string, cycleID *string) ([]BlockingIssue, error) {
+	if s.pool == nil {
+		return nil, nil
+	}
+	args := []any{workspaceID}
+	cycleClause := ""
+	if cycleID != nil {
+		cycleClause = " AND i.cycle_id = $2"
+		args = append(args, *cycleID)
+	}
+	sql := `SELECT i.id, i.workspace_id, i.team_id, i.project_id, i.number, i.identifier,
+                i.title, i.description, i.status, i.priority,
+                i.assignee_id, i.creator_id, i.cycle_id, i.parent_id,
+                i.due_date, i.completed_at,
+                i.lens_feature, i.ai_cost_usd, i.ai_tokens,
+                i.labels, i.sort_order, i.created_at, i.updated_at,
+                COUNT(r.target_id)             AS blocks_count,
+                array_agg(r.target_id)         AS blocked_ids
+            FROM issues i
+            JOIN issue_relations r ON r.source_id = i.id AND r.type = 'blocks'
+            WHERE r.workspace_id = $1` + cycleClause + `
+            GROUP BY i.id
+            ORDER BY blocks_count DESC, i.created_at ASC`
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("dependency: blocking: %w", err)
+	}
+	defer rows.Close()
+	var out []BlockingIssue
+	for rows.Next() {
+		var (
+			bi       BlockingIssue
+			status   string
+			priority int
+			count    int64
+		)
+		if err := rows.Scan(
+			&bi.ID, &bi.WorkspaceID, &bi.TeamID, &bi.ProjectID, &bi.Number, &bi.Identifier,
+			&bi.Title, &bi.Description, &status, &priority,
+			&bi.AssigneeID, &bi.CreatorID, &bi.CycleID, &bi.ParentID,
+			&bi.DueDate, &bi.CompletedAt,
+			&bi.LensFeature, &bi.AICostUSD, &bi.AITokens,
+			&bi.Labels, &bi.SortOrder, &bi.CreatedAt, &bi.UpdatedAt,
+			&count, &bi.BlockedIssues,
+		); err != nil {
+			return nil, err
+		}
+		bi.Status = model.IssueStatus(status)
+		bi.Priority = model.IssuePriority(priority)
+		bi.BlocksCount = int(count)
+		out = append(out, bi)
+	}
+	return out, rows.Err()
+}
+
+// ─── BulkCreateRelations ───────────────────────────────────
+
+// MaxBulkRelationTargets caps the per-request fan-out so a single
+// malicious POST can't hot-loop the database. Matches the frontend
+// "Link multiple" picker's hard limit.
+const MaxBulkRelationTargets = 50
+
+// BulkCreateRelations inserts one source→target relation per entry
+// in `targets`. Uses UNNEST + ON CONFLICT DO NOTHING so duplicates
+// silently skip — the returned count reflects rows actually written.
+//
+// The auto-inverse logic that Create runs is deliberately NOT
+// applied here. The bulk path is for relates_to / clones — adding
+// 50 blocks at once would create 100 rows and is the wrong UX. Use
+// per-row Create for blocks/duplicates.
+func (s *Store) BulkCreateRelations(ctx context.Context, rel Relation, targets []string) (int, error) {
+	if s.pool == nil {
+		return 0, errors.New("dependency: store has no pool")
+	}
+	if rel.SourceID == "" {
+		return 0, errors.New("dependency: source_id required")
+	}
+	if _, ok := validTypes[rel.Type]; !ok {
+		return 0, fmt.Errorf("dependency: invalid type %q", rel.Type)
+	}
+	if len(targets) == 0 {
+		return 0, nil
+	}
+	if len(targets) > MaxBulkRelationTargets {
+		return 0, fmt.Errorf("dependency: max %d targets per bulk request", MaxBulkRelationTargets)
+	}
+	for _, t := range targets {
+		if t == rel.SourceID {
+			return 0, errors.New("dependency: targets list contains source — self-relations rejected")
+		}
+	}
+
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO issue_relations (source_id, target_id, workspace_id, type, created_by)
+        SELECT $1, t, $3, $4, $5
+        FROM UNNEST($2::text[]) AS t
+        ON CONFLICT (source_id, target_id, type) DO NOTHING`,
+		rel.SourceID, targets, rel.WorkspaceID, string(rel.Type), rel.CreatedBy,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("dependency: bulk insert: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}

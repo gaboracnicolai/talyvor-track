@@ -337,3 +337,145 @@ func TestGetDependencyGraph_RespectsDepthLimit(t *testing.T) {
 	// adding noise to the test.
 	_ = errors.Is
 }
+
+// ─── GetRelationStats ──────────────────────────────────────
+
+func TestGetRelationStats_ReturnsCounts(t *testing.T) {
+	store, pool := newMockStore(t)
+	pool.ExpectQuery(`FROM issue_relations`).
+		WithArgs("ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{
+			"total_relations", "blocking_chains", "blocked_issues", "duplicate_pairs",
+		}).AddRow(int64(12), int64(3), int64(7), int64(2)))
+
+	out, err := store.GetRelationStats(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("GetRelationStats: %v", err)
+	}
+	if out.TotalRelations != 12 || out.BlockingChains != 3 ||
+		out.BlockedIssues != 7 || out.DuplicatePairs != 2 {
+		t.Errorf("got %+v", out)
+	}
+}
+
+// ─── GetBlockingIssues ─────────────────────────────────────
+
+func TestGetBlockingIssues_SortedByBlocksCountDesc(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	pool.ExpectQuery(`GROUP BY i.id`).
+		WithArgs("ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{
+			"id", "workspace_id", "team_id", "project_id", "number", "identifier",
+			"title", "description", "status", "priority",
+			"assignee_id", "creator_id", "cycle_id", "parent_id",
+			"due_date", "completed_at",
+			"lens_feature", "ai_cost_usd", "ai_tokens",
+			"labels", "sort_order", "created_at", "updated_at",
+			"blocks_count", "blocked_ids",
+		}).
+			AddRow("i-1", "ws-1", "team-1", nil, 1, "ENG-1",
+				"big blocker", "", "in_progress", 1, nil, "creator", nil, nil,
+				nil, nil,
+				"", float64(0), 0, []string{}, float64(0), now, now,
+				int64(3), []string{"i-2", "i-3", "i-4"}).
+			AddRow("i-5", "ws-1", "team-1", nil, 5, "ENG-5",
+				"smaller blocker", "", "todo", 2, nil, "creator", nil, nil,
+				nil, nil,
+				"", float64(0), 0, []string{}, float64(0), now, now,
+				int64(1), []string{"i-6"}))
+
+	out, err := store.GetBlockingIssues(context.Background(), "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetBlockingIssues: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("got %d, want 2", len(out))
+	}
+	if out[0].BlocksCount != 3 || out[0].Identifier != "ENG-1" {
+		t.Errorf("first = %+v", out[0])
+	}
+	if len(out[0].BlockedIssues) != 3 {
+		t.Errorf("BlockedIssues = %v", out[0].BlockedIssues)
+	}
+	if out[1].BlocksCount != 1 {
+		t.Errorf("second blocks_count = %d", out[1].BlocksCount)
+	}
+}
+
+func TestGetBlockingIssues_FilterByCycle(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	pool.ExpectQuery(`i.cycle_id = \$2`).
+		WithArgs("ws-1", "cycle-1").
+		WillReturnRows(pgxmock.NewRows([]string{
+			"id", "workspace_id", "team_id", "project_id", "number", "identifier",
+			"title", "description", "status", "priority",
+			"assignee_id", "creator_id", "cycle_id", "parent_id",
+			"due_date", "completed_at",
+			"lens_feature", "ai_cost_usd", "ai_tokens",
+			"labels", "sort_order", "created_at", "updated_at",
+			"blocks_count", "blocked_ids",
+		}).AddRow("i-1", "ws-1", "team-1", nil, 1, "ENG-1",
+			"in cycle", "", "todo", 2, nil, "creator", ptrStr("cycle-1"), nil,
+			nil, nil,
+			"", float64(0), 0, []string{}, float64(0), now, now,
+			int64(2), []string{"i-2", "i-3"}))
+
+	cycle := "cycle-1"
+	out, err := store.GetBlockingIssues(context.Background(), "ws-1", &cycle)
+	if err != nil {
+		t.Fatalf("GetBlockingIssues: %v", err)
+	}
+	if len(out) != 1 {
+		t.Errorf("got %d, want 1", len(out))
+	}
+}
+
+// ─── BulkCreateRelations ───────────────────────────────────
+
+func TestBulkCreateRelations_SkipsDuplicates(t *testing.T) {
+	store, pool := newMockStore(t)
+	// Three target IDs. INSERT with ON CONFLICT DO NOTHING returns
+	// 2 inserted (one was a duplicate); the store reads the row
+	// count via tag.RowsAffected().
+	pool.ExpectExec(`INSERT INTO issue_relations`).
+		WithArgs("src", []string{"t-1", "t-2", "t-3"}, "ws", "relates_to", "agent").
+		WillReturnResult(pgxmock.NewResult("INSERT", 2))
+
+	count, err := store.BulkCreateRelations(context.Background(), Relation{
+		SourceID: "src", WorkspaceID: "ws", CreatedBy: "agent", Type: RelationRelates,
+	}, []string{"t-1", "t-2", "t-3"})
+	if err != nil {
+		t.Fatalf("BulkCreateRelations: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+}
+
+func TestBulkCreateRelations_RejectsTooMany(t *testing.T) {
+	store, _ := newMockStore(t)
+	targets := make([]string, 51)
+	for i := range targets {
+		targets[i] = "t"
+	}
+	_, err := store.BulkCreateRelations(context.Background(), Relation{
+		SourceID: "src", WorkspaceID: "ws", Type: RelationRelates,
+	}, targets)
+	if err == nil {
+		t.Fatal("expected error for >50 targets")
+	}
+}
+
+func TestBulkCreateRelations_RejectsSelfReference(t *testing.T) {
+	store, _ := newMockStore(t)
+	_, err := store.BulkCreateRelations(context.Background(), Relation{
+		SourceID: "src", WorkspaceID: "ws", Type: RelationRelates,
+	}, []string{"a", "src", "b"})
+	if err == nil {
+		t.Fatal("expected error for self-reference inside targets")
+	}
+}
+
+func ptrStr(s string) *string { return &s }

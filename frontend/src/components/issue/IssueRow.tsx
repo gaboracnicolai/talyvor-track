@@ -7,6 +7,7 @@ import { AICostBadge } from "./AICostBadge";
 import { Avatar } from "~/components/ui/Avatar";
 import { Badge } from "~/components/ui/Badge";
 import { Tooltip } from "~/components/ui/Tooltip";
+import { RelationSummary } from "./RelationSummary";
 
 interface IssueRowProps {
   issue: Issue;
@@ -47,6 +48,7 @@ export function IssueRow({ issue, focused, selected, onClick }: IssueRowProps) {
       ) : null}
       <span className="flex-1 truncate text-sm">{issue.title}</span>
       <AICostBadge costUSD={issue.ai_cost_usd ?? 0} tokens={issue.ai_tokens ?? 0} />
+      <RelationSummary issueID={issue.id} />
       <div className="hidden gap-1 md:flex">
         {(issue.labels ?? []).slice(0, 2).map((l) => (
           <Badge key={l}>{l}</Badge>

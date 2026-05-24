@@ -57,3 +57,28 @@ export function useDeleteRelation(issueID: string) {
     onError: (err: Error) => toast(err.message, "error"),
   });
 }
+
+export function useBulkCreateRelations(issueID: string) {
+  const { workspaceId } = useWorkspace();
+  const qc = useQueryClient();
+  const toast = useUIStore((s) => s.toast);
+  return useMutation({
+    mutationFn: (vars: { targetIDs: string[]; type: RelationType }) =>
+      relationsApi.bulkCreate(workspaceId, issueID, vars.targetIDs, vars.type),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["relations", workspaceId, issueID] });
+      qc.invalidateQueries({ queryKey: ["issue", workspaceId, issueID] });
+      qc.invalidateQueries({ queryKey: ["issues"] });
+    },
+    onError: (err: Error) => toast(err.message, "error"),
+  });
+}
+
+export function useBlockingIssues(cycleID?: string) {
+  const { workspaceId } = useWorkspace();
+  return useQuery({
+    queryKey: ["blocking", workspaceId, cycleID ?? null],
+    queryFn: () => relationsApi.blocking(workspaceId, cycleID),
+    enabled: !!workspaceId,
+  });
+}

@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 import clsx from "clsx";
 import { StatusBadge } from "~/components/issue/StatusBadge";
 import { KanbanCard } from "./KanbanCard";
+import { BlockerAlert } from "./BlockerAlert";
 import type { Issue, IssueStatus } from "~/api/types";
 
 interface KanbanColumnProps {
@@ -56,6 +57,7 @@ export function KanbanColumn({
         // is rendered below.
         style={{ minHeight: 64 }}
       >
+        <BlockerAlert count={issues.filter((i) => i.is_blocked).length} />
         {issues.length === 0 ? (
           <div className="flex h-24 items-center justify-center rounded-md border border-dashed border-border text-[10px] text-muted">
             Drop issues here

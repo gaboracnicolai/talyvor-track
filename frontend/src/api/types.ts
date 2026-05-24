@@ -99,6 +99,18 @@ export interface DependencyGraph {
   edges: GraphEdge[];
 }
 
+export interface RelationStats {
+  total_relations: number;
+  blocking_chains: number;
+  blocked_issues: number;
+  duplicate_pairs: number;
+}
+
+export interface BlockingIssue extends Issue {
+  blocks_count: number;
+  blocked_issue_ids: string[];
+}
+
 // ─── Roadmap ────────────────────────────────────────────
 // Mirrors internal/project/roadmap.go.
 

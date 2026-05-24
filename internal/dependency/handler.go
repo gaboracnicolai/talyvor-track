@@ -18,9 +18,16 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Route("/workspaces/{wsID}/issues/{id}/relations", func(r chi.Router) {
 		r.Get("/", h.List)
 		r.Post("/", h.Create)
+		r.Post("/bulk", h.BulkCreate)
 		r.Delete("/", h.Delete)
 	})
 	r.Get("/workspaces/{wsID}/issues/{id}/dependency-graph", h.Graph)
+
+	// Workspace-level aggregations powering the sprint planner +
+	// the relations dashboard. Live alongside the per-issue routes
+	// so the URL hierarchy stays grouped under "relations".
+	r.Get("/workspaces/{wsID}/relations/stats", h.Stats)
+	r.Get("/workspaces/{wsID}/relations/blocking", h.Blocking)
 }
 
 type apiError struct {
@@ -105,4 +112,57 @@ func (h *Handler) Graph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, graph)
+}
+
+// ─── new endpoints ─────────────────────────────────────────
+
+func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
+	out, err := h.store.GetRelationStats(r.Context(), chi.URLParam(r, "wsID"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "STATS_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) Blocking(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "wsID")
+	var cycleID *string
+	if v := r.URL.Query().Get("cycle_id"); v != "" {
+		cycleID = &v
+	}
+	out, err := h.store.GetBlockingIssues(r.Context(), wsID, cycleID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "BLOCKING_FAILED", err.Error())
+		return
+	}
+	if out == nil {
+		out = []BlockingIssue{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "wsID")
+	sourceID := chi.URLParam(r, "id")
+	var in struct {
+		TargetIDs []string     `json:"target_ids"`
+		Type      RelationType `json:"type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+		return
+	}
+	count, err := h.store.BulkCreateRelations(r.Context(),
+		Relation{
+			SourceID: sourceID, WorkspaceID: wsID, Type: in.Type,
+			CreatedBy: r.Header.Get("X-Member-Id"),
+		},
+		in.TargetIDs,
+	)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BULK_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]int{"created": count})
 }

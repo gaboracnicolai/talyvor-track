@@ -31,6 +31,10 @@ export const KanbanCard = forwardRef<HTMLDivElement, KanbanCardProps>(
           // touch-none lets pointer events fire on mobile without the
           // browser interpreting the gesture as a scroll.
           "touch-none",
+          // Red left border calls out blocked cards at a glance —
+          // sprint planning's primary signal that this column has
+          // load it can't progress.
+          issue.is_blocked ? "border-l-2 border-l-priority-urgent" : "",
           dragging
             ? "cursor-grabbing border-accent opacity-50 shadow-lg"
             : "cursor-grab border-border hover:border-border/80 hover:shadow",
