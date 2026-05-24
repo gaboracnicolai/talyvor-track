@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { Dialog } from "~/components/ui/Dialog";
 import { Input } from "~/components/ui/Input";
 import { Button } from "~/components/ui/Button";
@@ -9,13 +10,17 @@ import { useWorkspace } from "~/hooks/useWorkspace";
 import { teamsApi } from "~/api/teams";
 import { useUIStore } from "~/stores/ui";
 import { CustomFieldEditor } from "./CustomFieldRow";
+import type { IssueTemplate } from "~/api/types";
 
 interface IssueCreateProps {
   open: boolean;
   onClose: () => void;
+  // Optional template pre-applied when the dialog opens. Cleared via
+  // the "X" affordance on the template badge.
+  initialTemplate?: IssueTemplate | null;
 }
 
-export function IssueCreate({ open, onClose }: IssueCreateProps) {
+export function IssueCreate({ open, onClose, initialTemplate }: IssueCreateProps) {
   const { workspaceId, memberId } = useWorkspace();
   const teams = useQuery({
     queryKey: ["teams", workspaceId],
@@ -26,14 +31,24 @@ export function IssueCreate({ open, onClose }: IssueCreateProps) {
   const [description, setDescription] = useState("");
   const [teamId, setTeamId] = useState<string>("");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [template, setTemplate] = useState<IssueTemplate | null>(initialTemplate ?? null);
   const toast = useUIStore((s) => s.toast);
   const createMutation = useCreateIssue();
 
+  // Re-seed form state whenever the dialog opens with a (different)
+  // initial template. The reset on `open` toggle is intentional —
+  // closing then re-opening with a new template should overwrite
+  // half-typed input rather than silently preserve it.
+  useEffect(() => {
+    if (!open) return;
+    setTemplate(initialTemplate ?? null);
+    setTitle(initialTemplate?.title_format ?? "");
+    setDescription(initialTemplate?.body ?? "");
+    setFieldValues({ ...(initialTemplate?.field_defaults ?? {}) });
+    // intentionally omit the team — let the user pick.
+  }, [open, initialTemplate]);
+
   const chosenTeam = teamId || teams.data?.[0]?.id || "";
-  // Render every required custom field in the dialog. Non-required
-  // fields stay on the IssueDetail page — the create form should be
-  // short by default and only grow for fields the workspace insists
-  // can't be omitted.
   const fields = useCustomFields(chosenTeam || undefined);
   const requiredFields = useMemo(
     () => (fields.data ?? []).filter((f) => f.required),
@@ -49,8 +64,6 @@ export function IssueCreate({ open, onClose }: IssueCreateProps) {
       toast("No team selected", "error");
       return;
     }
-    // Client-side guard: the backend re-validates, but a fast inline
-    // message saves a round-trip.
     for (const f of requiredFields) {
       const v = fieldValues[f.id];
       if (!v || !v.trim()) {
@@ -59,18 +72,31 @@ export function IssueCreate({ open, onClose }: IssueCreateProps) {
       }
     }
     try {
+      // The backend re-applies the template too (defence in depth);
+      // we still send field_values so the user's overrides are
+      // honoured even if the template changes between dialog open
+      // and submit.
       await createMutation.mutateAsync({
         title: title.trim(),
         description: description.trim(),
         team_id: chosenTeam,
         creator_id: memberId,
-        priority: 0,
-        status: "todo",
+        priority: (template?.default_priority ?? 0) as 0 | 1 | 2 | 3 | 4,
+        status: (template?.default_status ?? "todo") as
+          | "backlog"
+          | "todo"
+          | "in_progress"
+          | "in_review"
+          | "done"
+          | "cancelled",
+        labels: template?.default_labels,
         field_values: fieldValues,
+        template_id: template?.id,
       });
       setTitle("");
       setDescription("");
       setFieldValues({});
+      setTemplate(null);
       onClose();
     } catch {
       // toast is fired by the hook's onError
@@ -80,6 +106,7 @@ export function IssueCreate({ open, onClose }: IssueCreateProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()} title="New issue">
       <div className="space-y-3">
+        {template ? <TemplateBadge template={template} onClear={() => setTemplate(null)} /> : null}
         <Input
           autoFocus
           placeholder="Issue title"
@@ -140,5 +167,23 @@ export function IssueCreate({ open, onClose }: IssueCreateProps) {
         </div>
       </div>
     </Dialog>
+  );
+}
+
+function TemplateBadge({
+  template,
+  onClear,
+}: {
+  template: IssueTemplate;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-accent/40 bg-accent/5 px-2 py-1.5 text-xs">
+      <span className="text-base">{template.icon}</span>
+      <span className="font-medium">Using: {template.name}</span>
+      <button onClick={onClear} className="ml-auto text-muted hover:text-text" title="Clear template">
+        <X size={12} />
+      </button>
+    </div>
   );
 }

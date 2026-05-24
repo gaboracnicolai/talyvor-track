@@ -41,6 +41,7 @@ import (
 	"github.com/talyvor/track/internal/project"
 	"github.com/talyvor/track/internal/realtime"
 	"github.com/talyvor/track/internal/team"
+	"github.com/talyvor/track/internal/template"
 	"github.com/talyvor/track/internal/timetracking"
 	"github.com/talyvor/track/internal/workflow"
 	"github.com/talyvor/track/internal/workspace"
@@ -72,7 +73,11 @@ func main() {
 	notifier := realtime.NewNotifier(hub)
 
 	workflowEngine := workflow.New(pool)
-	workspaceStore := workspace.NewStore(pool)
+	templateStore := template.NewStore(pool)
+	// Workspace creation auto-seeds the default templates so new
+	// teams land into a workspace that already has Bug Report,
+	// Feature Request, etc. ready to go.
+	workspaceStore := workspace.NewStore(pool).WithTemplateSeeder(templateStore)
 	customFieldStore := customfield.NewStore(pool)
 	dependencyStore := dependency.NewStore(pool)
 	timeStore := timetracking.NewStore(pool)
@@ -91,10 +96,14 @@ func main() {
 	wsHandler := workspace.NewHandler(workspaceStore)
 	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
 	projectHandler := project.NewHandler(projectStore)
-	issueHandler := issue.NewHandler(issueStore).WithNotifier(notifier).WithCustomFields(customFieldStore)
+	issueHandler := issue.NewHandler(issueStore).
+		WithNotifier(notifier).
+		WithCustomFields(customFieldStore).
+		WithTemplates(templateStore)
 	customFieldHandler := customfield.NewHandler(customFieldStore)
 	dependencyHandler := dependency.NewHandler(dependencyStore)
 	timeHandler := timetracking.NewHandler(timeStore)
+	templateHandler := template.NewHandler(templateStore)
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycleStore)
@@ -196,6 +205,7 @@ func main() {
 		customFieldHandler.Mount(r)
 		dependencyHandler.Mount(r)
 		timeHandler.Mount(r)
+		templateHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see

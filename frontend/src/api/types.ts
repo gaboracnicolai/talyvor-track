@@ -46,6 +46,10 @@ export interface Issue {
   // Total tracked seconds across every time entry on the issue.
   // Populated by GetByID; omitted from list payloads.
   time_tracked_sec?: number;
+  // template_id is accepted only on Create; the backend reads it out
+  // of the request body and merges the template's defaults before
+  // the row is inserted. Never returned on reads.
+  template_id?: string;
 }
 
 // ─── Relations / dependencies ───────────────────────────
@@ -186,6 +190,27 @@ export interface WorkspaceTimeSummary {
   billable_sec: number;
   by_member: MemberTime[];
   by_project: ProjectTime[];
+}
+
+// ─── Issue templates ────────────────────────────────────
+// Mirrors internal/template/store.go.
+
+export interface IssueTemplate {
+  id: string;
+  workspace_id: string;
+  team_id?: string;
+  name: string;
+  description: string;
+  icon: string;
+  title_format: string;
+  body: string;
+  default_status: string;
+  default_priority: number;
+  default_labels: string[];
+  default_assignee?: string;
+  field_defaults: Record<string, string>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Team {

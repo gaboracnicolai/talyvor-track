@@ -44,12 +44,21 @@ type customFields interface {
 	SetValue(ctx context.Context, issueID, fieldID, value string) error
 }
 
+// templateApplier merges an IssueTemplate's defaults into an Issue.
+// The full interface only needs GetByID (lookup) and Apply
+// (mutation) — we keep ApplyTo on the template type itself so this
+// interface stays narrow.
+type templateApplier interface {
+	ApplyTemplate(ctx context.Context, templateID string, into *model.Issue) error
+}
+
 // Handler is the HTTP surface for /workspaces/{wsID}/issues/*.
 type Handler struct {
 	store        *Store
 	notifier     notifier
 	automation   automationFirer
 	customFields customFields
+	templates    templateApplier
 }
 
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
@@ -75,6 +84,14 @@ func (h *Handler) WithAutomation(a automationFirer) *Handler {
 // in the POST body's field_values map.
 func (h *Handler) WithCustomFields(c customFields) *Handler {
 	h.customFields = c
+	return h
+}
+
+// WithTemplates wires the template applier. When set, Create accepts
+// an optional template_id; missing templates fall back to a blank
+// issue silently rather than failing the request.
+func (h *Handler) WithTemplates(t templateApplier) *Handler {
+	h.templates = t
 	return h
 }
 
@@ -121,14 +138,34 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, apiError{Error: msg, Code: code})
 }
 
+// createBody mirrors model.Issue plus the optional template_id input
+// that's only meaningful at create time. Keeping it separate lets
+// the model stay focused on persisted shape.
+type createBody struct {
+	model.Issue
+	TemplateID string `json:"template_id,omitempty"`
+}
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "wsID")
-	var in model.Issue
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	var body createBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
+	in := body.Issue
 	in.WorkspaceID = wsID
+
+	// Apply the template's defaults before validation runs so any
+	// required custom-field values seeded by the template count
+	// toward the required-field check.
+	if body.TemplateID != "" && h.templates != nil {
+		if err := h.templates.ApplyTemplate(r.Context(), body.TemplateID, &in); err != nil {
+			// "Templates never block issue creation" — swallow the
+			// error and continue with whatever the caller provided.
+			_ = err
+		}
+	}
 
 	// Custom-field required-field validation runs before the issue is
 	// inserted so a missing value fails fast and doesn't leave half-

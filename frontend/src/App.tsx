@@ -7,6 +7,7 @@ import { IssuesPage } from "./pages/Issues";
 import { CyclesPage } from "./pages/Cycles";
 import { RoadmapPage } from "./pages/Roadmap";
 import { TimeReportPage } from "./pages/TimeReport";
+import { TemplatesPage } from "./pages/Templates";
 import { AnalyticsPage } from "./pages/Analytics";
 import { SettingsPage } from "./pages/Settings";
 import { useUIStore } from "./stores/ui";
@@ -22,6 +23,7 @@ export type Route =
   | "roadmap"
   | "time"
   | "analytics"
+  | "templates"
   | "settings";
 
 const titleByRoute: Record<Route, string> = {
@@ -30,6 +32,7 @@ const titleByRoute: Record<Route, string> = {
   roadmap: "Roadmap",
   time: "Time",
   analytics: "Analytics",
+  templates: "Templates",
   settings: "Settings",
 };
 
@@ -76,6 +79,7 @@ export function App() {
           {route === "cycles" && <CyclesPage />}
           {route === "roadmap" && <RoadmapPage />}
           {route === "time" && <TimeReportPage />}
+          {route === "templates" && <TemplatesPage />}
           {route === "analytics" && <AnalyticsPage />}
           {route === "settings" && <SettingsPage />}
         </main>

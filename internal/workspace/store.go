@@ -22,7 +22,18 @@ type pgxDB interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-type Store struct{ pool pgxDB }
+// templateSeeder is the subset of template.Store that workspace
+// calls on Create. The interface lives here so workspace doesn't
+// import the template package directly — keeps the package graph
+// one-way and the workspace tests free of template fixtures.
+type templateSeeder interface {
+	SeedDefaults(ctx context.Context, workspaceID string) error
+}
+
+type Store struct {
+	pool   pgxDB
+	seeder templateSeeder
+}
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	var db pgxDB
@@ -33,6 +44,14 @@ func NewStore(pool *pgxpool.Pool) *Store {
 }
 
 func newStore(db pgxDB) *Store { return &Store{pool: db} }
+
+// WithTemplateSeeder wires the template store so workspace creation
+// auto-seeds the canonical Bug / Feature / Tech-Debt / Incident /
+// Task templates. Optional — without it, workspaces start empty.
+func (s *Store) WithTemplateSeeder(t templateSeeder) *Store {
+	s.seeder = t
+	return s
+}
 
 const workspaceColumns = `id, name, slug, logo_url, plan, created_at, updated_at`
 
@@ -51,11 +70,21 @@ func (s *Store) Create(ctx context.Context, ws model.Workspace) (*model.Workspac
 	if ws.Plan == "" {
 		ws.Plan = "free"
 	}
-	return scanWorkspace(s.pool.QueryRow(ctx,
+	out, err := scanWorkspace(s.pool.QueryRow(ctx,
 		`INSERT INTO workspaces (name, slug, logo_url, plan)
         VALUES ($1, $2, $3, $4) RETURNING `+workspaceColumns,
 		ws.Name, ws.Slug, ws.LogoURL, ws.Plan,
 	))
+	if err != nil {
+		return nil, err
+	}
+	// Best-effort template seed. A failure here never blocks workspace
+	// creation — at worst the user opens an empty Templates page and
+	// can re-trigger the seed manually.
+	if s.seeder != nil {
+		_ = s.seeder.SeedDefaults(ctx, out.ID)
+	}
+	return out, nil
 }
 
 func (s *Store) GetByID(ctx context.Context, id string) (*model.Workspace, error) {

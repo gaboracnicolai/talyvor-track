@@ -5,7 +5,9 @@ import { useUIStore } from "~/stores/ui";
 import { IssueList } from "~/components/issue/IssueList";
 import { IssueDetail } from "~/components/issue/IssueDetail";
 import { IssueCreate } from "~/components/issue/IssueCreate";
+import { TemplateSelector } from "~/components/issue/TemplateSelector";
 import { KanbanBoard } from "./KanbanBoard";
+import type { IssueTemplate } from "~/api/types";
 
 interface IssuesPageProps {
   createOpen: boolean;
@@ -28,10 +30,30 @@ export function IssuesPage({ createOpen, setCreateOpen }: IssuesPageProps) {
   const selectedId = useUIStore((s) => s.selectedIssueId);
   const setSelectedId = useUIStore((s) => s.setSelectedIssueId);
   const [view, setView] = useState<IssuesView>(readStoredView);
+  // The template selector intercepts the Header / Kanban "New" button.
+  // When the user picks (or skips) the picker flips the create dialog
+  // open with whatever template they chose.
+  const [pickedTemplate, setPickedTemplate] = useState<IssueTemplate | null>(null);
+  const [showCreateAfterPick, setShowCreateAfterPick] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(viewStorageKey, view);
   }, [view]);
+
+  // Sync external `createOpen` (from Header) to selector flow: when
+  // the parent flips it true we *show the selector first*, not the
+  // create dialog.
+  useEffect(() => {
+    if (createOpen) {
+      setShowCreateAfterPick(false);
+    }
+  }, [createOpen]);
+
+  const closeAll = () => {
+    setCreateOpen(false);
+    setShowCreateAfterPick(false);
+    setPickedTemplate(null);
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -42,7 +64,22 @@ export function IssuesPage({ createOpen, setCreateOpen }: IssuesPageProps) {
         <KanbanBoard onCreate={() => setCreateOpen(true)} />
       )}
       <IssueDetail issueId={selectedId} onClose={() => setSelectedId(null)} />
-      <IssueCreate open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      {/* Stage 1: template picker. Stage 2: create dialog with the
+          chosen template. Both modals close cleanly via closeAll(). */}
+      <TemplateSelector
+        open={createOpen && !showCreateAfterPick}
+        onClose={closeAll}
+        onPick={(template) => {
+          setPickedTemplate(template);
+          setShowCreateAfterPick(true);
+        }}
+      />
+      <IssueCreate
+        open={createOpen && showCreateAfterPick}
+        onClose={closeAll}
+        initialTemplate={pickedTemplate}
+      />
     </div>
   );
 }
