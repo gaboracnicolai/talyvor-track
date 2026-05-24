@@ -213,6 +213,46 @@ export interface IssueTemplate {
   updated_at: string;
 }
 
+// ─── Guests ─────────────────────────────────────────────
+// Mirrors internal/guest/store.go.
+
+export type GuestRole = "viewer" | "commenter" | "editor";
+
+export interface GuestRecord {
+  id: string;
+  workspace_id: string;
+  project_id?: string;
+  email: string;
+  name: string;
+  role: GuestRole;
+  active: boolean;
+  created_at: string;
+  last_seen_at?: string;
+}
+
+export interface InviteDetail {
+  workspace_id: string;
+  project_id?: string;
+  email: string;
+  role: GuestRole;
+  expires_at: string;
+  invited_by: string;
+}
+
+export interface InviteCreateResponse {
+  invite_url: string;
+  expires_at: string;
+  role: GuestRole;
+}
+
+export interface AcceptInviteResponse {
+  guest_id: string;
+  workspace_id: string;
+  project_id?: string;
+  role: GuestRole;
+  access_token: string;
+}
+
 export interface Team {
   id: string;
   workspace_id: string;

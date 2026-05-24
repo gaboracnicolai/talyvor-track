@@ -29,6 +29,7 @@ import (
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/dependency"
+	"github.com/talyvor/track/internal/guest"
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
@@ -104,6 +105,12 @@ func main() {
 	dependencyHandler := dependency.NewHandler(dependencyStore)
 	timeHandler := timetracking.NewHandler(timeStore)
 	templateHandler := template.NewHandler(templateStore)
+	// Guest store: invite + accept lives here; the access tokens are
+	// stateless HMAC-signed. GUEST_SECRET seeds the HMAC key; empty
+	// generates a per-process random key (fine for dev, never prod).
+	guestStore := guest.NewStore(pool, os.Getenv("TRACK_GUEST_SECRET"))
+	guestHandler := guest.NewHandler(guestStore, issueStore,
+		os.Getenv("TRACK_INVITE_BASE_URL"))
 	workflowHandler := workflow.NewHandler(workflowEngine)
 	labelHandler := label.NewHandler(label.NewStore(pool))
 	cycleHandler := cycle.NewHandler(cycleStore)
@@ -206,6 +213,7 @@ func main() {
 		dependencyHandler.Mount(r)
 		timeHandler.Mount(r)
 		templateHandler.Mount(r)
+		guestHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see
