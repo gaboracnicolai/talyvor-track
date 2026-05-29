@@ -29,6 +29,7 @@ import (
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/dependency"
+	"github.com/talyvor/track/internal/email"
 	"github.com/talyvor/track/internal/featureboard"
 	"github.com/talyvor/track/internal/guest"
 	"github.com/talyvor/track/internal/importer"
@@ -98,6 +99,30 @@ func main() {
 	cycleStore := cycle.NewStore(pool)
 	notificationStore := notification.NewStore(pool)
 
+	// Email notifications (Upgrade: Email Notifications). Strictly opt-in via
+	// EMAIL_ENABLED; when disabled, emailDispatcher stays nil and no email
+	// logic is wired into the handlers, so Track behaves exactly as before.
+	// Delivery is async + best-effort and never blocks or fails a request.
+	var (
+		emailQueue      *email.Queue
+		emailDispatcher *notification.Dispatcher
+	)
+	if emailCfg := email.LoadConfig(); emailCfg.Enabled {
+		renderer, rerr := email.NewRenderer()
+		if rerr != nil {
+			// A template error must not take Track down — log and leave email off.
+			slog.Error("email disabled: renderer init failed", slog.String("err", rerr.Error()))
+		} else {
+			emailQueue = email.NewQueue(email.NewSender(emailCfg, logger), email.QueueOptions{Workers: 4}, logger)
+			emailQueue.Start(ctx)
+			emailDispatcher = notification.NewDispatcher(
+				pool, notification.NewPreferenceStore(pool), emailQueue, renderer,
+				cfg.AppBaseURL, "Talyvor Track", logger,
+			)
+			slog.Info("email notifications enabled", slog.String("from", emailCfg.From))
+		}
+	}
+
 	wsHandler := workspace.NewHandler(workspaceStore)
 	teamHandler := team.NewHandler(team.NewStore(pool)).WithSeeder(workflowEngine)
 	projectHandler := project.NewHandler(projectStore)
@@ -125,6 +150,14 @@ func main() {
 	cycleHandler := cycle.NewHandler(cycleStore)
 	milestoneHandler := milestone.NewHandler(milestone.NewStore(pool))
 	notificationHandler := notification.NewHandler(notificationStore)
+
+	// Wire email hooks only when a dispatcher exists. Guarded so we never pass
+	// a typed-nil into the handler's interface field (which would make the
+	// nil-check pass and then panic on call).
+	if emailDispatcher != nil {
+		issueHandler.WithEmailer(emailDispatcher)
+		cycleHandler.WithEmailer(emailDispatcher)
+	}
 
 	// Lens integration: read side (client + AI cost endpoints), sync
 	// loop (15-minute interval), and webhook receiver. Lens config is
@@ -272,6 +305,14 @@ func main() {
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", slog.String("err", err.Error()))
+	}
+
+	// Drain any queued emails so an in-flight notification isn't lost on a
+	// clean shutdown. Bounded so a stuck SMTP server can't hang exit.
+	if emailQueue != nil {
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		emailQueue.Shutdown(drainCtx)
+		drainCancel()
 	}
 }
 

@@ -1,0 +1,71 @@
+{{define "issue.assigned"}}{{.Heading}}
+
+You've been assigned {{.IssueKey}}{{if .Title}} — {{.Title}}{{end}}.
+{{range .Lines}}
+{{.}}{{end}}
+{{if .CTAURL}}
+{{.CTALabel}}: {{.CTAURL}}{{end}}
+
+—
+Manage your email preferences: {{.PreferencesURL}}
+{{end}}
+
+{{define "issue.mentioned"}}{{.Heading}}
+
+You were mentioned on {{.IssueKey}}{{if .Title}} — {{.Title}}{{end}}.
+{{range .Lines}}
+{{.}}{{end}}
+{{if .CTAURL}}
+{{.CTALabel}}: {{.CTAURL}}{{end}}
+
+—
+Manage your email preferences: {{.PreferencesURL}}
+{{end}}
+
+{{define "issue.commented"}}{{.Heading}}
+
+New comment on {{.IssueKey}}{{if .Title}} — {{.Title}}{{end}}.
+{{range .Lines}}
+{{.}}{{end}}
+{{if .CTAURL}}
+{{.CTALabel}}: {{.CTAURL}}{{end}}
+
+—
+Manage your email preferences: {{.PreferencesURL}}
+{{end}}
+
+{{define "issue.status_changed"}}{{.Heading}}
+
+Status updated on {{.IssueKey}}{{if .Title}} — {{.Title}}{{end}}.
+{{range .Lines}}
+{{.}}{{end}}
+{{if .CTAURL}}
+{{.CTALabel}}: {{.CTAURL}}{{end}}
+
+—
+Manage your email preferences: {{.PreferencesURL}}
+{{end}}
+
+{{define "sprint.started"}}{{.Heading}}
+
+The sprint "{{.Title}}" has started.
+{{range .Lines}}
+{{.}}{{end}}
+{{if .CTAURL}}
+{{.CTALabel}}: {{.CTAURL}}{{end}}
+
+—
+Manage your email preferences: {{.PreferencesURL}}
+{{end}}
+
+{{define "sprint.ended"}}{{.Heading}}
+
+The sprint "{{.Title}}" has ended.
+{{range .Lines}}
+{{.}}{{end}}
+{{if .CTAURL}}
+{{.CTALabel}}: {{.CTAURL}}{{end}}
+
+—
+Manage your email preferences: {{.PreferencesURL}}
+{{end}}

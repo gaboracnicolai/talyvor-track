@@ -1,0 +1,29 @@
+{{define "issue.assigned"}}
+<p style="margin:0 0 12px;">You've been assigned <strong>{{.IssueKey}}</strong>{{if .Title}} — {{.Title}}{{end}}.</p>
+{{range .Lines}}<p style="margin:0 0 8px;color:#5c6370;">{{.}}</p>{{end}}
+{{end}}
+
+{{define "issue.mentioned"}}
+<p style="margin:0 0 12px;">You were mentioned on <strong>{{.IssueKey}}</strong>{{if .Title}} — {{.Title}}{{end}}.</p>
+{{range .Lines}}<p style="margin:0 0 8px;color:#5c6370;">{{.}}</p>{{end}}
+{{end}}
+
+{{define "issue.commented"}}
+<p style="margin:0 0 12px;">New comment on <strong>{{.IssueKey}}</strong>{{if .Title}} — {{.Title}}{{end}}.</p>
+{{range .Lines}}<p style="margin:0 0 8px;color:#5c6370;">{{.}}</p>{{end}}
+{{end}}
+
+{{define "issue.status_changed"}}
+<p style="margin:0 0 12px;">Status updated on <strong>{{.IssueKey}}</strong>{{if .Title}} — {{.Title}}{{end}}.</p>
+{{range .Lines}}<p style="margin:0 0 8px;color:#5c6370;">{{.}}</p>{{end}}
+{{end}}
+
+{{define "sprint.started"}}
+<p style="margin:0 0 12px;">The sprint <strong>{{.Title}}</strong> has started.</p>
+{{range .Lines}}<p style="margin:0 0 8px;color:#5c6370;">{{.}}</p>{{end}}
+{{end}}
+
+{{define "sprint.ended"}}
+<p style="margin:0 0 12px;">The sprint <strong>{{.Title}}</strong> has ended.</p>
+{{range .Lines}}<p style="margin:0 0 8px;color:#5c6370;">{{.}}</p>{{end}}
+{{end}}

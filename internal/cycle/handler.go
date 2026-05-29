@@ -1,6 +1,7 @@
 package cycle
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -9,9 +10,27 @@ import (
 	"github.com/talyvor/track/internal/model"
 )
 
-type Handler struct{ store *Store }
+// emailer is the subset of the notification dispatcher the cycle handler calls.
+// Local interface so the cycle package stays free of a notification import;
+// email is optional and opt-in. Calls are best-effort and never fail the request.
+type emailer interface {
+	SprintStarted(ctx context.Context, cycle model.Cycle, actorID string)
+	SprintEnded(ctx context.Context, cycle model.Cycle, actorID string)
+}
+
+type Handler struct {
+	store   *Store
+	emailer emailer
+}
 
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
+
+// WithEmailer wires the email dispatcher. Optional/opt-in: without it, cycle
+// behaviour is unchanged.
+func (h *Handler) WithEmailer(e emailer) *Handler {
+	h.emailer = e
+	return h
+}
 
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/workspaces/{wsID}/teams/{teamID}/cycles", func(r chi.Router) {
@@ -52,6 +71,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return
 	}
+	// Track has no separate cycle-activation flow today (Create defaults to
+	// "upcoming"; PATCH is 501), so a "sprint started" can only be observed
+	// when a cycle is created already-active. When an activation flow is added,
+	// it should call SprintStarted too.
+	if h.emailer != nil && out.Status == "active" {
+		h.emailer.SprintStarted(r.Context(), *out, r.Header.Get("X-Member-Id"))
+	}
 	writeJSON(w, http.StatusCreated, out)
 }
 
@@ -88,9 +114,19 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.Complete(r.Context(), chi.URLParam(r, "id")); err != nil {
+	id := chi.URLParam(r, "id")
+	// Load before completing so the email can carry the sprint's name (Complete
+	// only takes an ID). Best-effort: a load failure just means no email.
+	var cyc *model.Cycle
+	if h.emailer != nil {
+		cyc, _ = h.store.GetByID(r.Context(), id)
+	}
+	if err := h.store.Complete(r.Context(), id); err != nil {
 		writeErr(w, http.StatusInternalServerError, "COMPLETE_FAILED", err.Error())
 		return
+	}
+	if h.emailer != nil && cyc != nil {
+		h.emailer.SprintEnded(r.Context(), *cyc, r.Header.Get("X-Member-Id"))
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

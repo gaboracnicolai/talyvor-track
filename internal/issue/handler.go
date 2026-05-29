@@ -52,6 +52,17 @@ type templateApplier interface {
 	ApplyTemplate(ctx context.Context, templateID string, into *model.Issue) error
 }
 
+// emailer is the subset of the notification dispatcher the issue handler
+// calls. Defined locally so the issue package doesn't import notification —
+// email stays an optional, opt-in dependency. All calls are best-effort and
+// must never block or fail the request (the dispatcher swallows its own
+// errors).
+type emailer interface {
+	IssueCreated(ctx context.Context, issue model.Issue, actorID string)
+	IssueUpdated(ctx context.Context, issue model.Issue, updates map[string]any, actorID string)
+	IssueCommented(ctx context.Context, issueID string, comment model.Comment, actorID string)
+}
+
 // Handler is the HTTP surface for /workspaces/{wsID}/issues/*.
 type Handler struct {
 	store        *Store
@@ -59,9 +70,18 @@ type Handler struct {
 	automation   automationFirer
 	customFields customFields
 	templates    templateApplier
+	emailer      emailer
 }
 
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
+
+// WithEmailer wires the email notification dispatcher. Optional and opt-in:
+// without it (the default, and whenever EMAIL_ENABLED=false) no email logic
+// runs and behaviour is unchanged. Hooks fire AFTER the store write commits.
+func (h *Handler) WithEmailer(e emailer) *Handler {
+	h.emailer = e
+	return h
+}
 
 // WithNotifier wires the realtime notifier so every successful issue
 // or comment mutation fans out over WebSockets. Optional — without
@@ -213,6 +233,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.automation != nil {
 		_ = h.automation.Fire(r.Context(), "issue.created", out.WorkspaceID, *out, nil)
 	}
+	if h.emailer != nil {
+		// Actor is the creator; self-assignment / self-mention are excluded
+		// inside the dispatcher.
+		h.emailer.IssueCreated(r.Context(), *out, out.CreatorID)
+	}
 	writeJSON(w, http.StatusCreated, out)
 }
 
@@ -302,6 +327,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			_ = h.automation.Fire(r.Context(), "assignee.changed", out.WorkspaceID, *out, updates)
 		}
 	}
+	if h.emailer != nil {
+		h.emailer.IssueUpdated(r.Context(), *out, updates, r.Header.Get("X-Member-Id"))
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -343,6 +371,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.notifier != nil {
 		h.notifier.CommentCreated(r.Context(), chi.URLParam(r, "wsID"), issueID, out.AuthorID, *out)
+	}
+	if h.emailer != nil {
+		h.emailer.IssueCommented(r.Context(), issueID, *out, out.AuthorID)
 	}
 	writeJSON(w, http.StatusCreated, out)
 }
