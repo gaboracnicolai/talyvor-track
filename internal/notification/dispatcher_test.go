@@ -177,6 +177,41 @@ func TestDispatcher_MentionEmailsResolvedUser(t *testing.T) {
 	}
 }
 
+// TestDispatcher_SkipsRecipientsWithoutResolvedAddress is an anti-enumeration
+// guard: recipients are addressed only by the address the directory resolves
+// for their member ID. A member that the directory does not return (no row),
+// or one with an empty email, is dropped — the dispatcher never invents or
+// forwards an address, so notifications can only ever reach real account
+// addresses, never an attacker-supplied one.
+func TestDispatcher_SkipsRecipientsWithoutResolvedAddress(t *testing.T) {
+	dir := &fakeDir{members: map[string]model.Member{
+		// "ghost" deliberately absent from the directory (no member row).
+		"noaddr":   mem("noaddr", ""), // present but no email on file
+		"realuser": mem("realuser", "real@x.z"),
+	}}
+	d, q := newTestDispatcher(t, dir, fakePrefs{})
+
+	assignee := "realuser"
+	issue := model.Issue{
+		ID: "i1", Identifier: "ENG-9", Title: "x",
+		CreatorID: "ghost", AssigneeID: &assignee, WorkspaceID: "ws",
+	}
+	// status change notifies creator ("ghost", unresolved) + participants.
+	d.notifyStatusChanged(context.Background(), issueRefOf(issue), "done", "someoneelse")
+
+	for _, m := range q.msgs {
+		for _, to := range m.To {
+			if to == "" {
+				t.Fatalf("dispatched a message with an empty recipient address: %+v", m)
+			}
+		}
+	}
+	// "ghost" (no row) and "noaddr" (empty email) must never be addressed.
+	if q.recipients()[""] {
+		t.Fatal("empty address must never be enqueued")
+	}
+}
+
 func TestDispatcher_SprintStartedEmailsMembersNotActor(t *testing.T) {
 	dir := &fakeDir{
 		members: map[string]model.Member{"a": mem("a", "a@x.z"), "b": mem("b", "b@x.z")},

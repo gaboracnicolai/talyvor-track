@@ -65,3 +65,26 @@ func TestRenderer_EscapesUserSuppliedContent(t *testing.T) {
 		t.Error("user-supplied Title must be HTML-escaped in the email body")
 	}
 }
+
+// TestRenderer_EscapesUserSuppliedLines pins escaping of the most adversarial
+// vector: comment bodies, which the dispatcher passes through as Lines. The
+// HTML body must escape markup; the plain-text body keeps it verbatim (plain
+// text is never interpreted as HTML, so it is not an injection sink).
+func TestRenderer_EscapesUserSuppliedLines(t *testing.T) {
+	r, _ := NewRenderer()
+	d := sampleData()
+	d.Lines = []string{`<img src=x onerror="alert(document.cookie)">`}
+	html, text, err := r.Render(EventIssueCommented, d)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(html, "<img src=x onerror=") {
+		t.Errorf("comment body must be HTML-escaped in the email body:\n%s", html)
+	}
+	if !strings.Contains(html, "&lt;img") {
+		t.Errorf("expected the escaped entity form in HTML body:\n%s", html)
+	}
+	if !strings.Contains(text, `<img src=x onerror="alert(document.cookie)">`) {
+		t.Errorf("plain-text body should carry the raw comment verbatim:\n%s", text)
+	}
+}

@@ -66,6 +66,60 @@ func TestSMTPSender_SendInvokesTransportWithRecipientsAndMIME(t *testing.T) {
 	}
 }
 
+// TestBuildMIME_StripsHeaderInjectionFromSubject is an adversarial-sweep test:
+// the Subject is built from user-controlled data (issue titles, sprint names),
+// so a CRLF in that data must not be able to inject extra SMTP headers (Bcc,
+// fake bodies, …). The header block is everything before the first blank line.
+func TestBuildMIME_StripsHeaderInjectionFromSubject(t *testing.T) {
+	s := &SMTPSender{from: "noreply@track.example", fromName: "Track"}
+	msg := Message{
+		To:       []string{"alice@example.com"},
+		Subject:  "ENG-1 assigned\r\nBcc: attacker@evil.example\r\nX-Injected: yes",
+		TextBody: "body", HTMLBody: "<p>body</p>",
+	}
+	raw := string(s.buildMIME(msg))
+
+	// Header injection means a new header LINE: assert no header line starts
+	// with the smuggled header names. The collapsed text may still contain the
+	// substring "Bcc:" inside the Subject value, which is harmless.
+	for _, line := range headerLines(raw) {
+		if strings.HasPrefix(line, "Bcc:") || strings.HasPrefix(line, "X-Injected") {
+			t.Errorf("Subject header injection not neutralized — smuggled header line %q present\n%s", line, raw)
+		}
+	}
+	if !strings.Contains(raw, "Subject: ENG-1 assigned") {
+		t.Errorf("sanitized subject text should still be present:\n%s", raw)
+	}
+}
+
+// headerLines returns the CRLF-split lines of the header block (everything
+// before the first blank line).
+func headerLines(raw string) []string {
+	block := raw
+	if i := strings.Index(raw, "\r\n\r\n"); i >= 0 {
+		block = raw[:i]
+	}
+	return strings.Split(block, "\r\n")
+}
+
+// TestBuildMIME_StripsHeaderInjectionFromRecipient is defense-in-depth: even
+// though recipient addresses are resolved server-side (never user-supplied per
+// send), a CRLF in an address must never break out of the To header.
+func TestBuildMIME_StripsHeaderInjectionFromRecipient(t *testing.T) {
+	s := &SMTPSender{from: "noreply@track.example", fromName: "Track"}
+	msg := Message{
+		To:       []string{"alice@example.com\r\nBcc: attacker@evil.example"},
+		Subject:  "hi",
+		TextBody: "body", HTMLBody: "<p>body</p>",
+	}
+	raw := string(s.buildMIME(msg))
+	for _, line := range headerLines(raw) {
+		if strings.HasPrefix(line, "Bcc:") {
+			t.Errorf("recipient header injection not neutralized — smuggled header line %q present\n%s", line, raw)
+		}
+	}
+}
+
 func TestSMTPSender_SendNoRecipientsIsNoop(t *testing.T) {
 	called := false
 	s := &SMTPSender{host: "h", port: "25", from: "f@x.z",
