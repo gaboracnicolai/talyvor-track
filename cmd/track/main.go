@@ -106,6 +106,7 @@ func main() {
 	var (
 		emailQueue      *email.Queue
 		emailDispatcher *notification.Dispatcher
+		emailDeadLetter *notification.DeadLetterStore
 	)
 	if emailCfg := email.LoadConfig(); emailCfg.Enabled {
 		renderer, rerr := email.NewRenderer()
@@ -113,7 +114,12 @@ func main() {
 			// A template error must not take Track down — log and leave email off.
 			slog.Error("email disabled: renderer init failed", slog.String("err", rerr.Error()))
 		} else {
-			emailQueue = email.NewQueue(email.NewSender(emailCfg, logger), email.QueueOptions{Workers: 4}, logger)
+			// Dead-letter sink: messages that exhaust all retry attempts are
+			// recorded durably (and surfaced via the admin list) rather than
+			// silently dropped.
+			emailDeadLetter = notification.NewDeadLetterStore(pool)
+			emailQueue = email.NewQueue(email.NewSender(emailCfg, logger), email.QueueOptions{Workers: 4}, logger).
+				WithDeadLetter(emailDeadLetter)
 			emailQueue.Start(ctx)
 			emailDispatcher = notification.NewDispatcher(
 				pool, notification.NewPreferenceStore(pool), emailQueue, renderer,
@@ -150,6 +156,10 @@ func main() {
 	cycleHandler := cycle.NewHandler(cycleStore)
 	milestoneHandler := milestone.NewHandler(milestone.NewStore(pool))
 	notificationHandler := notification.NewHandler(notificationStore)
+	// Expose the email dead-letter admin list only when email is enabled.
+	if emailDeadLetter != nil {
+		notificationHandler.WithDeadLetters(emailDeadLetter)
+	}
 
 	// Wire email hooks only when a dispatcher exists. Guarded so we never pass
 	// a typed-nil into the handler's interface field (which would make the
