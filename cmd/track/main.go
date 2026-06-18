@@ -10,16 +10,19 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/talyvor/track/internal/ai"
 	"github.com/talyvor/track/internal/analytics"
@@ -37,6 +40,7 @@ import (
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/mcp"
 	"github.com/talyvor/track/internal/metrics"
+	"github.com/talyvor/track/internal/migrate"
 	"github.com/talyvor/track/internal/milestone"
 	"github.com/talyvor/track/internal/model"
 	"github.com/talyvor/track/internal/notification"
@@ -48,11 +52,77 @@ import (
 	"github.com/talyvor/track/internal/timetracking"
 	"github.com/talyvor/track/internal/workflow"
 	"github.com/talyvor/track/internal/workspace"
+	"github.com/talyvor/track/migrations"
 )
+
+// runMigrate is the `track migrate <up|status>` subcommand: it applies or reports
+// schema migrations against TRACK_DATABASE_URL and exits. It uses a SINGLE
+// connection (not the pool) so the advisory lock that serializes concurrent
+// runners lives on one session.
+func runMigrate(args []string) {
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+	}
+	dsn := os.Getenv("TRACK_DATABASE_URL")
+	if dsn == "" {
+		fmt.Fprintln(os.Stderr, "track migrate: TRACK_DATABASE_URL is required")
+		os.Exit(2)
+	}
+	migs, err := migrate.Load(migrations.FS)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "track migrate:", err)
+		os.Exit(1)
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "track migrate: connect:", err)
+		os.Exit(1)
+	}
+	defer conn.Close(ctx)
+
+	switch cmd {
+	case "up":
+		applied, err := migrate.Up(ctx, conn, migs)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "track migrate up:", err)
+			os.Exit(1)
+		}
+		if len(applied) == 0 {
+			fmt.Println("migrate up: already up to date (0 applied)")
+		} else {
+			fmt.Printf("migrate up: applied %d migration(s): %s\n", len(applied), strings.Join(applied, ", "))
+		}
+	case "status":
+		st, err := migrate.StatusOf(ctx, conn, migs)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "track migrate status:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("migrate status: %d applied, %d pending\n", len(st.Applied), len(st.Pending))
+		for _, m := range st.Applied {
+			fmt.Printf("  [x] %s\n", m.Name)
+		}
+		for _, m := range st.Pending {
+			fmt.Printf("  [ ] %s\n", m.Name)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "usage: track migrate <up|status>")
+		os.Exit(2)
+	}
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	// Subcommand: `track migrate up|status` runs the schema migrator and exits.
+	// With no subcommand, track runs the API server (the default).
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrate(os.Args[2:])
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
