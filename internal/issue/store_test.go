@@ -49,7 +49,7 @@ func TestCreate_InsertsWithAutoNumberAndIdentifier(t *testing.T) {
 
 	// 1) Look up the team identifier so we can format ENG-N.
 	pool.ExpectQuery(`SELECT identifier FROM teams WHERE id`).
-		WithArgs("team-1").
+		WithArgs("team-1", "ws-1").
 		WillReturnRows(pgxmock.NewRows([]string{"identifier"}).AddRow("ENG"))
 
 	// 2) Pick the next number for this team — current max is 41.
@@ -250,7 +250,7 @@ func TestDelete_SetsStatusToCancelled(t *testing.T) {
 func TestCreate_PropagatesTeamNotFound(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`SELECT identifier FROM teams WHERE id`).
-		WithArgs("team-missing").
+		WithArgs("team-missing", "ws-1").
 		WillReturnError(errors.New("no rows in result set"))
 
 	_, err := store.Create(context.Background(), model.Issue{

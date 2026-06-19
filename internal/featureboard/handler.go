@@ -116,7 +116,7 @@ func (h *Handler) AdminUpdatePost(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	if err := h.store.UpdateStatus(r.Context(), chi.URLParam(r, "postID"), in.Status, in.IssueID); err != nil {
+	if err := h.store.UpdateStatus(r.Context(), chi.URLParam(r, "wsID"), chi.URLParam(r, "boardID"), chi.URLParam(r, "postID"), in.Status, in.IssueID); err != nil {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
 	}
@@ -146,6 +146,12 @@ func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "POST_NOT_FOUND", err.Error())
 		return
 	}
+	// Object-graph integrity: only convert a post that belongs to this workspace —
+	// don't copy a cross-workspace post's content into a new issue here.
+	if post.WorkspaceID != wsID {
+		writeErr(w, http.StatusNotFound, "POST_NOT_FOUND", "post not found in workspace")
+		return
+	}
 	if h.issues == nil {
 		writeErr(w, http.StatusInternalServerError, "ISSUES_UNAVAILABLE",
 			"issue store not wired")
@@ -165,7 +171,7 @@ func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
 	}
 	// Link the post back to the new issue and bump status to planned
 	// so the public board reflects "we're going to build it".
-	if err := h.store.UpdateStatus(r.Context(), postID, PostStatusPlanned, &created.ID); err != nil {
+	if err := h.store.UpdateStatus(r.Context(), wsID, chi.URLParam(r, "boardID"), postID, PostStatusPlanned, &created.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "LINK_FAILED", err.Error())
 		return
 	}

@@ -250,10 +250,13 @@ func TestListPosts_StatusFilter(t *testing.T) {
 
 func TestUpdateStatus_LinksIssue(t *testing.T) {
 	store, pool := newMockStore(t)
+	pool.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM issues`).
+		WithArgs("i-99", "ws").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectExec(`UPDATE feature_posts SET status`).
-		WithArgs("planned", ptr("i-99"), "p-1").
+		WithArgs("planned", ptr("i-99"), "p-1", "ws", "board").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-	if err := store.UpdateStatus(context.Background(), "p-1", PostStatusPlanned, ptr("i-99")); err != nil {
+	if err := store.UpdateStatus(context.Background(), "ws", "board", "p-1", PostStatusPlanned, ptr("i-99")); err != nil {
 		t.Fatalf("UpdateStatus: %v", err)
 	}
 }

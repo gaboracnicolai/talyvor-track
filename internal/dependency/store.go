@@ -141,6 +141,26 @@ const relationColumns = `id, source_id, target_id, type, workspace_id, created_b
 // row. The inverse uses ON CONFLICT DO NOTHING so an existing inverse
 // (from an earlier create that crashed mid-way) is a no-op instead
 // of a hard failure.
+// assertIssuesShareWorkspace refuses unless both issues exist and share a workspace.
+// Object-graph integrity: a relation must never link issues across a workspace
+// boundary. EXISTS returns a plain bool (false if either issue is missing or they
+// differ), so there is no nullable-scan ambiguity.
+func (s *Store) assertIssuesShareWorkspace(ctx context.Context, aID, bID string) error {
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+            SELECT 1 FROM issues a JOIN issues b ON a.workspace_id = b.workspace_id
+            WHERE a.id = $1 AND b.id = $2)`,
+		aID, bID,
+	).Scan(&ok); err != nil {
+		return fmt.Errorf("dependency: workspace check: %w", err)
+	}
+	if !ok {
+		return errors.New("dependency: source and target issues are in different workspaces (or missing)")
+	}
+	return nil
+}
+
 func (s *Store) Create(ctx context.Context, r Relation) (*Relation, error) {
 	if s.pool == nil {
 		return nil, errors.New("dependency: store has no pool")
@@ -167,6 +187,10 @@ func (s *Store) Create(ctx context.Context, r Relation) (*Relation, error) {
 	}
 	if count > 0 {
 		return nil, fmt.Errorf("dependency: relation already exists")
+	}
+
+	if err := s.assertIssuesShareWorkspace(ctx, r.SourceID, r.TargetID); err != nil {
+		return nil, err
 	}
 
 	row, err := scanRelation(s.pool.QueryRow(ctx,
@@ -351,10 +375,11 @@ func (s *Store) GetBlockedBy(ctx context.Context, issueID string) ([]model.Issue
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+issueColumnsForRelations+`
+		`SELECT `+relationIssueCols+`
         FROM issue_relations r JOIN issues i ON i.id = r.source_id
         WHERE r.target_id = $1 AND r.type = 'blocks'
-          AND i.status NOT IN ('done', 'cancelled')`,
+          AND i.status NOT IN ('done', 'cancelled')
+          AND i.workspace_id = (SELECT workspace_id FROM issues WHERE id = $1)`,
 		issueID,
 	)
 	if err != nil {
@@ -403,7 +428,8 @@ func (s *Store) IsBlocked(ctx context.Context, issueID string) (bool, error) {
 	err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM issue_relations r JOIN issues i ON i.id = r.source_id
         WHERE r.target_id = $1 AND r.type = 'blocks'
-          AND i.status NOT IN ('done', 'cancelled')`,
+          AND i.status NOT IN ('done', 'cancelled')
+          AND i.workspace_id = (SELECT workspace_id FROM issues WHERE id = $1)`,
 		issueID,
 	).Scan(&count)
 	if err != nil {
@@ -686,6 +712,24 @@ func (s *Store) BulkCreateRelations(ctx context.Context, rel Relation, targets [
 		if t == rel.SourceID {
 			return 0, errors.New("dependency: targets list contains source — self-relations rejected")
 		}
+	}
+
+	// Object-graph integrity: every target must share the source issue's workspace.
+	// A missing source (NULL subquery) or any cross-workspace/absent target counts
+	// as "bad" and refuses the whole batch.
+	var badTargets int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM UNNEST($1::text[]) AS t
+        WHERE NOT EXISTS (
+            SELECT 1 FROM issues i
+            WHERE i.id = t
+              AND i.workspace_id = (SELECT workspace_id FROM issues WHERE id = $2))`,
+		targets, rel.SourceID,
+	).Scan(&badTargets); err != nil {
+		return 0, fmt.Errorf("dependency: bulk workspace check: %w", err)
+	}
+	if badTargets > 0 {
+		return 0, errors.New("dependency: one or more targets are in a different workspace or do not exist")
 	}
 
 	tag, err := s.pool.Exec(ctx,
