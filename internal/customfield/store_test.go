@@ -278,6 +278,9 @@ func TestSetValue_AcceptsValidSelectOption(t *testing.T) {
 			"id", "workspace_id", "team_id", "name", "type", "options", "required", "position", "created_at",
 		}).AddRow("f-sel", "ws-1", (*string)(nil), "Stage", "select",
 			[]string{"discovery", "evaluation"}, false, 0, time.Now()))
+	pool.ExpectQuery(`SELECT workspace_id FROM issues`).
+		WithArgs("i-1").
+		WillReturnRows(pgxmock.NewRows([]string{"workspace_id"}).AddRow("ws-1"))
 	pool.ExpectExec(`INSERT INTO issue_field_values`).
 		WithArgs("i-1", "f-sel", "evaluation").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
@@ -347,6 +350,9 @@ func TestSetValue_UpsertsCorrectly(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "workspace_id", "team_id", "name", "type", "options", "required", "position", "created_at",
 		}).AddRow("f-txt", "ws-1", (*string)(nil), "Customer", "text", []string{}, false, 0, time.Now()))
+	pool.ExpectQuery(`SELECT workspace_id FROM issues`).
+		WithArgs("i-1").
+		WillReturnRows(pgxmock.NewRows([]string{"workspace_id"}).AddRow("ws-1"))
 	// ON CONFLICT update path means the UPSERT runs even when a row
 	// already exists; the test only needs to verify the query fires
 	// with the right args.

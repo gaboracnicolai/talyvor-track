@@ -148,6 +148,11 @@ func TestVote_IncrementsAndDedupes(t *testing.T) {
 	store, pool := newMockStore(t)
 	// INSERT vote, then refresh count via UPDATE … RETURNING. Wrap
 	// in a transaction so the dedupe + count stay consistent.
+	// Object-graph guard runs first (post belongs to the published board),
+	// then INSERT vote + refresh count in a transaction.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("p-1", "feedback", "acme").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectBegin()
 	pool.ExpectExec(`INSERT INTO feature_votes`).
 		WithArgs("p-1", "alice@example.com").
@@ -157,7 +162,7 @@ func TestVote_IncrementsAndDedupes(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"vote_count"}).AddRow(int64(1)))
 	pool.ExpectCommit()
 
-	count, err := store.Vote(context.Background(), "p-1", "alice@example.com")
+	count, err := store.Vote(context.Background(), "acme", "feedback", "p-1", "alice@example.com")
 	if err != nil {
 		t.Fatalf("Vote: %v", err)
 	}
@@ -168,6 +173,9 @@ func TestVote_IncrementsAndDedupes(t *testing.T) {
 
 func TestUnvote_Decrements(t *testing.T) {
 	store, pool := newMockStore(t)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("p-1", "feedback", "acme").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectBegin()
 	pool.ExpectExec(`DELETE FROM feature_votes`).
 		WithArgs("p-1", "alice@example.com").
@@ -177,7 +185,7 @@ func TestUnvote_Decrements(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"vote_count"}).AddRow(int64(0)))
 	pool.ExpectCommit()
 
-	count, err := store.Unvote(context.Background(), "p-1", "alice@example.com")
+	count, err := store.Unvote(context.Background(), "acme", "feedback", "p-1", "alice@example.com")
 	if err != nil {
 		t.Fatalf("Unvote: %v", err)
 	}

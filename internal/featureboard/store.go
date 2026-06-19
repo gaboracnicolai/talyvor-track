@@ -389,15 +389,40 @@ func (s *Store) GetPost(ctx context.Context, postID string) (*FeaturePost, error
 
 // ─── Vote / Unvote ─────────────────────────────────────────
 
+// assertPostOnPublicBoard enforces object-graph integrity for the public vote
+// path: the post must belong to a PUBLIC board whose workspace-slug and board-slug
+// match the ones in the request URL. Without it, Vote/Unvote mutate any post by
+// bare ID — including posts on unpublished boards or under a different board.
+func (s *Store) assertPostOnPublicBoard(ctx context.Context, wsSlug, boardSlug, postID string) error {
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+            SELECT 1 FROM feature_posts p
+            JOIN feature_boards b ON b.id = p.board_id
+            JOIN workspaces w ON w.id = b.workspace_id
+            WHERE p.id = $1 AND b.slug = $2 AND w.slug = $3 AND b.public = true)`,
+		postID, boardSlug, wsSlug,
+	).Scan(&ok); err != nil {
+		return fmt.Errorf("featureboard: board check: %w", err)
+	}
+	if !ok {
+		return errors.New("featureboard: post does not belong to the published board in the URL")
+	}
+	return nil
+}
+
 // Vote inserts the (post, email) record and re-syncs vote_count. The
 // dedupe + count refresh sit inside one transaction so concurrent
 // votes can't double-count or under-count.
-func (s *Store) Vote(ctx context.Context, postID, email string) (int, error) {
+func (s *Store) Vote(ctx context.Context, wsSlug, boardSlug, postID, email string) (int, error) {
 	if s.pool == nil {
 		return 0, errors.New("featureboard: store has no pool")
 	}
 	if postID == "" || email == "" {
 		return 0, errors.New("featureboard: post_id and email required")
+	}
+	if err := s.assertPostOnPublicBoard(ctx, wsSlug, boardSlug, postID); err != nil {
+		return 0, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -432,12 +457,15 @@ func (s *Store) Vote(ctx context.Context, postID, email string) (int, error) {
 
 // Unvote removes the vote and re-syncs vote_count. Same transaction
 // shape as Vote so the count is always consistent.
-func (s *Store) Unvote(ctx context.Context, postID, email string) (int, error) {
+func (s *Store) Unvote(ctx context.Context, wsSlug, boardSlug, postID, email string) (int, error) {
 	if s.pool == nil {
 		return 0, errors.New("featureboard: store has no pool")
 	}
 	if postID == "" || email == "" {
 		return 0, errors.New("featureboard: post_id and email required")
+	}
+	if err := s.assertPostOnPublicBoard(ctx, wsSlug, boardSlug, postID); err != nil {
+		return 0, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
