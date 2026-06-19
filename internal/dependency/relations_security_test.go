@@ -32,12 +32,15 @@ func TestGetRelations_ObjectGraph_NoCrossWorkspaceContentLeak(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create same-workspace relation: %v", err)
 	}
-	// Cross-workspace relation A -> B (the leak vector).
-	if _, err := dep.Create(ctx, dependency.Relation{
-		SourceID: issueA.ID, TargetID: issueB.ID, Type: dependency.RelationRelates,
-		WorkspaceID: wsA.ID, CreatedBy: "u",
-	}); err != nil {
-		t.Fatalf("create cross-workspace relation: %v", err)
+	// Cross-workspace relation A -> B, inserted RAW: Create now refuses one (the #1
+	// write-side fix), so this models pre-existing/legacy data. The read path must
+	// still not leak the foreign issue's content.
+	if _, err := d.Pool.Exec(ctx,
+		`INSERT INTO issue_relations (source_id, target_id, type, workspace_id, created_by)
+         VALUES ($1, $2, 'relates_to', $3, 'u')`,
+		issueA.ID, issueB.ID, wsA.ID,
+	); err != nil {
+		t.Fatalf("seed raw cross-workspace relation: %v", err)
 	}
 
 	rels, err := dep.GetRelations(ctx, issueA.ID)

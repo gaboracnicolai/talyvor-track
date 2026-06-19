@@ -29,6 +29,10 @@ func TestCreate_BlocksCreatesInverseBlockedBy(t *testing.T) {
 	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM issue_relations`).
 		WithArgs("a", "b", "blocks").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	// Same-workspace guard: both issues resolve to the same workspace.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("a", "b").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	// Forward insert.
 	pool.ExpectQuery(`INSERT INTO issue_relations`).
 		WithArgs("a", "b", "blocks", "ws", "user-1").
@@ -59,6 +63,9 @@ func TestCreate_DuplicatesCreatesInverseDuplicates(t *testing.T) {
 	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM issue_relations`).
 		WithArgs("a", "b", "duplicates").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("a", "b").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_relations`).
 		WithArgs("a", "b", "duplicates", "ws", "").
 		WillReturnRows(pgxmock.NewRows([]string{
@@ -82,6 +89,9 @@ func TestCreate_RelatesToHasNoInverse(t *testing.T) {
 	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM issue_relations`).
 		WithArgs("a", "b", "relates_to").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("a", "b").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_relations`).
 		WithArgs("a", "b", "relates_to", "ws", "").
 		WillReturnRows(pgxmock.NewRows([]string{
@@ -439,6 +449,9 @@ func TestBulkCreateRelations_SkipsDuplicates(t *testing.T) {
 	// Three target IDs. INSERT with ON CONFLICT DO NOTHING returns
 	// 2 inserted (one was a duplicate); the store reads the row
 	// count via tag.RowsAffected().
+	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM UNNEST`).
+		WithArgs([]string{"t-1", "t-2", "t-3"}, "src").
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	pool.ExpectExec(`INSERT INTO issue_relations`).
 		WithArgs("src", []string{"t-1", "t-2", "t-3"}, "ws", "relates_to", "agent").
 		WillReturnResult(pgxmock.NewResult("INSERT", 2))

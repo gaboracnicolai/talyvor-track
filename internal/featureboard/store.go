@@ -520,20 +520,38 @@ func (s *Store) HasVoted(ctx context.Context, postID, email string) (bool, error
 // when callers explicitly pass nil — that matches the spec's "link
 // is optional" intent (the handler always provides one when the
 // admin form submits an issue choice).
-func (s *Store) UpdateStatus(ctx context.Context, postID string, status PostStatus, issueID *string) error {
+func (s *Store) UpdateStatus(ctx context.Context, wsID, boardID, postID string, status PostStatus, issueID *string) error {
 	if s.pool == nil {
 		return errors.New("featureboard: store has no pool")
 	}
 	if _, ok := validStatuses[status]; !ok {
 		return fmt.Errorf("featureboard: invalid status %q", status)
 	}
-	_, err := s.pool.Exec(ctx,
+	// Object-graph integrity: a linked issue must share the post's workspace.
+	if issueID != nil && *issueID != "" {
+		var ok bool
+		if err := s.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
+			*issueID, wsID,
+		).Scan(&ok); err != nil {
+			return fmt.Errorf("featureboard: validate linked issue: %w", err)
+		}
+		if !ok {
+			return errors.New("featureboard: linked issue is in a different workspace")
+		}
+	}
+	// Scope the mutation to the post's own board + workspace; a post that doesn't
+	// belong there is refused (0 rows affected).
+	tag, err := s.pool.Exec(ctx,
 		`UPDATE feature_posts SET status = $1, issue_id = $2, updated_at = NOW()
-        WHERE id = $3`,
-		string(status), issueID, postID,
+        WHERE id = $3 AND workspace_id = $4 AND board_id = $5`,
+		string(status), issueID, postID, wsID, boardID,
 	)
 	if err != nil {
 		return fmt.Errorf("featureboard: update status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("featureboard: post not found on the expected board/workspace")
 	}
 	return nil
 }

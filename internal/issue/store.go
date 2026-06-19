@@ -194,10 +194,25 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 
 	var teamIdentifier string
 	if err := s.pool.QueryRow(ctx,
-		`SELECT identifier FROM teams WHERE id = $1`,
-		issue.TeamID,
+		`SELECT identifier FROM teams WHERE id = $1 AND workspace_id = $2`,
+		issue.TeamID, issue.WorkspaceID,
 	).Scan(&teamIdentifier); err != nil {
-		return nil, fmt.Errorf("issue: lookup team identifier: %w", err)
+		return nil, fmt.Errorf("issue: team not found in workspace: %w", err)
+	}
+
+	// Object-graph integrity: optional cross-object refs must be in this workspace.
+	for field, p := range map[string]*string{
+		"project_id":  issue.ProjectID,
+		"cycle_id":    issue.CycleID,
+		"assignee_id": issue.AssigneeID,
+		"parent_id":   issue.ParentID,
+	} {
+		if p == nil || *p == "" {
+			continue
+		}
+		if err := s.assertRefInWorkspace(ctx, issueRefQueries[field], field, *p, issue.WorkspaceID); err != nil {
+			return nil, err
+		}
 	}
 
 	var nextNumber int
@@ -458,6 +473,61 @@ var updatableFields = map[string]struct{}{
 // row. Status transitions to "done" stamp completed_at; transitions
 // away from "done" clear it — both happen server-side so the API
 // caller never has to set completed_at by hand.
+// issueRefQueries maps a settable cross-object reference to a FIXED EXISTS query
+// confirming the referenced object lives in a given workspace. The queries are
+// literals (no dynamic table name), so there is no injection surface. team_id is
+// validated separately, folded into Create's existing identifier lookup.
+var issueRefQueries = map[string]string{
+	"assignee_id": `SELECT EXISTS(SELECT 1 FROM members WHERE id = $1 AND workspace_id = $2)`,
+	"project_id":  `SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2)`,
+	"cycle_id":    `SELECT EXISTS(SELECT 1 FROM cycles WHERE id = $1 AND workspace_id = $2)`,
+	"parent_id":   `SELECT EXISTS(SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
+}
+
+// assertRefInWorkspace refuses unless refID exists in workspaceID. query is a fixed
+// literal supplied by the caller (issueRefQueries).
+func (s *Store) assertRefInWorkspace(ctx context.Context, query, field, refID, workspaceID string) error {
+	var ok bool
+	if err := s.pool.QueryRow(ctx, query, refID, workspaceID).Scan(&ok); err != nil {
+		return fmt.Errorf("issue: validate %s: %w", field, err)
+	}
+	if !ok {
+		return fmt.Errorf("issue: %s references an object outside the issue's workspace", field)
+	}
+	return nil
+}
+
+// validateRefWorkspaces checks every settable cross-object reference in updates
+// against the issue's own workspace. Object-graph integrity: you can't give an issue
+// a parent / cycle / project / assignee from another workspace. The workspace is
+// looked up only when at least one reference is actually being set, so status-only
+// (and other ref-free) updates pay nothing.
+func (s *Store) validateRefWorkspaces(ctx context.Context, issueID string, updates map[string]any) error {
+	pending := map[string]string{}
+	for field := range issueRefQueries {
+		raw, ok := updates[field]
+		if !ok || raw == nil {
+			continue
+		}
+		if id, ok := raw.(string); ok && id != "" {
+			pending[field] = id
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	var ws string
+	if err := s.pool.QueryRow(ctx, `SELECT workspace_id FROM issues WHERE id = $1`, issueID).Scan(&ws); err != nil {
+		return fmt.Errorf("issue: lookup workspace: %w", err)
+	}
+	for field, refID := range pending {
+		if err := s.assertRefInWorkspace(ctx, issueRefQueries[field], field, refID, ws); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error) {
 	if len(updates) == 0 {
 		return s.GetByID(ctx, id)
@@ -472,6 +542,10 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 				updates["completed_at"] = nil
 			}
 		}
+	}
+
+	if err := s.validateRefWorkspaces(ctx, id, updates); err != nil {
+		return nil, err
 	}
 
 	var (
