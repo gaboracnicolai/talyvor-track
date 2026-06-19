@@ -459,8 +459,8 @@ func (s *Store) GetDependencyGraph(ctx context.Context, workspaceID, rootIssueID
 	// Start with the root.
 	var root GraphNode
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, identifier, title, status, workspace_id FROM issues WHERE id = $1`,
-		rootIssueID,
+		`SELECT id, identifier, title, status, workspace_id FROM issues WHERE id = $1 AND workspace_id = $2`,
+		rootIssueID, workspaceID,
 	).Scan(&root.ID, &root.Identifier, &root.Title, &root.Status, new(string))
 	if err != nil {
 		return nil, fmt.Errorf("dependency: graph root: %w", err)
@@ -517,8 +517,11 @@ func (s *Store) GetDependencyGraph(ctx context.Context, workspaceID, rootIssueID
 		// Deterministic order so the query plan + tests stay stable.
 		sort.Strings(nodeIDs)
 		rows, err := s.pool.Query(ctx,
-			`SELECT id, identifier, title, status FROM issues WHERE id = ANY($1)`,
-			nodeIDs,
+			// Scope the node-metadata fetch to the queried workspace so a foreign
+			// issue reached via a raw/legacy cross-workspace relation can't surface
+			// its content here.
+			`SELECT id, identifier, title, status FROM issues WHERE id = ANY($1) AND workspace_id = $2`,
+			nodeIDs, workspaceID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("dependency: graph nodes: %w", err)

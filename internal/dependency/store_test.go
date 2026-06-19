@@ -300,7 +300,7 @@ func TestGetDependencyGraph_ReturnsConnectedNodesAndEdges(t *testing.T) {
 
 	// Root issue lookup (1 query).
 	pool.ExpectQuery(`SELECT id, identifier, title, status, workspace_id FROM issues WHERE id`).
-		WithArgs("root").
+		WithArgs("root", "ws").
 		WillReturnRows(pgxmock.NewRows([]string{"id", "identifier", "title", "status", "workspace_id"}).
 			AddRow("root", "TEAM-1", "Root issue", "todo", "ws"))
 
@@ -313,7 +313,7 @@ func TestGetDependencyGraph_ReturnsConnectedNodesAndEdges(t *testing.T) {
 
 	// Fetch nodes for child-1, child-2.
 	pool.ExpectQuery(`SELECT id, identifier, title, status FROM issues WHERE id = ANY`).
-		WithArgs([]string{"child-1", "child-2"}).
+		WithArgs([]string{"child-1", "child-2"}, "ws").
 		WillReturnRows(pgxmock.NewRows([]string{"id", "identifier", "title", "status"}).
 			AddRow("child-1", "TEAM-2", "Child 1", "in_progress").
 			AddRow("child-2", "TEAM-3", "Child 2", "done"))
