@@ -8,6 +8,27 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      # pgvector image because migration 0007 needs the `vector` extension
+      # (plain postgres lacks it); uuid-ossp + pg_trgm ship with it too.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: track
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Admin DSN for the real-Postgres migrate tests; each creates + drops its
+      # own isolated database (extensions are database-scoped, so per-DB not
+      # per-schema). Other packages use pgxmock and ignore this.
+      TRACK_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,6 +39,15 @@ jobs:
           cache: true
       - name: go vet
         run: go vet ./...
+      # Prove the runner applies the real schema cleanly against real Postgres.
+      - name: track migrate up (real Postgres)
+        run: go run ./cmd/track migrate up
+        env:
+          TRACK_DATABASE_URL: postgres://postgres:postgres@localhost:5432/track?sslmode=disable
+      - name: track migrate status
+        run: go run ./cmd/track migrate status
+        env:
+          TRACK_DATABASE_URL: postgres://postgres:postgres@localhost:5432/track?sslmode=disable
       - name: go test
         run: go test -timeout 120s -race -count=1 ./...
 
