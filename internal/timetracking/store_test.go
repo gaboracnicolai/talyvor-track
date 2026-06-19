@@ -33,6 +33,10 @@ func entryRows() *pgxmock.Rows {
 func TestStartTimer_CreatesRunningEntry(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
+	// Object-graph guard: the issue belongs to the workspace.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectBegin()
 	// Stop any running timer for this member (no-op if none).
 	pool.ExpectExec(`UPDATE time_entries SET stopped_at`).
@@ -59,6 +63,9 @@ func TestStartTimer_CreatesRunningEntry(t *testing.T) {
 func TestStartTimer_StopsPreviousRunningTimer(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-2", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectBegin()
 	// The "stop previous" UPDATE returns RowsAffected=1 — the
 	// previous running timer was closed atomically.
@@ -170,6 +177,9 @@ func TestLogTime_CreatesManualEntry(t *testing.T) {
 	stop := now
 	// 30 min = 1800 sec; the store computes duration from the
 	// timestamps so the caller doesn't have to.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO time_entries`).
 		WithArgs("i-1", "ws-1", "m-1", "did a thing",
 			start, ptrTime(stop), 1800, true).

@@ -115,12 +115,32 @@ func scanEntry(s interface{ Scan(...any) error }) (*TimeEntry, error) {
 // closes any pre-existing running entry. Wrapped in a transaction so
 // the "only one running timer per member" invariant holds even if a
 // caller races a stop + start.
+// assertIssueInWorkspace refuses unless issueID belongs to workspaceID. Object-graph
+// integrity: a time entry must reference an issue in its own workspace — the FKs
+// prove issue/workspace exist independently, not that they belong together.
+func (s *Store) assertIssueInWorkspace(ctx context.Context, issueID, workspaceID string) error {
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
+		issueID, workspaceID,
+	).Scan(&ok); err != nil {
+		return fmt.Errorf("timetracking: validate issue: %w", err)
+	}
+	if !ok {
+		return errors.New("timetracking: issue is not in this workspace")
+	}
+	return nil
+}
+
 func (s *Store) StartTimer(ctx context.Context, issueID, workspaceID, memberID, description string) (*TimeEntry, error) {
 	if s.pool == nil {
 		return nil, errors.New("timetracking: store has no pool")
 	}
 	if issueID == "" || memberID == "" || workspaceID == "" {
 		return nil, errors.New("timetracking: issue_id, workspace_id, member_id required")
+	}
+	if err := s.assertIssueInWorkspace(ctx, issueID, workspaceID); err != nil {
+		return nil, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -233,6 +253,9 @@ func (s *Store) LogTime(ctx context.Context, e TimeEntry) (*TimeEntry, error) {
 	duration := int(e.StoppedAt.Sub(e.StartedAt).Seconds())
 	if duration < 0 {
 		return nil, errors.New("timetracking: stopped_at must be after started_at")
+	}
+	if err := s.assertIssueInWorkspace(ctx, e.IssueID, e.WorkspaceID); err != nil {
+		return nil, err
 	}
 	return scanEntry(s.pool.QueryRow(ctx,
 		`INSERT INTO time_entries (issue_id, workspace_id, member_id, description,
