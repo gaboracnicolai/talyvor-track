@@ -289,7 +289,7 @@ func (h *Handler) PublicVote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	count, err := h.store.Vote(r.Context(), postID, in.Email)
+	count, err := h.store.Vote(r.Context(), chi.URLParam(r, "wsSlug"), chi.URLParam(r, "boardSlug"), postID, in.Email)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "VOTE_FAILED", err.Error())
 		return
@@ -309,7 +309,7 @@ func (h *Handler) PublicUnvote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	count, err := h.store.Unvote(r.Context(), postID, in.Email)
+	count, err := h.store.Unvote(r.Context(), chi.URLParam(r, "wsSlug"), chi.URLParam(r, "boardSlug"), postID, in.Email)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "UNVOTE_FAILED", err.Error())
 		return

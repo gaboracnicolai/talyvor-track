@@ -295,6 +295,16 @@ func (s *Store) SetValue(ctx context.Context, issueID, fieldID, value string) er
 	if err := validateValue(field, value); err != nil {
 		return err
 	}
+	// Object-graph integrity: the field and the target issue must belong to the
+	// same workspace — a field from one workspace must not be settable on another
+	// workspace's issue by bare ID.
+	var issueWS string
+	if err := s.pool.QueryRow(ctx, `SELECT workspace_id FROM issues WHERE id = $1`, issueID).Scan(&issueWS); err != nil {
+		return fmt.Errorf("customfield: lookup issue: %w", err)
+	}
+	if issueWS != field.WorkspaceID {
+		return errors.New("customfield: field and issue belong to different workspaces")
+	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO issue_field_values (issue_id, field_id, value)
         VALUES ($1, $2, $3)

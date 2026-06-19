@@ -247,6 +247,19 @@ const issueColumnsForRelations = `id, workspace_id, team_id, project_id, number,
     lens_feature, ai_cost_usd, ai_tokens,
     labels, sort_order, created_at, updated_at`
 
+// relationIssueCols qualifies every issueColumnsForRelations column with the "i."
+// alias. The previous inline ReplaceAll only prefixed the first column on each
+// line, leaving `workspace_id` unqualified — ambiguous against
+// issue_relations.workspace_id on real Postgres (SQLSTATE 42702). The pgxmock store
+// tests never exercised real SQL, so the crash hid until the integration harness.
+var relationIssueCols = func() string {
+	parts := strings.Split(issueColumnsForRelations, ",")
+	for i, p := range parts {
+		parts[i] = "i." + strings.TrimSpace(p)
+	}
+	return strings.Join(parts, ", ")
+}()
+
 // GetRelations returns all relations connected to issueID, presented
 // from issueID's perspective. Outgoing rows (source=issueID) are
 // returned as-is; incoming rows (target=issueID) are returned with
@@ -266,11 +279,15 @@ func (s *Store) GetRelations(ctx context.Context, issueID string) ([]RelationWit
 		`SELECT
             r.id, r.source_id, r.target_id, r.type, r.workspace_id, r.created_by, r.created_at,
             (r.source_id = $1) AS is_source,
-            i.`+strings.ReplaceAll(issueColumnsForRelations, ",\n    ", ", i.")+`
+            `+relationIssueCols+`
         FROM issue_relations r JOIN issues i ON i.id = CASE
             WHEN r.source_id = $1 THEN r.target_id
             ELSE r.source_id
         END
+        -- Object-graph integrity: only surface a related issue that shares the
+        -- caller issue's workspace, so a cross-workspace relation can't leak the
+        -- foreign issue's content.
+        AND i.workspace_id = (SELECT workspace_id FROM issues WHERE id = $1)
         WHERE r.source_id = $1 OR r.target_id = $1
         ORDER BY r.created_at ASC`,
 		issueID,
