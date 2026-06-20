@@ -91,6 +91,7 @@ type pgxDB interface {
 // Local interface keeps tests cheap (no pgxmock for the full store).
 type issueUpdater interface {
 	Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error)
+	Create(ctx context.Context, issue model.Issue) (*model.Issue, error)
 	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
 }
 
@@ -374,14 +375,27 @@ func (e *Engine) executeAction(ctx context.Context, action RuleAction, data map[
 		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"cycle_id": data["cycle_id"]})
 		return err
 	case ActionCreateIssue:
-		// Child issue creation: handled by adding a comment that
-		// links to the parent. Full child-issue creation requires
-		// the issue.Store's Create method which has additional
-		// dependencies; Phase 7 can promote this to a full create.
-		_, err := e.issues.CreateComment(ctx, model.Comment{
-			IssueID:  issue.ID,
-			AuthorID: "automation",
-			Body:     "Automation requested child issue: " + data["title"],
+		// Create a real child issue linked to the triggering issue. Attribution: the
+		// rule carries no creator, so the child inherits the parent issue's creator_id
+		// — the closest attributable human (creator_id is NOT NULL and not
+		// FK-constrained). Falls back to the "automation" sentinel only if the parent
+		// somehow has no creator.
+		title := data["title"]
+		if title == "" {
+			return errors.New("create_issue: action_data.title required")
+		}
+		creator := issue.CreatorID
+		if creator == "" {
+			creator = "automation"
+		}
+		parentID := issue.ID
+		_, err := e.issues.Create(ctx, model.Issue{
+			WorkspaceID: issue.WorkspaceID,
+			TeamID:      issue.TeamID,
+			Title:       title,
+			CreatorID:   creator,
+			ParentID:    &parentID,
+			Status:      model.StatusBacklog,
 		})
 		return err
 	case ActionNotifySlack:
