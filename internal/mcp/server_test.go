@@ -598,8 +598,8 @@ func TestMCP_TriageIssue_AppliesSuggestions(t *testing.T) {
 	if avail, _ := data["ai_available"].(bool); !avail {
 		t.Errorf("ai_available = %v, want true", data["ai_available"])
 	}
-	if int(gotUpdates["priority"].(int)) != int(model.PriorityHigh) {
-		// JSON path: priority may be int64/int — handle both.
+	if got := gotUpdates["priority"].(int); got != int(model.PriorityHigh) {
+		t.Errorf("priority = %d, want %d", got, int(model.PriorityHigh))
 	}
 	if gotUpdates["priority"] == nil || gotUpdates["labels"] == nil {
 		t.Errorf("apply=true should have set priority + labels, got %v", gotUpdates)
