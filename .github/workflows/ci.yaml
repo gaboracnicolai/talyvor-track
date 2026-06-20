@@ -6,6 +6,24 @@ on:
     branches: [main]
 
 jobs:
+  # Regression lock for the object-graph cross-object tenancy class: fails the build
+  # when a store inserts a cross-object *_id reference alongside workspace_id without
+  # routing it through tenancy.AssertRefInWorkspace. See .semgrep/cross-object-tenancy.yml
+  # and internal/tenancy/closure_test.go.
+  tenancy-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Object-graph cross-object tenancy regression lock
+        run: |
+          python -m pip install --quiet semgrep
+          semgrep scan --config .semgrep/ --error --metrics=off internal/
+
   test:
     runs-on: ubuntu-latest
     services:

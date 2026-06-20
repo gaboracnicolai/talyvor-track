@@ -26,6 +26,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // ─── public types ───────────────────────────────────────────
@@ -85,7 +87,7 @@ type AcceptResult struct {
 // Exported accessors so callers outside the package can read the
 // fields without us widening the AcceptResult struct (tests use the
 // unexported names directly).
-func (a *AcceptResult) Guest() *Guest      { return a.guest }
+func (a *AcceptResult) Guest() *Guest       { return a.guest }
 func (a *AcceptResult) AccessToken() string { return a.accessToken }
 
 // GuestClaims is the wire shape of the signed access token's
@@ -188,8 +190,8 @@ const inviteColumns = `id, workspace_id, project_id, email, role,
 
 func scanInvite(s interface{ Scan(...any) error }) (*GuestInvite, error) {
 	var (
-		i        GuestInvite
-		roleStr  string
+		i       GuestInvite
+		roleStr string
 	)
 	if err := s.Scan(
 		&i.ID, &i.WorkspaceID, &i.ProjectID, &i.Email, &roleStr,
@@ -245,6 +247,12 @@ func (s *Store) CreateInvite(ctx context.Context, workspaceID string, projectID 
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	expires := time.Now().UTC().Add(inviteTTL)
 
+	if projectID != nil && *projectID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "projects", *projectID, workspaceID); err != nil {
+			return nil, err
+		}
+	}
+
 	return scanInvite(s.pool.QueryRow(ctx,
 		`INSERT INTO guest_invites (workspace_id, project_id, email, role, token, expires_at, invited_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+inviteColumns,
@@ -293,6 +301,12 @@ func (s *Store) AcceptInvite(ctx context.Context, token, name string) (*AcceptRe
 	}
 	if time.Now().UTC().After(invite.ExpiresAt) {
 		return nil, errors.New("guest: invite expired")
+	}
+
+	if invite.ProjectID != nil && *invite.ProjectID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "projects", *invite.ProjectID, invite.WorkspaceID); err != nil {
+			return nil, err
+		}
 	}
 
 	g, err := scanGuest(s.pool.QueryRow(ctx,

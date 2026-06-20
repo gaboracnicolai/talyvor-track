@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/talyvor/track/internal/model"
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 type RuleTrigger string
@@ -145,10 +146,10 @@ func (e *Engine) LoadRules(ctx context.Context, workspaceID string) error {
 	var loaded []Rule
 	for rows.Next() {
 		var (
-			r              Rule
-			conditionsRaw  []byte
-			actionsStr     []string
-			actionDataRaw  []byte
+			r             Rule
+			conditionsRaw []byte
+			actionsStr    []string
+			actionDataRaw []byte
 		)
 		if err := rows.Scan(&r.ID, &r.WorkspaceID, &r.TeamID, &r.Name, &r.Enabled,
 			&r.Trigger, &conditionsRaw, &actionsStr, &actionDataRaw, &r.CreatedAt); err != nil {
@@ -192,6 +193,15 @@ func (e *Engine) AddRule(ctx context.Context, rule Rule) (*Rule, error) {
 	}
 
 	if e.pool != nil {
+		// Cross-object tenancy: a rule's team must live in the rule's own
+		// workspace. TeamID is required above, but the empty guard keeps
+		// this consistent with the other cross-object sites.
+		if rule.TeamID != "" {
+			if err := tenancy.AssertRefInWorkspace(ctx, e.pool, "teams", rule.TeamID, rule.WorkspaceID); err != nil {
+				return nil, err
+			}
+		}
+
 		conditionsJSON, _ := json.Marshal(rule.Conditions)
 		actionDataJSON, _ := json.Marshal(rule.ActionData)
 		actionsStr := make([]string, len(rule.Actions))

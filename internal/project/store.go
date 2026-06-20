@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/talyvor/track/internal/model"
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 type pgxDB interface {
@@ -52,6 +53,11 @@ func (s *Store) Create(ctx context.Context, p model.Project) (*model.Project, er
 	}
 	if p.Status == "" {
 		p.Status = "active"
+	}
+	if p.TeamID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", p.TeamID, p.WorkspaceID); err != nil {
+			return nil, err
+		}
 	}
 	return scanProject(s.pool.QueryRow(ctx,
 		`INSERT INTO projects (workspace_id, team_id, name, identifier, description, status,

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/talyvor/track/internal/model"
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // ─── types ──────────────────────────────────────────────────
@@ -109,8 +110,8 @@ const templateColumns = `id, workspace_id, team_id, name, description, icon,
 
 func scanTemplate(s interface{ Scan(...any) error }) (*IssueTemplate, error) {
 	var (
-		t       IssueTemplate
-		raw     []byte
+		t   IssueTemplate
+		raw []byte
 	)
 	if err := s.Scan(
 		&t.ID, &t.WorkspaceID, &t.TeamID, &t.Name, &t.Description, &t.Icon,
@@ -156,6 +157,15 @@ func (s *Store) Create(ctx context.Context, t IssueTemplate) (*IssueTemplate, er
 	}
 	if t.FieldDefaults == nil {
 		t.FieldDefaults = map[string]string{}
+	}
+
+	// Cross-object tenancy: a team-scoped template must reference a team in
+	// its own workspace. Workspace-wide templates (nil/empty team_id) skip
+	// the guard — there is no reference to validate.
+	if t.TeamID != nil && *t.TeamID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", *t.TeamID, t.WorkspaceID); err != nil {
+			return nil, err
+		}
 	}
 
 	defaults, err := json.Marshal(t.FieldDefaults)
@@ -294,6 +304,13 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 func (s *Store) ApplyTemplate(ctx context.Context, templateID string, into *model.Issue) error {
 	if templateID == "" {
 		return nil
+	}
+	// Cross-object tenancy: the template must belong to the issue's own
+	// workspace — a caller must not apply another workspace's template by
+	// bare ID. Checked before the lookup so a cross-workspace ID never
+	// loads a foreign template into the issue.
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "issue_templates", templateID, into.WorkspaceID); err != nil {
+		return err
 	}
 	t, err := s.GetByID(ctx, templateID)
 	if err != nil {

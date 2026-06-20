@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 type Milestone struct {
@@ -72,6 +74,9 @@ func (s *Store) Create(ctx context.Context, m Milestone) (*Milestone, error) {
 	}
 	if m.Status == "" {
 		m.Status = "upcoming"
+	}
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "projects", m.ProjectID, m.WorkspaceID); err != nil {
+		return nil, err
 	}
 	return scanMilestone(s.pool.QueryRow(ctx,
 		`INSERT INTO milestones (workspace_id, project_id, name, description, status, target_date)

@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 type Label struct {
@@ -58,6 +60,11 @@ func (s *Store) Create(ctx context.Context, l Label) (*Label, error) {
 	}
 	if l.Color == "" {
 		l.Color = "#94a3b8"
+	}
+	if l.TeamID != nil && *l.TeamID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", *l.TeamID, l.WorkspaceID); err != nil {
+			return nil, err
+		}
 	}
 	return scanLabel(s.pool.QueryRow(ctx,
 		`INSERT INTO labels (workspace_id, team_id, name, color, description)

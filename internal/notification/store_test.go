@@ -26,6 +26,10 @@ func notifRow(id, memberID, title string, read bool) *pgxmock.Rows {
 
 func TestCreate_InsertsNotification(t *testing.T) {
 	store, pool := newMockStore(t)
+	// Member tenancy guard runs first (member_id is required).
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("alice", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO notifications`).
 		WithArgs("ws-1", "alice", "mention", "Alice mentioned you", "", pgxmock.AnyArg()).
 		WillReturnRows(notifRow("n-1", "alice", "Alice mentioned you", false))
@@ -39,6 +43,28 @@ func TestCreate_InsertsNotification(t *testing.T) {
 	}
 	if out.Read {
 		t.Errorf("new notifications must start unread; got read=true")
+	}
+}
+
+func TestCreate_GuardsIssueRefWhenSet(t *testing.T) {
+	store, pool := newMockStore(t)
+	issueID := "iss-1"
+	// Guards run in source order: member first, then issue.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("alice", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("iss-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`INSERT INTO notifications`).
+		WithArgs("ws-1", "alice", "mention", "Alice mentioned you", "", &issueID).
+		WillReturnRows(notifRow("n-1", "alice", "Alice mentioned you", false))
+
+	if _, err := store.Create(context.Background(), Notification{
+		WorkspaceID: "ws-1", MemberID: "alice", Type: "mention",
+		Title: "Alice mentioned you", IssueID: &issueID,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 }
 

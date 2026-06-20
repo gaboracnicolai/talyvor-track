@@ -64,6 +64,27 @@ func TestCreateInvite_GeneratesUniqueToken(t *testing.T) {
 	}
 }
 
+func TestCreateInvite_GuardsProjectRefWhenSet(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	// Project tenancy guard runs before the insert when project_id is set.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("p-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`INSERT INTO guest_invites`).
+		WithArgs("ws-1", ptr("p-1"), "alice@example.com", "viewer",
+			pgxmock.AnyArg(), pgxmock.AnyArg(), "member-1").
+		WillReturnRows(inviteRows().AddRow(
+			"inv-1", "ws-1", ptr("p-1"), "alice@example.com", "viewer",
+			"tok-aaaa", now.Add(7*24*time.Hour), (*time.Time)(nil), "member-1", now,
+		))
+
+	if _, err := store.CreateInvite(context.Background(), "ws-1", ptr("p-1"),
+		"alice@example.com", GuestRoleViewer, "member-1"); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+}
+
 func TestCreateInvite_RejectsInvalidRole(t *testing.T) {
 	store, _ := newMockStore(t)
 	_, err := store.CreateInvite(context.Background(), "ws-1", nil,
@@ -123,6 +144,39 @@ func TestAcceptInvite_CreatesGuestAndMarksInviteAccepted(t *testing.T) {
 	}
 	if claims.GuestID != "g-1" || claims.WorkspaceID != "ws-1" || claims.Role != GuestRoleViewer {
 		t.Errorf("claims = %+v", claims)
+	}
+}
+
+func TestAcceptInvite_GuardsProjectRefWhenSet(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	// Project-scoped invite: lookup, then the project tenancy guard runs
+	// before the guests insert.
+	pool.ExpectQuery(`SELECT .* FROM guest_invites WHERE token`).
+		WithArgs("tok-proj").
+		WillReturnRows(inviteRows().AddRow(
+			"inv-1", "ws-1", ptr("p-1"), "alice@example.com", "viewer",
+			"tok-proj", now.Add(7*24*time.Hour), (*time.Time)(nil), "member-1", now,
+		))
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("p-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`INSERT INTO guests`).
+		WithArgs("ws-1", ptr("p-1"), "alice@example.com", "Alice", "viewer").
+		WillReturnRows(guestRows().AddRow(
+			"g-1", "ws-1", ptr("p-1"), "alice@example.com", "Alice", "viewer",
+			true, now, (*time.Time)(nil),
+		))
+	pool.ExpectExec(`UPDATE guest_invites SET accepted_at`).
+		WithArgs("inv-1").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	out, err := store.AcceptInvite(context.Background(), "tok-proj", "Alice")
+	if err != nil {
+		t.Fatalf("AcceptInvite: %v", err)
+	}
+	if out.guest.ID != "g-1" {
+		t.Errorf("got %+v", out.guest)
 	}
 }
 

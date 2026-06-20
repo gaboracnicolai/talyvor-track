@@ -89,6 +89,9 @@ func TestCreateBoard_RejectsInvalidSlug(t *testing.T) {
 func TestCreatePost_StripsHTML(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("b-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO feature_posts`).
 		WithArgs("ws-1", "b-1", "Add dark mode", "Use OLED-friendly colours", "Alice", "a@example.com").
 		WillReturnRows(postRows().AddRow(
@@ -118,6 +121,9 @@ func TestCreatePost_RateLimits(t *testing.T) {
 	// Three successful posts in a row, then the fourth gets rate-
 	// limited before any SQL fires.
 	for i := 0; i < 3; i++ {
+		pool.ExpectQuery(`SELECT EXISTS`).
+			WithArgs("b-1", "ws-1").
+			WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 		pool.ExpectQuery(`INSERT INTO feature_posts`).
 			WithArgs("ws-1", "b-1", "Idea", "", "Alice", "rate@example.com").
 			WillReturnRows(postRows().AddRow(

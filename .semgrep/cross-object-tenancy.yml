@@ -1,0 +1,40 @@
+rules:
+  - id: cross-object-insert-requires-tenancy-guard
+    languages: [go]
+    severity: ERROR
+    message: >-
+      This store inserts a cross-object *_id reference alongside workspace_id without
+      a workspace guard. Route the reference through tenancy.AssertRefInWorkspace
+      (internal/tenancy) so a caller cannot link an object to a reference in another
+      workspace. This is the regression lock for the object-graph cross-object
+      tenancy class — see internal/tenancy/closure_test.go.
+    patterns:
+      # A pgx INSERT whose column list (within the parens) carries workspace_id AND a
+      # foreign <x>_id reference, in either order.
+      - pattern-either:
+          - pattern: $Q.QueryRow($CTX, $SQL, ...)
+          - pattern: $Q.Exec($CTX, $SQL, ...)
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: >-
+            (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id)\b[^)]*\)|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id)\b[^)]*\bworkspace_id\b[^)]*\)
+      # Excluded when the enclosing function routes the reference through a workspace
+      # guard: the shared primitive, or a grandfathered per-store guard.
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            tenancy.AssertRefInWorkspace(...)
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertRefInWorkspace(...)
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertIssueInWorkspace(...)
+            ...
+          }

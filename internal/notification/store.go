@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 type Notification struct {
@@ -58,6 +60,14 @@ func scan(s interface{ Scan(...any) error }) (*Notification, error) {
 func (s *Store) Create(ctx context.Context, n Notification) (*Notification, error) {
 	if n.WorkspaceID == "" || n.MemberID == "" || n.Type == "" || n.Title == "" {
 		return nil, errors.New("notification: WorkspaceID, MemberID, Type, Title required")
+	}
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "members", n.MemberID, n.WorkspaceID); err != nil {
+		return nil, err
+	}
+	if n.IssueID != nil && *n.IssueID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "issues", *n.IssueID, n.WorkspaceID); err != nil {
+			return nil, err
+		}
 	}
 	return scan(s.pool.QueryRow(ctx,
 		`INSERT INTO notifications (workspace_id, member_id, type, title, body, issue_id)

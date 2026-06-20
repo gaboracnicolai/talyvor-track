@@ -16,10 +16,10 @@ import (
 // Records every Update/CreateComment so tests can assert side
 // effects after a webhook fires.
 type fakeIssueLookup struct {
-	mu        sync.Mutex
+	mu                 sync.Mutex
 	issuesByIdentifier map[string]*model.Issue
-	updates   []map[string]any
-	comments  []model.Comment
+	updates            []map[string]any
+	comments           []model.Comment
 }
 
 func (f *fakeIssueLookup) GetByIdentifier(_ context.Context, ident string) (*model.Issue, error) {

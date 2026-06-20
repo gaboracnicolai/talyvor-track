@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/pashagolub/pgxmock/v4"
+
+	"github.com/talyvor/track/internal/model"
 )
 
 func newMockStore(t *testing.T) (*Store, pgxmock.PgxPoolIface) {
@@ -76,6 +78,119 @@ func TestCreate_RejectsEmptyName(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestCreate_TeamScoped_GuardsTeamRef(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	// Team-scoped template: the cross-object guard verifies the team is in
+	// the template's workspace before the insert.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`INSERT INTO issue_templates`).
+		WithArgs("ws-1", ptr("team-1"), "Bug", "describe", "🐛",
+			"[Bug] ", "## Body", "backlog", 2,
+			[]string{"bug"}, (*string)(nil), []byte("{}")).
+		WillReturnRows(templateCols().AddRow(
+			"t-1", "ws-1", ptr("team-1"), "Bug", "describe", "🐛",
+			"[Bug] ", "## Body", "backlog", 2,
+			[]string{"bug"}, (*string)(nil), []byte("{}"),
+			now, now,
+		))
+
+	out, err := store.Create(context.Background(), IssueTemplate{
+		WorkspaceID:     "ws-1",
+		TeamID:          ptr("team-1"),
+		Name:            "Bug",
+		Description:     "describe",
+		Icon:            "🐛",
+		TitleFormat:     "[Bug] ",
+		Body:            "## Body",
+		DefaultStatus:   "backlog",
+		DefaultPriority: 2,
+		DefaultLabels:   []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if out.TeamID == nil || *out.TeamID != "team-1" {
+		t.Errorf("got %+v", out)
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreate_TeamScoped_CrossWorkspaceTeamRejected(t *testing.T) {
+	store, pool := newMockStore(t)
+	// Team in another workspace → EXISTS false → reject before insert.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-other", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+
+	_, err := store.Create(context.Background(), IssueTemplate{
+		WorkspaceID: "ws-1",
+		TeamID:      ptr("team-other"),
+		Name:        "Bug",
+	})
+	if err == nil {
+		t.Fatal("expected cross-workspace team ref to be rejected")
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// ─── ApplyTemplate ──────────────────────────────────────────
+
+func TestApplyTemplate_GuardsTemplateAgainstIssueWorkspace(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	// Guard runs first (template_id, into.WorkspaceID) → ok, then the
+	// GetByID lookup, then ApplyTo fills the issue.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("t-9", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`WHERE id = \$1`).
+		WithArgs("t-9").
+		WillReturnRows(templateCols().AddRow(
+			"t-9", "ws-1", (*string)(nil), "Bug", "", "🐛",
+			"[Bug] ", "## Body", "backlog", 2,
+			[]string{"bug"}, (*string)(nil), []byte("{}"),
+			now, now,
+		))
+
+	into := &model.Issue{WorkspaceID: "ws-1"}
+	if err := store.ApplyTemplate(context.Background(), "t-9", into); err != nil {
+		t.Fatalf("ApplyTemplate: %v", err)
+	}
+	if into.Title != "[Bug] " {
+		t.Errorf("template not applied; title = %q", into.Title)
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestApplyTemplate_CrossWorkspaceTemplateRejected(t *testing.T) {
+	store, pool := newMockStore(t)
+	// Template not in the issue's workspace → EXISTS false → reject, the
+	// GetByID lookup must never run (no foreign template loaded).
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("t-foreign", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+
+	into := &model.Issue{WorkspaceID: "ws-1"}
+	if err := store.ApplyTemplate(context.Background(), "t-foreign", into); err == nil {
+		t.Fatal("expected cross-workspace template to be rejected")
+	}
+	if into.Title != "" {
+		t.Errorf("foreign template must not be applied; title = %q", into.Title)
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
 	}
 }
 

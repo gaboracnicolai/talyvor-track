@@ -41,6 +41,9 @@ func TestSetScore_RICECalculatesCorrectly(t *testing.T) {
 	now := time.Now().UTC()
 	// RICE = (R * I * C/100) / E = (1000 * 2 * 80/100) / 4 = 400
 	// The store rounds to 1 decimal place: 400.0
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_scores`).
 		WithArgs("i-1", "ws-1", "rice",
 			float64(1000), float64(2), float64(80), float64(4), float64(400),
@@ -68,6 +71,9 @@ func TestSetScore_RICERoundsToOneDecimal(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
 	// (100 * 1 * 75/100) / 7 = 75/7 = 10.714... → 10.7
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_scores`).
 		WithArgs("i-1", "ws-1", "rice",
 			float64(100), float64(1), float64(75), float64(7), float64(10.7),
@@ -114,6 +120,9 @@ func TestSetScore_ICECalculatesCorrectly(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
 	// ICE = I*C*E = 8*7*6 = 336 (integer)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_scores`).
 		WithArgs("i-1", "ws-1", "ice",
 			(*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil),
@@ -140,6 +149,9 @@ func TestSetScore_ICERoundsToInteger(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
 	// 5.5 * 6.7 * 8.1 = 298.485 → 298 (nearest int)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("i-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_scores`).
 		WithArgs("i-1", "ws-1", "ice",
 			(*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil), (*float64)(nil),
