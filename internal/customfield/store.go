@@ -23,6 +23,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // ─── types ──────────────────────────────────────────────────
@@ -157,6 +159,15 @@ func (s *Store) CreateField(ctx context.Context, f CustomField) (*CustomField, e
 		f.Options = []string{}
 	}
 	f.Name = strings.TrimSpace(f.Name)
+
+	// Cross-object tenancy: a team-scoped field must reference a team in
+	// its own workspace. Workspace-wide fields (nil/empty team_id) skip the
+	// guard — there is no reference to validate.
+	if f.TeamID != nil && *f.TeamID != "" {
+		if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", *f.TeamID, f.WorkspaceID); err != nil {
+			return nil, err
+		}
+	}
 
 	// Per-workspace cap. Reads + insert aren't in a transaction — a
 	// simultaneous CreateField could squeak past, but the worst case

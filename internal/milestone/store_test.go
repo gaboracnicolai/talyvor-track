@@ -28,6 +28,9 @@ func milestoneRow(id, name, status string) *pgxmock.Rows {
 
 func TestCreate_MilestoneForProject(t *testing.T) {
 	store, pool := newMockStore(t)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("p-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO milestones`).
 		WithArgs("ws-1", "p-1", "v1.0", "", "upcoming", pgxmock.AnyArg()).
 		WillReturnRows(milestoneRow("m-1", "v1.0", "upcoming"))

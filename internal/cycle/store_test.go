@@ -33,6 +33,9 @@ func TestCreate_AutoNumbersCyclesPerTeam(t *testing.T) {
 	start := time.Now().UTC()
 	end := start.Add(14 * 24 * time.Hour)
 
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`SELECT COALESCE\(MAX\(number\), 0\) \+ 1 FROM cycles`).
 		WithArgs("team-1").
 		WillReturnRows(pgxmock.NewRows([]string{"next"}).AddRow(3))

@@ -4,6 +4,9 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/pashagolub/pgxmock/v4"
 
 	"github.com/talyvor/track/internal/model"
 )
@@ -110,7 +113,7 @@ func TestFire_SkipsRulesWithFailedConditions(t *testing.T) {
 		Conditions: []RuleCondition{
 			{Field: "status", Operator: "eq", Value: "done"},
 		},
-		Actions: []RuleAction{ActionAddLabel},
+		Actions:    []RuleAction{ActionAddLabel},
 		ActionData: map[string]string{"label": "shouldn't fire"},
 	})
 
@@ -188,6 +191,70 @@ func TestExecuteAction_NotifySlackCallsSender(t *testing.T) {
 	}
 	if slack.calls[0] != "https://hooks.slack.com/x|*ENG-42* — Bug" {
 		t.Errorf("Slack message wrong: %q", slack.calls[0])
+	}
+}
+
+func TestAddRule_GuardsTeamRef(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	e := newEngine(pool, &fakeIssueUpdater{}, &fakeSlack{})
+
+	// Cross-object guard verifies the team is in the rule's workspace
+	// before the INSERT.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`INSERT INTO automation_rules`).
+		WithArgs("ws-1", "team-1", "Auto", string(TriggerIssueCreated),
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "created_at"}).
+			AddRow("r-1", time.Now().UTC()))
+
+	out, err := e.AddRule(context.Background(), Rule{
+		WorkspaceID: "ws-1", TeamID: "team-1", Name: "Auto",
+		Trigger: TriggerIssueCreated,
+		Actions: []RuleAction{ActionAddLabel},
+	})
+	if err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+	if out.ID != "r-1" {
+		t.Errorf("got %+v", out)
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestAddRule_CrossWorkspaceTeamRejected(t *testing.T) {
+	pool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	e := newEngine(pool, &fakeIssueUpdater{}, &fakeSlack{})
+
+	// Team in another workspace → EXISTS false → reject before INSERT.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-other", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+
+	_, err = e.AddRule(context.Background(), Rule{
+		WorkspaceID: "ws-1", TeamID: "team-other", Name: "Auto",
+		Trigger: TriggerIssueCreated,
+		Actions: []RuleAction{ActionAddLabel},
+	})
+	if err == nil {
+		t.Fatal("expected cross-workspace team ref to be rejected")
+	}
+	if len(e.ListRules("ws-1")) != 0 {
+		t.Error("rejected rule must not enter the cache")
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
 	}
 }
 

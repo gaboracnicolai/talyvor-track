@@ -21,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // ─── public types ───────────────────────────────────────────
@@ -327,6 +329,9 @@ func (s *Store) CreatePost(ctx context.Context, p FeaturePost) (*FeaturePost, er
 	// limited globally on (board, "").
 	if !s.limiter.allow(p.BoardID + ":" + p.AuthorEmail) {
 		return nil, fmt.Errorf("featureboard: rate limit — max %d posts per email per 24h", maxPostsPerUser)
+	}
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "feature_boards", p.BoardID, p.WorkspaceID); err != nil {
+		return nil, err
 	}
 	return scanPost(s.pool.QueryRow(ctx,
 		`INSERT INTO feature_posts

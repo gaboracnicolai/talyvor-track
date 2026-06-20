@@ -40,6 +40,9 @@ func TestCreate_WorkspaceWideLabel(t *testing.T) {
 func TestCreate_TeamSpecificLabel(t *testing.T) {
 	teamID := "team-1"
 	store, pool := newMockStore(t)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO labels`).
 		WithArgs("ws-1", &teamID, "Frontend", "#3b82f6", "").
 		WillReturnRows(pgxmock.NewRows([]string{

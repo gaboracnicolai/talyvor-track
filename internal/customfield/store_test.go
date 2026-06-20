@@ -48,6 +48,62 @@ func TestCreateField_TextType(t *testing.T) {
 	}
 }
 
+func TestCreateField_TeamScoped_GuardsTeamRef(t *testing.T) {
+	store, pool := newMockStore(t)
+	now := time.Now().UTC()
+	// Team-scoped field: the cross-object guard must verify the team is in
+	// the field's workspace BEFORE the count/insert.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM custom_fields`).
+		WithArgs("ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	pool.ExpectQuery(`INSERT INTO custom_fields`).
+		WithArgs("ws-1", ptr("team-1"), "TeamField", "text", []string{}, false, 0).
+		WillReturnRows(pgxmock.NewRows([]string{
+			"id", "workspace_id", "team_id", "name", "type", "options", "required", "position", "created_at",
+		}).AddRow("f-1", "ws-1", ptr("team-1"), "TeamField", "text", []string{}, false, 0, now))
+
+	out, err := store.CreateField(context.Background(), CustomField{
+		WorkspaceID: "ws-1",
+		TeamID:      ptr("team-1"),
+		Name:        "TeamField",
+		Type:        FieldTypeText,
+	})
+	if err != nil {
+		t.Fatalf("CreateField: %v", err)
+	}
+	if out.TeamID == nil || *out.TeamID != "team-1" {
+		t.Errorf("got %+v", out)
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreateField_TeamScoped_CrossWorkspaceTeamRejected(t *testing.T) {
+	store, pool := newMockStore(t)
+	// Guard sees the team in another workspace → EXISTS false → reject, no
+	// count or insert should run.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-other", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+
+	_, err := store.CreateField(context.Background(), CustomField{
+		WorkspaceID: "ws-1",
+		TeamID:      ptr("team-other"),
+		Name:        "TeamField",
+		Type:        FieldTypeText,
+	})
+	if err == nil {
+		t.Fatal("expected cross-workspace team ref to be rejected")
+	}
+	if err := pool.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
 func TestCreateField_SelectTypeRequiresOptions(t *testing.T) {
 	store, _ := newMockStore(t)
 	_, err := store.CreateField(context.Background(), CustomField{

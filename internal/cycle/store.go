@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/talyvor/track/internal/model"
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 type pgxDB interface {
@@ -67,6 +68,9 @@ func (s *Store) Create(ctx context.Context, c model.Cycle) (*model.Cycle, error)
 	}
 	if c.Status == "" {
 		c.Status = "upcoming"
+	}
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", c.TeamID, c.WorkspaceID); err != nil {
+		return nil, err
 	}
 
 	var nextNumber int

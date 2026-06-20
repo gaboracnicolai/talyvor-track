@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/talyvor/track/internal/model"
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // ─── public types ───────────────────────────────────────────
@@ -105,10 +106,10 @@ const scoreColumns = `id, issue_id, workspace_id, method,
 
 func scanScore(s interface{ Scan(...any) error }) (*IssueScore, error) {
 	var (
-		out                                            IssueScore
-		method                                         string
+		out                                                 IssueScore
+		method                                              string
 		riceReach, riceImpact, riceConf, riceEff, riceScore *float64
-		iceImpact, iceConf, iceEase, iceScore          *float64
+		iceImpact, iceConf, iceEase, iceScore               *float64
 	)
 	if err := s.Scan(
 		&out.ID, &out.IssueID, &out.WorkspaceID, &method,
@@ -211,6 +212,9 @@ func (s *Store) SetScore(ctx context.Context, issueID, workspaceID, memberID str
 		return nil, fmt.Errorf("scoring: unknown method %q", method)
 	}
 
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "issues", issueID, workspaceID); err != nil {
+		return nil, err
+	}
 	return scanScore(s.pool.QueryRow(ctx,
 		`INSERT INTO issue_scores (issue_id, workspace_id, method,
             rice_reach, rice_impact, rice_confidence, rice_effort, rice_score,

@@ -30,6 +30,9 @@ func projRow(id, identifier, status string) *pgxmock.Rows {
 
 func TestCreate_InsertsProject(t *testing.T) {
 	store, pool := newMockStore(t)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO projects`).
 		WithArgs("ws-1", "team-1", "Project", "PRJ-1", "", "active", 0,
 			pgxmock.AnyArg(), pgxmock.AnyArg()).
