@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -56,6 +57,64 @@ func scanCycle(s interface{ Scan(...any) error }) (*model.Cycle, error) {
 // at a time — Create itself doesn't enforce that constraint, but
 // callers should ensure the new cycle starts as "upcoming" and use
 // the activate flow to transition.
+// ErrNotFound is returned when a cycle does not exist in the given workspace.
+var ErrNotFound = errors.New("cycle: not found")
+
+var validStatuses = map[string]struct{}{"upcoming": {}, "active": {}, "completed": {}}
+
+// CycleUpdate is a partial update; nil fields are left unchanged.
+type CycleUpdate struct {
+	Name      *string
+	Status    *string
+	StartDate *time.Time
+	EndDate   *time.Time
+}
+
+// Update applies a partial update to a cycle, scoped to its workspace. An unknown or
+// cross-workspace cycle returns ErrNotFound. Validates the resulting name (non-empty),
+// status (upcoming|active|completed), and that end_date stays after start_date.
+func (s *Store) Update(ctx context.Context, id, workspaceID string, upd CycleUpdate) (*model.Cycle, error) {
+	cur, err := s.GetByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if cur.WorkspaceID != workspaceID {
+		return nil, ErrNotFound
+	}
+
+	if upd.Name != nil {
+		cur.Name = strings.TrimSpace(*upd.Name)
+	}
+	if upd.Status != nil {
+		cur.Status = *upd.Status
+	}
+	if upd.StartDate != nil {
+		cur.StartDate = *upd.StartDate
+	}
+	if upd.EndDate != nil {
+		cur.EndDate = *upd.EndDate
+	}
+
+	if cur.Name == "" {
+		return nil, errors.New("cycle: name cannot be empty")
+	}
+	if _, ok := validStatuses[cur.Status]; !ok {
+		return nil, fmt.Errorf("cycle: invalid status %q", cur.Status)
+	}
+	if !cur.EndDate.After(cur.StartDate) {
+		return nil, errors.New("cycle: end_date must be after start_date")
+	}
+
+	return scanCycle(s.pool.QueryRow(ctx,
+		`UPDATE cycles SET name = $2, status = $3, start_date = $4, end_date = $5, updated_at = NOW()
+        WHERE id = $1 AND workspace_id = $6 RETURNING `+cycleColumns,
+		id, cur.Name, cur.Status, cur.StartDate, cur.EndDate, workspaceID,
+	))
+}
+
 func (s *Store) Create(ctx context.Context, c model.Cycle) (*model.Cycle, error) {
 	if c.WorkspaceID == "" || c.TeamID == "" || c.Name == "" {
 		return nil, errors.New("cycle: WorkspaceID, TeamID, and Name required")
