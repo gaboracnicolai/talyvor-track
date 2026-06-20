@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
 )
@@ -144,8 +145,7 @@ func (h *Handler) SuggestSprint(w http.ResponseWriter, r *http.Request) {
 		TeamSize  int `json:"team_size"`
 		CycleDays int `json:"cycle_days"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if in.TeamSize <= 0 {

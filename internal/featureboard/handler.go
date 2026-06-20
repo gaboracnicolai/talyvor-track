@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -85,8 +86,7 @@ func (h *Handler) AdminList(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "wsID")
 	var in Board
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.WorkspaceID = wsID
@@ -112,8 +112,7 @@ func (h *Handler) AdminUpdatePost(w http.ResponseWriter, r *http.Request) {
 		Status  PostStatus `json:"status"`
 		IssueID *string    `json:"issue_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if err := h.store.UpdateStatus(r.Context(), chi.URLParam(r, "wsID"), chi.URLParam(r, "boardID"), chi.URLParam(r, "postID"), in.Status, in.IssueID); err != nil {
@@ -133,8 +132,7 @@ func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
 		TeamID    string `json:"team_id"`
 		CreatorID string `json:"creator_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if in.TeamID == "" {
@@ -260,8 +258,7 @@ func (h *Handler) PublicCreatePost(w http.ResponseWriter, r *http.Request) {
 		AuthorName  string `json:"author_name"`
 		AuthorEmail string `json:"author_email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if !board.AllowAnonymous && in.AuthorEmail == "" {
@@ -291,8 +288,7 @@ func (h *Handler) PublicVote(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	count, err := h.store.Vote(r.Context(), chi.URLParam(r, "wsSlug"), chi.URLParam(r, "boardSlug"), postID, in.Email)
@@ -311,8 +307,7 @@ func (h *Handler) PublicUnvote(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	count, err := h.store.Unvote(r.Context(), chi.URLParam(r, "wsSlug"), chi.URLParam(r, "boardSlug"), postID, in.Email)

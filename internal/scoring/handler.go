@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/talyvor/track/internal/httpx"
 )
 
 type Handler struct{ store *Store }
@@ -50,8 +52,7 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		ICE    *ICEScore     `json:"ice"`
 		Notes  string        `json:"notes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.SetScore(r.Context(), id, wsID,

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -46,8 +47,7 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var in model.Project
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.WorkspaceID = chi.URLParam(r, "wsID")
@@ -82,8 +82,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var updates map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &updates) {
 		return
 	}
 	out, err := h.store.Update(r.Context(), chi.URLParam(r, "id"), updates)
