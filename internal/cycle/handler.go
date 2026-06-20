@@ -2,7 +2,9 @@ package cycle
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -80,11 +82,32 @@ func (h *Handler) GetActive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// Update applies a partial update (name / status / start_date / end_date) to a cycle,
+// scoped to the workspace in the path. Unknown or cross-workspace cycles → 404.
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	// Cycle updates are limited to name/status/end_date; a future
-	// phase can grow this. For now we return 501 so the route shape
-	// is documented but no caller can corrupt cycle metadata.
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "cycle PATCH not implemented in phase 2")
+	wsID := chi.URLParam(r, "wsID")
+	id := chi.URLParam(r, "id")
+	var in struct {
+		Name      *string    `json:"name"`
+		Status    *string    `json:"status"`
+		StartDate *time.Time `json:"start_date"`
+		EndDate   *time.Time `json:"end_date"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	out, err := h.store.Update(r.Context(), id, wsID, CycleUpdate{
+		Name: in.Name, Status: in.Status, StartDate: in.StartDate, EndDate: in.EndDate,
+	})
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "CYCLE_NOT_FOUND", err.Error())
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
