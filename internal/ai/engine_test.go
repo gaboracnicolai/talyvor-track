@@ -27,15 +27,6 @@ func (s *stubSearcher) Search(_ context.Context, _ string, _ string, _ int) ([]m
 	return s.results, nil
 }
 
-// fakeLens is a configured-but-unrouted Lens used by tests that
-// don't need a real upstream. Methods we call are URL/APIKey
-// accessors only.
-type fakeLens struct{ url, key string }
-
-func (f *fakeLens) IsConfigured() bool { return f.url != "" }
-func (f *fakeLens) BaseURL() string    { return f.url }
-func (f *fakeLens) APIKey() string     { return f.key }
-
 // lensMock builds an httptest server that maps a request handler
 // per path. Each handler can inspect the request body to verify the
 // outbound shape (model, messages, headers).

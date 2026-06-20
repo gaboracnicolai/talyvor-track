@@ -161,7 +161,7 @@ func (e *Engine) GetBurndown(ctx context.Context, cycleID string) (*BurndownRepo
 		Points: make([]BurndownPoint, 0, days),
 	}
 	now := time.Now().UTC()
-	var currentRemaining int = total
+	currentRemaining := total
 	for i := 0; i < days; i++ {
 		day := start.AddDate(0, 0, i)
 		eod := time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())

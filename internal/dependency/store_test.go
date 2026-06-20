@@ -2,7 +2,6 @@ package dependency
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -336,20 +335,11 @@ func TestGetDependencyGraph_ReturnsConnectedNodesAndEdges(t *testing.T) {
 }
 
 func TestGetDependencyGraph_RespectsDepthLimit(t *testing.T) {
-	store, _ := newMockStore(t)
-	// depth=0 → just the root; no further queries.
-	// We expect: 1 root lookup, no edge query.
-	// Set up only the root lookup.
-	if _, err := store.GetDependencyGraph(context.Background(), "ws", "root", 100); err != nil {
-		// We didn't set up the mocks fully for this path. Check that
-		// depth was clamped to the documented max.
-	}
+	// The graph walk caps traversal at MaxGraphDepth regardless of the requested
+	// depth — assert the documented cap.
 	if MaxGraphDepth != 5 {
 		t.Errorf("MaxGraphDepth = %d, want 5 (cap stated in API)", MaxGraphDepth)
 	}
-	// Use errors.Is to silence the lint about unused import without
-	// adding noise to the test.
-	_ = errors.Is
 }
 
 // ─── GetRelationStats ──────────────────────────────────────

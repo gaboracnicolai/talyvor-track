@@ -146,11 +146,15 @@ func TestUp_BrokenMigration_FailsClosed(t *testing.T) {
 		t.Error("FAIL-OPEN: broken migration 0002 was recorded in schema_migrations")
 	}
 	var present bool
-	conn.QueryRow(ctx, `SELECT to_regclass('public.broke') IS NOT NULL`).Scan(&present)
+	if err := conn.QueryRow(ctx, `SELECT to_regclass('public.broke') IS NOT NULL`).Scan(&present); err != nil {
+		t.Fatalf("check 'broke': %v", err)
+	}
 	if present {
 		t.Error("FAIL-OPEN: table 'broke' from the failed migration persisted — must roll back")
 	}
-	conn.QueryRow(ctx, `SELECT to_regclass('public.never_ran') IS NOT NULL`).Scan(&present)
+	if err := conn.QueryRow(ctx, `SELECT to_regclass('public.never_ran') IS NOT NULL`).Scan(&present); err != nil {
+		t.Fatalf("check 'never_ran': %v", err)
+	}
 	if present {
 		t.Error("FAIL-OPEN: migration 0003 ran AFTER a failure — must stop")
 	}
