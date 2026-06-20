@@ -161,6 +161,53 @@ func (s *Store) assertIssuesShareWorkspace(ctx context.Context, aID, bID string)
 	return nil
 }
 
+// ErrCycle is returned when a blocks-family relation would close a directed cycle in
+// the blocks graph (A blocks B when B already transitively blocks A) — a dependency
+// deadlock. Handlers map it to 409 Conflict.
+var ErrCycle = errors.New("dependency: relation would create a blocking cycle")
+
+// blocksEdge normalises a blocks-family relation to its (blocker, blocked) issue IDs —
+// blocker must complete before blocked. Non-dependency relations (relates_to,
+// duplicates, clones) return ok=false; they cannot form a blocking cycle.
+func blocksEdge(t RelationType, source, target string) (blocker, blocked string, ok bool) {
+	switch t {
+	case RelationBlocks:
+		return source, target, true
+	case RelationBlockedBy:
+		return target, source, true
+	}
+	return "", "", false
+}
+
+// wouldCloseBlockingCycle reports whether adding the relation would close a directed
+// cycle. It walks the blocks graph (recursive, deduped — so it terminates even if the
+// data already contains a cycle) asking whether `blocked` can already reach `blocker`;
+// if so, the new blocker→blocked edge completes a cycle. Transitive: A→B→C→A is caught,
+// while a diamond (A→B, A→C, B→D, C→D) is not — no back-path exists.
+func (s *Store) wouldCloseBlockingCycle(ctx context.Context, t RelationType, source, target, workspaceID string) (bool, error) {
+	blocker, blocked, ok := blocksEdge(t, source, target)
+	if !ok {
+		return false, nil
+	}
+	var reaches bool
+	err := s.pool.QueryRow(ctx, `
+        WITH RECURSIVE reachable AS (
+            SELECT target_id AS node FROM issue_relations
+            WHERE source_id = $1 AND type = 'blocks' AND workspace_id = $3
+          UNION
+            SELECT r.target_id FROM issue_relations r
+            JOIN reachable rc ON r.source_id = rc.node
+            WHERE r.type = 'blocks' AND r.workspace_id = $3
+        )
+        SELECT EXISTS (SELECT 1 FROM reachable WHERE node = $2)`,
+		blocked, blocker, workspaceID,
+	).Scan(&reaches)
+	if err != nil {
+		return false, fmt.Errorf("dependency: cycle check: %w", err)
+	}
+	return reaches, nil
+}
+
 func (s *Store) Create(ctx context.Context, r Relation) (*Relation, error) {
 	if s.pool == nil {
 		return nil, errors.New("dependency: store has no pool")
@@ -191,6 +238,15 @@ func (s *Store) Create(ctx context.Context, r Relation) (*Relation, error) {
 
 	if err := s.assertIssuesShareWorkspace(ctx, r.SourceID, r.TargetID); err != nil {
 		return nil, err
+	}
+
+	// Reject an edge that would close a directed blocking cycle (deadlock).
+	cyclic, err := s.wouldCloseBlockingCycle(ctx, r.Type, r.SourceID, r.TargetID, r.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if cyclic {
+		return nil, ErrCycle
 	}
 
 	row, err := scanRelation(s.pool.QueryRow(ctx,
@@ -733,6 +789,18 @@ func (s *Store) BulkCreateRelations(ctx context.Context, rel Relation, targets [
 	}
 	if badTargets > 0 {
 		return 0, errors.New("dependency: one or more targets are in a different workspace or do not exist")
+	}
+
+	// Cycle detection per target: a blocks-family bulk insert must not close a
+	// directed cycle for any of its edges.
+	for _, t := range targets {
+		cyclic, err := s.wouldCloseBlockingCycle(ctx, rel.Type, rel.SourceID, t, rel.WorkspaceID)
+		if err != nil {
+			return 0, err
+		}
+		if cyclic {
+			return 0, fmt.Errorf("%w (target %s)", ErrCycle, t)
+		}
 	}
 
 	tag, err := s.pool.Exec(ctx,

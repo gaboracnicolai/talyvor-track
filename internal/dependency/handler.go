@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -75,6 +76,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:   r.Header.Get("X-Member-Id"),
 	})
 	if err != nil {
+		if errors.Is(err, ErrCycle) {
+			writeErr(w, http.StatusConflict, "DEPENDENCY_CYCLE", err.Error())
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return
 	}
@@ -160,6 +165,10 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		in.TargetIDs,
 	)
 	if err != nil {
+		if errors.Is(err, ErrCycle) {
+			writeErr(w, http.StatusConflict, "DEPENDENCY_CYCLE", err.Error())
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "BULK_FAILED", err.Error())
 		return
 	}
