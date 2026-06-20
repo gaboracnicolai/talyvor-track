@@ -590,19 +590,85 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-// UpdateAICost is the Lens-side reconciliation hook: when the proxy
-// records a spend row with X-Talyvor-Feature=<feat>, the Track
-// recorder calls here to accumulate the cost on every issue that
-// declared the same lens_feature within the same workspace.
-func (s *Store) UpdateAICost(ctx context.Context, lensFeature string, costUSD float64, tokens int, workspaceID string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE issues SET
-        ai_cost_usd = ai_cost_usd + $2,
-        ai_tokens = ai_tokens + $3,
-        updated_at = NOW()
-    WHERE lens_feature = $1 AND workspace_id = $4`,
-		lensFeature, costUSD, tokens, workspaceID,
+// RecordSpendEvent is the WEBHOOK's authoritative, idempotent cost accumulator. It
+// records a Lens cost event in ai_spend_events and accumulates it onto every issue
+// sharing the lens_feature, ATOMICALLY in one statement. eventKey is the idempotency
+// key (a content hash of the event): a re-delivered event with the same key writes no
+// new row and adds no cost. One ai_spend_events row is written per credited issue, so
+// an issue's ai_cost_usd always equals the SUM of its ai_spend_events rows. Returns
+// the number of issues newly credited (0 on a re-delivery, or no feature match).
+//
+// Cost still fans out to every issue sharing a lens_feature (name-match attribution);
+// the durable fix is per-request attribution from Lens — see the T7 notes.
+func (s *Store) RecordSpendEvent(ctx context.Context, eventKey, lensFeature string, costUSD float64, tokens int, workspaceID, source string) (int, error) {
+	if eventKey == "" || lensFeature == "" || workspaceID == "" {
+		return 0, errors.New("issue: RecordSpendEvent requires event_key, lens_feature, workspace_id")
+	}
+	tag, err := s.pool.Exec(ctx, `
+        WITH matched AS (
+            SELECT id FROM issues WHERE lens_feature = $2 AND workspace_id = $3
+        ),
+        ins AS (
+            INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, lens_feature, cost_usd, tokens, source)
+            SELECT $1, $3, m.id, $2, $4, $5, $6 FROM matched m
+            ON CONFLICT (event_key, COALESCE(issue_id, '')) DO NOTHING
+            RETURNING issue_id
+        )
+        UPDATE issues SET ai_cost_usd = ai_cost_usd + $4, ai_tokens = ai_tokens + $5, updated_at = NOW()
+        WHERE id IN (SELECT issue_id FROM ins)`,
+		eventKey, lensFeature, workspaceID, costUSD, tokens, source,
 	)
-	return err
+	if err != nil {
+		return 0, fmt.Errorf("issue: record spend event: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ReconcileFeatureSpend is the SYNCER's idempotent backfill against the ledger. Given
+// the authoritative running total Lens reports for a feature, it adds to each matching
+// issue ONLY the gap between that total and what Track already recorded
+// (max(lensTotal - ai_cost_usd, 0)), writing that gap as a 'sync-reconcile' ledger row.
+// So repeated polls of the same total are no-ops, and it can never double-count spend
+// the webhook already recorded (the gap is 0 when the webhook is keeping up). FOR
+// UPDATE on the matched issues serializes against concurrent webhook accumulation, and
+// the per-total eventKey makes concurrent identical reconciliations exactly-once.
+// Returns the total USD reconciled this call.
+func (s *Store) ReconcileFeatureSpend(ctx context.Context, eventKey, lensFeature string, lensTotalUSD float64, lensTokens int, workspaceID string) (float64, error) {
+	if eventKey == "" || lensFeature == "" || workspaceID == "" {
+		return 0, errors.New("issue: ReconcileFeatureSpend requires event_key, lens_feature, workspace_id")
+	}
+	var added float64
+	err := s.pool.QueryRow(ctx, `
+        WITH matched AS (
+            SELECT id, ai_cost_usd, ai_tokens FROM issues
+            WHERE lens_feature = $2 AND workspace_id = $3
+            FOR UPDATE
+        ),
+        deltas AS (
+            SELECT id,
+                   GREATEST($4::float8 - ai_cost_usd, 0) AS d_cost,
+                   GREATEST($5::int - ai_tokens, 0) AS d_tokens
+            FROM matched
+        ),
+        ins AS (
+            INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, lens_feature, cost_usd, tokens, source)
+            SELECT $1, $3, id, $2, d_cost, d_tokens, 'sync-reconcile' FROM deltas WHERE d_cost > 0 OR d_tokens > 0
+            ON CONFLICT (event_key, COALESCE(issue_id, '')) DO NOTHING
+            RETURNING issue_id, cost_usd, tokens
+        ),
+        upd AS (
+            UPDATE issues i SET ai_cost_usd = ai_cost_usd + ins.cost_usd,
+                                ai_tokens = ai_tokens + ins.tokens, updated_at = NOW()
+            FROM ins WHERE i.id = ins.issue_id
+            RETURNING ins.cost_usd
+        )
+        SELECT COALESCE(SUM(cost_usd), 0) FROM upd`,
+		eventKey, lensFeature, workspaceID, lensTotalUSD, lensTokens,
+	).Scan(&added)
+	if err != nil {
+		return 0, fmt.Errorf("issue: reconcile feature spend: %w", err)
+	}
+	return added, nil
 }
 
 // TopByAICost returns the workspace's most expensive issues in

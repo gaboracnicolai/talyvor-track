@@ -9,15 +9,18 @@ rules:
       workspace. This is the regression lock for the object-graph cross-object
       tenancy class — see internal/tenancy/closure_test.go.
     patterns:
-      # A pgx INSERT whose column list (within the parens) carries workspace_id AND a
-      # foreign <x>_id reference, in either order.
+      # A pgx INSERT ... VALUES whose column list carries workspace_id AND a foreign
+      # <x>_id reference (in either order) — i.e. a CALLER-SUPPLIED cross-object ref.
+      # INSERT ... SELECT that derives the ref from an in-workspace query (e.g. the
+      # ai_spend_events ledger: SELECT id FROM issues WHERE workspace_id=$n) is safe by
+      # construction — the ref provably shares the workspace — and is out of scope.
       - pattern-either:
           - pattern: $Q.QueryRow($CTX, $SQL, ...)
           - pattern: $Q.Exec($CTX, $SQL, ...)
       - metavariable-regex:
           metavariable: $SQL
           regex: >-
-            (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id)\b[^)]*\)|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id)\b[^)]*\bworkspace_id\b[^)]*\)
+            (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES
       # Excluded when the enclosing function routes the reference through a workspace
       # guard: the shared primitive, or a grandfathered per-store guard.
       - pattern-not-inside: |

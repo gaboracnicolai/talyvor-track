@@ -28,7 +28,7 @@ type notifier interface {
 // interface so tests can substitute a counter mock.
 type issueLookup interface {
 	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
-	UpdateAICost(ctx context.Context, lensFeature string, costUSD float64, tokens int, workspaceID string) error
+	RecordSpendEvent(ctx context.Context, eventKey, lensFeature string, costUSD float64, tokens int, workspaceID, source string) (int, error)
 }
 
 // notificationCreator is the slice of notification.Store the webhook
@@ -107,7 +107,11 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 			return
 		}
-		if err := h.handleSpendAlert(r.Context(), payload); err != nil {
+		// Idempotency key = hash of the exact signed body. A re-delivered event
+		// (identical bytes) maps to the same key and is recorded exactly once.
+		sum := sha256.Sum256(body)
+		eventKey := "lens-spend:" + hex.EncodeToString(sum[:])
+		if err := h.handleSpendAlert(r.Context(), payload, eventKey); err != nil {
 			slog.Warn("lensintegration: spend alert handling failed",
 				slog.String("workspace_id", payload.WorkspaceID),
 				slog.String("feature", payload.Feature),
@@ -133,16 +137,18 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //
 // Each step is best-effort — a failure in one doesn't roll back the
 // others. The webhook always returns 200 so Lens doesn't retry.
-func (h *WebhookHandler) handleSpendAlert(ctx context.Context, p SpendAlertPayload) error {
+func (h *WebhookHandler) handleSpendAlert(ctx context.Context, p SpendAlertPayload, eventKey string) error {
 	if p.WorkspaceID == "" || p.Feature == "" {
 		return errors.New("spend_alert: workspace_id and feature required")
 	}
 
-	// Cost accumulation — the issue store's UpdateAICost is idempotent
-	// only insofar as it always adds; calling twice would double-count.
-	// Lens dedupes alerts before sending, so we trust the input.
-	if err := h.issues.UpdateAICost(ctx, p.Feature, p.CostUSD, 0, p.WorkspaceID); err != nil {
-		slog.Warn("spend_alert: UpdateAICost failed",
+	// Idempotent cost accumulation: RecordSpendEvent writes one ai_spend_events row per
+	// credited issue and accumulates atomically, keyed by eventKey — a re-delivered
+	// event adds nothing. Limitation: two genuinely-distinct events with byte-identical
+	// bodies collapse to one — errs toward UNDER-count, the safe direction for a cost
+	// number; the durable fix is a Lens-sent event_id.
+	if _, err := h.issues.RecordSpendEvent(ctx, eventKey, p.Feature, p.CostUSD, 0, p.WorkspaceID, "webhook"); err != nil {
+		slog.Warn("spend_alert: RecordSpendEvent failed",
 			slog.String("feature", p.Feature),
 			slog.String("err", err.Error()),
 		)
@@ -177,10 +183,10 @@ func (h *WebhookHandler) handleSpendAlert(ctx context.Context, p SpendAlertPaylo
 	// without refreshing. ActorID empty — the actor is Lens itself.
 	if h.notifier != nil && issue != nil {
 		h.notifier.IssueUpdated(ctx, p.WorkspaceID, issue.TeamID, issue.ID, "", map[string]any{
-			"ai_cost_usd":      p.CostUSD,
-			"spend_alert":      true,
-			"threshold_usd":    p.Threshold,
-			"alert_feature":    p.Feature,
+			"ai_cost_usd":   p.CostUSD,
+			"spend_alert":   true,
+			"threshold_usd": p.Threshold,
+			"alert_feature": p.Feature,
 		})
 	}
 	return nil
