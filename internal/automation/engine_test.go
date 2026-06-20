@@ -17,6 +17,7 @@ type fakeIssueUpdater struct {
 	mu       sync.Mutex
 	updates  []map[string]any
 	comments []model.Comment
+	created  []model.Issue
 }
 
 func (f *fakeIssueUpdater) Update(_ context.Context, _ string, updates map[string]any) (*model.Issue, error) {
@@ -24,6 +25,13 @@ func (f *fakeIssueUpdater) Update(_ context.Context, _ string, updates map[strin
 	defer f.mu.Unlock()
 	f.updates = append(f.updates, updates)
 	return &model.Issue{ID: "i-1"}, nil
+}
+func (f *fakeIssueUpdater) Create(_ context.Context, issue model.Issue) (*model.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.created = append(f.created, issue)
+	issue.ID = "child-1"
+	return &issue, nil
 }
 func (f *fakeIssueUpdater) CreateComment(_ context.Context, c model.Comment) (*model.Comment, error) {
 	f.mu.Lock()
@@ -84,6 +92,58 @@ func TestFire_ExecutesMatchingRule(t *testing.T) {
 	got := updater.updates[0]["labels"].([]string)
 	if len(got) != 2 || got[1] != "auto-triaged" {
 		t.Errorf("labels = %v, want [bug auto-triaged]", got)
+	}
+}
+
+// TestFire_CreateIssueAction_CreatesIssueNotComment — the create_issue action must
+// actually create a child issue (inheriting the parent's creator, linked to it), NOT
+// fall back to posting a comment.
+func TestFire_CreateIssueAction_CreatesIssueNotComment(t *testing.T) {
+	e, updater, _ := newTestEngine()
+	withCachedRule(e, Rule{
+		ID: "r-spawn", WorkspaceID: "ws-1", TeamID: "team-1", Name: "Spawn child",
+		Trigger:    TriggerStatusChanged,
+		Actions:    []RuleAction{ActionCreateIssue},
+		ActionData: map[string]string{"title": "Follow-up task"},
+	})
+
+	err := e.Fire(context.Background(), TriggerStatusChanged, "ws-1", model.Issue{
+		ID: "parent-1", WorkspaceID: "ws-1", TeamID: "team-1", CreatorID: "alice",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Fire: %v", err)
+	}
+	if len(updater.created) != 1 {
+		t.Fatalf("created %d issues, want 1 (action must CREATE an issue, not comment)", len(updater.created))
+	}
+	if len(updater.comments) != 0 {
+		t.Fatalf("created %d comments, want 0 (must not fall back to a comment)", len(updater.comments))
+	}
+	c := updater.created[0]
+	if c.Title != "Follow-up task" {
+		t.Errorf("child title = %q, want 'Follow-up task'", c.Title)
+	}
+	if c.CreatorID != "alice" {
+		t.Errorf("child creator = %q, want inherited 'alice'", c.CreatorID)
+	}
+	if c.ParentID == nil || *c.ParentID != "parent-1" {
+		t.Errorf("child parent_id = %v, want parent-1", c.ParentID)
+	}
+}
+
+// TestFire_CreateIssueAction_RequiresTitle — no title → a clear error, no issue.
+func TestFire_CreateIssueAction_RequiresTitle(t *testing.T) {
+	e, updater, _ := newTestEngine()
+	withCachedRule(e, Rule{
+		ID: "r-notitle", WorkspaceID: "ws-1", TeamID: "team-1",
+		Trigger: TriggerStatusChanged,
+		Actions: []RuleAction{ActionCreateIssue},
+	})
+	_ = e.Fire(context.Background(), TriggerStatusChanged, "ws-1", model.Issue{
+		ID: "parent-1", WorkspaceID: "ws-1", TeamID: "team-1", CreatorID: "alice",
+	}, nil)
+	if len(updater.created) != 0 {
+		t.Fatalf("created %d issues with no title, want 0", len(updater.created))
 	}
 }
 
