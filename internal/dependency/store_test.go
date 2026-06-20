@@ -33,6 +33,10 @@ func TestCreate_BlocksCreatesInverseBlockedBy(t *testing.T) {
 	pool.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("a", "b").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	// Cycle check: blocked (b) does not already reach blocker (a).
+	pool.ExpectQuery(`WITH RECURSIVE reachable`).
+		WithArgs("b", "a", "ws").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
 	// Forward insert.
 	pool.ExpectQuery(`INSERT INTO issue_relations`).
 		WithArgs("a", "b", "blocks", "ws", "user-1").
