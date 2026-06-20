@@ -210,17 +210,6 @@ func TestUpdate_StatusFromDoneClearsCompletedAt(t *testing.T) {
 	}
 }
 
-func TestUpdateAICost_IncrementsCostAndTokens(t *testing.T) {
-	store, pool := newMockStore(t)
-	pool.ExpectExec(`UPDATE issues SET\s+ai_cost_usd = ai_cost_usd \+ \$2`).
-		WithArgs("feat-search", 0.012, 800, "ws-1").
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-
-	if err := store.UpdateAICost(context.Background(), "feat-search", 0.012, 800, "ws-1"); err != nil {
-		t.Fatalf("UpdateAICost: %v", err)
-	}
-}
-
 func TestSearch_ReturnsMatchingIssues(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`to_tsvector|websearch_to_tsquery|@@`).

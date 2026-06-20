@@ -23,11 +23,11 @@ type fakeUpdater struct {
 	failOn map[string]error
 }
 
-func (f *fakeUpdater) UpdateAICost(_ context.Context, feature string, cost float64, tokens int, ws string) error {
+func (f *fakeUpdater) ReconcileFeatureSpend(_ context.Context, _, feature string, cost float64, tokens int, ws string) (float64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err, ok := f.failOn[feature]; ok {
-		return err
+		return 0, err
 	}
 	f.calls = append(f.calls, struct {
 		Feature   string
@@ -35,7 +35,7 @@ func (f *fakeUpdater) UpdateAICost(_ context.Context, feature string, cost float
 		Tokens    int
 		Workspace string
 	}{feature, cost, tokens, ws})
-	return nil
+	return cost, nil
 }
 
 type fakeWorkspaces struct{ ids []string }

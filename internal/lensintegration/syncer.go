@@ -2,6 +2,9 @@ package lensintegration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -12,7 +15,7 @@ const defaultSyncInterval = 15 * time.Minute
 // Defined as an interface so tests can drop in a counter mock without
 // spinning up pgxmock or the full Track DB schema.
 type costUpdater interface {
-	UpdateAICost(ctx context.Context, lensFeature string, costUSD float64, tokens int, workspaceID string) error
+	ReconcileFeatureSpend(ctx context.Context, eventKey, lensFeature string, lensTotalUSD float64, lensTokens int, workspaceID string) (float64, error)
 }
 
 // workspaceLister returns the workspace IDs the syncer should poll on
@@ -54,8 +57,14 @@ func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error
 			// originating request) doesn't map to a Track issue.
 			continue
 		}
-		if err := s.updater.UpdateAICost(ctx, fs.Feature, fs.CostUSD, fs.InputTokens+fs.OutputTokens, workspaceID); err != nil {
-			slog.Warn("lensintegration: UpdateAICost failed",
+		// Reconcile against the ledger: the key is the observed (workspace, feature,
+		// total), so a repeated poll of an unchanged total is a no-op, and the
+		// reconciler adds only the gap the webhook hasn't already recorded — it never
+		// double-counts spend the webhook already wrote.
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%v", workspaceID, fs.Feature, fs.CostUSD)))
+		eventKey := "lens-sync:" + hex.EncodeToString(sum[:])
+		if _, err := s.updater.ReconcileFeatureSpend(ctx, eventKey, fs.Feature, fs.CostUSD, fs.InputTokens+fs.OutputTokens, workspaceID); err != nil {
+			slog.Warn("lensintegration: ReconcileFeatureSpend failed",
 				slog.String("workspace_id", workspaceID),
 				slog.String("feature", fs.Feature),
 				slog.String("err", err.Error()),
