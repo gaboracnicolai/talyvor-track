@@ -139,6 +139,13 @@ func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "team_id required")
 		return
 	}
+	// The converted issue's creator_id is NOT NULL; require it explicitly so an omitted
+	// value is a clear contract error here, not a cryptic DB failure deep in
+	// issues.Create. The converting admin supplies their own member id.
+	if in.CreatorID == "" {
+		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "creator_id required")
+		return
+	}
 	post, err := h.store.GetPost(r.Context(), postID)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "POST_NOT_FOUND", err.Error())
