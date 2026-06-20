@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/model"
 )
@@ -149,8 +150,7 @@ type createBody struct {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "wsID")
 	var body createBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	in := body.Issue
@@ -272,8 +272,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var updates map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &updates) {
 		return
 	}
 	if len(updates) == 0 {
@@ -328,8 +327,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	var in model.Comment
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.IssueID = issueID
@@ -363,8 +361,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Body string `json:"body"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.UpdateComment(r.Context(), chi.URLParam(r, "commentID"), in.Body)
@@ -424,8 +421,7 @@ func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Updates []BulkUpdateItem `json:"updates"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if len(in.Updates) == 0 {

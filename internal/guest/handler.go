@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
 )
@@ -82,8 +83,7 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 		Role      GuestRole `json:"role"`
 		ProjectID *string   `json:"project_id,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if in.Role == "" {
@@ -157,8 +157,7 @@ func (h *Handler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.AcceptInvite(r.Context(), tok, in.Name)

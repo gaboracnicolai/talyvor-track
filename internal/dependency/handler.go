@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/httpx"
 )
 
 type Handler struct{ store *Store }
@@ -64,8 +66,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		TargetID string       `json:"target_id"`
 		Type     RelationType `json:"type"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.Create(r.Context(), Relation{
@@ -86,8 +87,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		TargetID string       `json:"target_id"`
 		Type     RelationType `json:"type"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if err := h.store.Delete(r.Context(), sourceID, in.TargetID, in.Type); err != nil {
@@ -149,8 +149,7 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		TargetIDs []string     `json:"target_ids"`
 		Type      RelationType `json:"type"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	count, err := h.store.BulkCreateRelations(r.Context(),

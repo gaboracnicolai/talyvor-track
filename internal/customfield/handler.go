@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/httpx"
 )
 
 type Handler struct{ store *Store }
@@ -63,8 +65,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "wsID")
 	var in CustomField
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.WorkspaceID = wsID
@@ -83,8 +84,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Options  []string `json:"options"`
 		Required bool     `json:"required"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.UpdateField(r.Context(), id, in.Name, in.Options, in.Required)
@@ -120,8 +120,7 @@ func (h *Handler) SetValue(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Value string `json:"value"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	if err := h.store.SetValue(r.Context(), id, fieldID, in.Value); err != nil {

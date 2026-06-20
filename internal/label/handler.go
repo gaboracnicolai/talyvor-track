@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/httpx"
 )
 
 type Handler struct{ store *Store }
@@ -35,8 +37,7 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var in Label
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.WorkspaceID = chi.URLParam(r, "wsID")

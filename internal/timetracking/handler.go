@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/httpx"
 )
 
 type Handler struct{ store *Store }
@@ -66,8 +68,7 @@ func (h *Handler) StartTimer(w http.ResponseWriter, r *http.Request) {
 		MemberID    string `json:"member_id"`
 		Description string `json:"description"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.StartTimer(r.Context(), in.IssueID, wsID, in.MemberID, in.Description)
@@ -83,8 +84,7 @@ func (h *Handler) StopTimer(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		MemberID string `json:"member_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.store.StopTimer(r.Context(), in.MemberID, wsID)
@@ -117,8 +117,7 @@ type logTimeRequest struct {
 func (h *Handler) LogTime(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "wsID")
 	var in logTimeRequest
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	billable := true

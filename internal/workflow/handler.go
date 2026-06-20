@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/httpx"
 )
 
 type Handler struct{ engine *Engine }
@@ -49,8 +51,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var in WorkflowStatus
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.TeamID = chi.URLParam(r, "teamID")
@@ -68,8 +69,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Color    string `json:"color"`
 		Position int    `json:"position"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	out, err := h.engine.UpdateStatus(r.Context(), chi.URLParam(r, "id"), in.Name, in.Color, in.Position)

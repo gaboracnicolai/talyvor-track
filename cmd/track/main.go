@@ -34,6 +34,7 @@ import (
 	"github.com/talyvor/track/internal/dependency"
 	"github.com/talyvor/track/internal/featureboard"
 	"github.com/talyvor/track/internal/guest"
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
@@ -258,6 +259,9 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(metricsMiddleware)
+	// Cap request bodies (oversize → 413) before any handler reads them — covers the
+	// JSON API and the raw-body webhooks alike.
+	r.Use(httpx.BodyLimit)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

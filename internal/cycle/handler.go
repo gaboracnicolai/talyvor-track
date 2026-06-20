@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -41,8 +42,7 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var in model.Cycle
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
 	in.WorkspaceID = chi.URLParam(r, "wsID")
