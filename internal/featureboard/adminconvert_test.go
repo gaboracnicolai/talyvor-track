@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/featureboard"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/testutil"
@@ -45,6 +46,10 @@ func convert(t *testing.T, r http.Handler, wsID, boardID, postID, body string) *
 		"/workspaces/"+wsID+"/boards/"+boardID+"/posts/"+postID+"/convert",
 		bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	// T10: AdminConvert now reads the authorized workspace from context (set by the
+	// authz middleware in production). Inject the path workspace as the authorized
+	// one so these tests exercise the handler body rather than a 403.
+	req = req.WithContext(authz.WithAuthorized(req.Context(), wsID, "admin-1"))
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 	return rr

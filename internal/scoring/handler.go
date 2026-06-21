@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -44,7 +45,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var in struct {
 		Method ScoringMethod `json:"method"`
@@ -56,7 +66,7 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := h.store.SetScore(r.Context(), id, wsID,
-		r.Header.Get("X-Member-Id"), in.Method, in.RICE, in.ICE, in.Notes)
+		actorID, in.Method, in.RICE, in.ICE, in.Notes)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "SET_FAILED", err.Error())
 		return
@@ -86,7 +96,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) PrioritizedBacklog(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	method := ScoringMethod(r.URL.Query().Get("method"))
 	if method == "" {
 		method = ScoringRICE
@@ -114,7 +128,11 @@ func (h *Handler) PrioritizedBacklog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Summary(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	out, err := h.store.GetScoreSummary(r.Context(), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "SUMMARY_FAILED", err.Error())

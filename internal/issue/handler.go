@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/model"
@@ -114,9 +115,9 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Patch("/{id}", h.Update)
 		r.Delete("/{id}", h.Delete)
 
-		// Comments live under the issue. POST takes the actor in the
-		// X-Member-Id header — Phase 4's auth pass will replace that
-		// with a real identity claim.
+		// Comments live under the issue. The actor is the caller's
+		// resolved member id from the authz context (T10), never a
+		// caller-supplied header.
 		r.Post("/{id}/comments", h.CreateComment)
 		r.Get("/{id}/comments", h.ListComments)
 		r.Patch("/{id}/comments/{commentID}", h.UpdateComment)
@@ -148,7 +149,11 @@ type createBody struct {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var body createBody
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -220,7 +225,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 // params: status, team_id, project_id, cycle_id, assignee_id,
 // priority, labels, limit, offset, order_by, order_dir.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	q := r.URL.Query()
 	filter := IssueFilter{
 		WorkspaceID: wsID,
@@ -286,7 +295,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	metrics.IssuesUpdated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
 	if h.notifier != nil {
-		actorID := r.Header.Get("X-Member-Id")
+		actorID, ok := authz.MemberID(r.Context())
+		if !ok {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+			return
+		}
 		h.notifier.IssueUpdated(r.Context(), out.WorkspaceID, out.TeamID, out.ID, actorID, updates)
 	}
 	if h.automation != nil {
@@ -315,16 +328,30 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.notifier != nil && existing != nil {
-		actorID := r.Header.Get("X-Member-Id")
+		actorID, ok := authz.MemberID(r.Context())
+		if !ok {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+			return
+		}
 		h.notifier.IssueDeleted(r.Context(), existing.WorkspaceID, existing.TeamID, id, actorID)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // CreateComment appends a comment to an issue and fans out a
-// comment.created event to the issue's room. The author_id comes
-// from the X-Member-Id header (Phase 4 will replace with auth).
+// comment.created event to the issue's room. The author_id is the
+// caller's resolved member id from the authz context (T10).
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	issueID := chi.URLParam(r, "id")
 	var in model.Comment
 	if !httpx.DecodeJSON(w, r, &in) {
@@ -332,7 +359,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	in.IssueID = issueID
 	if in.AuthorID == "" {
-		in.AuthorID = r.Header.Get("X-Member-Id")
+		in.AuthorID = actorID
 	}
 	out, err := h.store.CreateComment(r.Context(), in)
 	if err != nil {
@@ -340,7 +367,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.notifier != nil {
-		h.notifier.CommentCreated(r.Context(), chi.URLParam(r, "wsID"), issueID, out.AuthorID, *out)
+		h.notifier.CommentCreated(r.Context(), wsID, issueID, out.AuthorID, *out)
 	}
 	writeJSON(w, http.StatusCreated, out)
 }
@@ -358,6 +385,11 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var in struct {
 		Body string `json:"body"`
 	}
@@ -370,27 +402,44 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.notifier != nil {
-		actorID := r.Header.Get("X-Member-Id")
-		h.notifier.CommentUpdated(r.Context(), chi.URLParam(r, "wsID"), chi.URLParam(r, "id"), actorID, *out)
+		actorID, ok := authz.MemberID(r.Context())
+		if !ok {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+			return
+		}
+		h.notifier.CommentUpdated(r.Context(), wsID, chi.URLParam(r, "id"), actorID, *out)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	commentID := chi.URLParam(r, "commentID")
 	if err := h.store.DeleteComment(r.Context(), commentID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}
 	if h.notifier != nil {
-		actorID := r.Header.Get("X-Member-Id")
-		h.notifier.CommentDeleted(r.Context(), chi.URLParam(r, "wsID"), chi.URLParam(r, "id"), commentID, actorID)
+		actorID, ok := authz.MemberID(r.Context())
+		if !ok {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+			return
+		}
+		h.notifier.CommentDeleted(r.Context(), wsID, chi.URLParam(r, "id"), commentID, actorID)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	query := r.URL.Query().Get("q")
 	if query == "" {
 		writeErr(w, http.StatusBadRequest, "MISSING_QUERY", "q query parameter is required")

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -37,11 +38,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "WORKSPACE_FORBIDDEN"})
+		return
+	}
 	var in Rule
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	in.WorkspaceID = chi.URLParam(r, "wsID")
+	in.WorkspaceID = wsID
 	out, err := h.engine.AddRule(r.Context(), in)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
@@ -51,7 +57,12 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
-	rules := h.engine.ListRules(chi.URLParam(r, "wsID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "WORKSPACE_FORBIDDEN"})
+		return
+	}
+	rules := h.engine.ListRules(wsID)
 	if rules == nil {
 		rules = []Rule{}
 	}
@@ -70,6 +81,11 @@ func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 // workspace. The query joins logs to rules so we can filter by
 // workspace; logs themselves only carry rule_id.
 func (h *Handler) ListLogs(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "WORKSPACE_FORBIDDEN"})
+		return
+	}
 	if h.engine.pool == nil {
 		writeJSON(w, http.StatusOK, []map[string]any{})
 		return
@@ -81,7 +97,7 @@ func (h *Handler) ListLogs(w http.ResponseWriter, r *http.Request) {
         JOIN automation_rules ar ON ar.id = l.rule_id
         WHERE ar.workspace_id = $1
         ORDER BY l.created_at DESC LIMIT 100`,
-		chi.URLParam(r, "wsID"),
+		wsID,
 	)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())

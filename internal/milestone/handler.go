@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -37,11 +38,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized workspace")
+		return
+	}
 	var in Milestone
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	in.WorkspaceID = chi.URLParam(r, "wsID")
+	in.WorkspaceID = wsID
 	in.ProjectID = chi.URLParam(r, "projectID")
 	out, err := h.store.Create(r.Context(), in)
 	if err != nil {

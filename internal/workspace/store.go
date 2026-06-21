@@ -20,6 +20,7 @@ type pgxDB interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // templateSeeder is the subset of template.Store that workspace
@@ -85,6 +86,80 @@ func (s *Store) Create(ctx context.Context, ws model.Workspace) (*model.Workspac
 		_ = s.seeder.SeedDefaults(ctx, out.ID)
 	}
 	return out, nil
+}
+
+// CreateWithOwner creates a workspace AND seeds its creator as the OWNER member in the
+// SAME TRANSACTION (T10). The atomicity matters: a workspace with no members is
+// unreachable (T10's own membership check would 403 everyone, including its creator), so
+// a partial failure must leave neither. Role is 'owner' explicitly — the creator is the
+// root of this workspace's permission structure. The member name defaults to the email
+// (the gateway provides no name claim; display-only, editable later).
+func (s *Store) CreateWithOwner(ctx context.Context, ws model.Workspace, ownerEmail string) (*model.Workspace, error) {
+	if ws.Name == "" || ws.Slug == "" {
+		return nil, errors.New("workspace: Name and Slug required")
+	}
+	if ownerEmail == "" {
+		return nil, errors.New("workspace: owner email required")
+	}
+	if ws.Plan == "" {
+		ws.Plan = "free"
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	out, err := scanWorkspace(tx.QueryRow(ctx,
+		`INSERT INTO workspaces (name, slug, logo_url, plan) VALUES ($1, $2, $3, $4) RETURNING `+workspaceColumns,
+		ws.Name, ws.Slug, ws.LogoURL, ws.Plan,
+	))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO members (workspace_id, name, email, role) VALUES ($1, $2, $3, 'owner')`,
+		out.ID, ownerEmail, ownerEmail,
+	); err != nil {
+		return nil, fmt.Errorf("workspace: seed owner member: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	// Best-effort, POST-commit: a template-seed failure must not roll back the workspace
+	// + its owner.
+	if s.seeder != nil {
+		_ = s.seeder.SeedDefaults(ctx, out.ID)
+	}
+	return out, nil
+}
+
+// ListByIDs returns the workspaces with the given ids (T10: the caller's own workspaces,
+// resolved from membership — so a list can never enumerate workspaces the caller is not a
+// member of).
+func (s *Store) ListByIDs(ctx context.Context, ids []string) ([]model.Workspace, error) {
+	if len(ids) == 0 {
+		return []model.Workspace{}, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+workspaceColumns+` FROM workspaces WHERE id = ANY($1) ORDER BY created_at DESC`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: list by ids: %w", err)
+	}
+	defer rows.Close()
+	var out []model.Workspace
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *w)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetByID(ctx context.Context, id string) (*model.Workspace, error) {

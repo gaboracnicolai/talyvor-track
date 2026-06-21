@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -51,7 +52,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // `lens_configured: false` so the frontend can show a "set up Lens"
 // CTA instead of failing.
 func (h *Handler) GetAICosts(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "WORKSPACE_FORBIDDEN"})
+		return
+	}
 	ctx := r.Context()
 
 	if !h.lens.IsConfigured() {
