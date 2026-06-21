@@ -33,6 +33,7 @@ import (
 	"github.com/talyvor/track/internal/db"
 	"github.com/talyvor/track/internal/dependency"
 	"github.com/talyvor/track/internal/featureboard"
+	"github.com/talyvor/track/internal/gatewayauth"
 	"github.com/talyvor/track/internal/guest"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/importer"
@@ -277,6 +278,22 @@ func main() {
 	r.Get("/mcp/sse", mcpServer.HandleSSE)
 
 	r.Route("/v1", func(r chi.Router) {
+		// T9 auth trust boundary: every user-API request must prove it transited the edge
+		// gateway (x-gateway-auth, constant-time-verified) before any gateway-injected
+		// identity header is trusted. Exempt the own-auth paths that do NOT rely on
+		// gateway identity: HMAC webhooks, the anonymous public board, guest-token +
+		// invite routes, and the websocket upgrade. T9 only establishes the boundary +
+		// puts verified identity in context — it does NOT enforce membership or scope the
+		// store (that's T10). MCP at /mcp is on the public router and still bypasses this
+		// boundary — flagged for T11.
+		r.Use(gatewayauth.Middleware(cfg.GatewayAuthSecret, func(p string) bool {
+			return strings.HasPrefix(p, "/v1/lens/webhook") ||
+				strings.HasPrefix(p, "/v1/webhooks/") ||
+				strings.HasPrefix(p, "/v1/public/") ||
+				strings.HasPrefix(p, "/v1/invite/") ||
+				strings.HasPrefix(p, "/v1/guest/") ||
+				p == "/v1/ws"
+		}))
 		wsHandler.Mount(r)
 		teamHandler.Mount(r)
 		projectHandler.Mount(r)
