@@ -10,6 +10,9 @@ services:
       - TRACK_LENS_API_KEY=${TRACK_LENS_API_KEY:-}
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}
       - TRACK_GITHUB_WEBHOOK_SECRET=${TRACK_GITHUB_WEBHOOK_SECRET:-}
+      # Track's copy of the edge gateway transit-proof secret. Track fail-closes without
+      # it (>=16 chars). Dev default here; production MUST set the gateway's real secret.
+      - GATEWAY_AUTH_SECRET=${GATEWAY_AUTH_SECRET:-dev-gateway-transit-secret-change-me}
       - TRACK_LOG_LEVEL=${TRACK_LOG_LEVEL:-info}
     depends_on:
       postgres:
