@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -47,7 +48,11 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) GetTimer(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	memberID := r.URL.Query().Get("member_id")
 	if memberID == "" {
 		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "member_id required")
@@ -62,7 +67,11 @@ func (h *Handler) GetTimer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StartTimer(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var in struct {
 		IssueID     string `json:"issue_id"`
 		MemberID    string `json:"member_id"`
@@ -80,7 +89,11 @@ func (h *Handler) StartTimer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StopTimer(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var in struct {
 		MemberID string `json:"member_id"`
 	}
@@ -115,7 +128,11 @@ type logTimeRequest struct {
 }
 
 func (h *Handler) LogTime(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var in logTimeRequest
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
@@ -163,7 +180,11 @@ func (h *Handler) ListIssueEntries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) WorkspaceSummary(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	since := time.Now().UTC().AddDate(0, 0, -30) // default last 30 days
 	if v := r.URL.Query().Get("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {

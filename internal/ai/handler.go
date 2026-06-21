@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
@@ -84,6 +85,11 @@ func (h *Handler) Triage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) FindDuplicates(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	if !h.engine.IsAvailable() {
 		unavailable(w)
 		return
@@ -96,7 +102,7 @@ func (h *Handler) FindDuplicates(w http.ResponseWriter, r *http.Request) {
 	// Pull a recency-ordered candidate window so we don't ship the
 	// entire issue tree to the LLM. 20 is plenty for triage.
 	candidates, _ := h.issues.List(r.Context(), issue.IssueFilter{
-		WorkspaceID: chi.URLParam(r, "wsID"),
+		WorkspaceID: wsID,
 		TeamID:      iss.TeamID,
 		Limit:       20,
 		OrderBy:     "created_at",
@@ -137,6 +143,11 @@ func (h *Handler) Summary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SuggestSprint(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	if !h.engine.IsAvailable() {
 		unavailable(w)
 		return
@@ -155,7 +166,7 @@ func (h *Handler) SuggestSprint(w http.ResponseWriter, r *http.Request) {
 		in.CycleDays = 14
 	}
 	backlog, _ := h.issues.List(r.Context(), issue.IssueFilter{
-		WorkspaceID: chi.URLParam(r, "wsID"),
+		WorkspaceID: wsID,
 		TeamID:      chi.URLParam(r, "teamID"),
 		Status:      "backlog",
 		Limit:       100,
@@ -171,6 +182,11 @@ func (h *Handler) SuggestSprint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SemanticSearch(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	query := r.URL.Query().Get("q")
 	if query == "" {
 		writeErr(w, http.StatusBadRequest, "MISSING_QUERY", "q query parameter required")
@@ -182,7 +198,7 @@ func (h *Handler) SemanticSearch(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	out, err := h.engine.SemanticSearch(r.Context(), chi.URLParam(r, "wsID"), query, limit)
+	out, err := h.engine.SemanticSearch(r.Context(), wsID, query, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "SEARCH_FAILED", err.Error())
 		return

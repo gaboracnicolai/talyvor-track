@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/model"
 	"github.com/talyvor/track/internal/testutil"
@@ -113,6 +114,10 @@ func TestUpdate_Handler_PatchesReturns200(t *testing.T) {
 		"/workspaces/"+ws.ID+"/teams/"+team.ID+"/cycles/"+c.ID,
 		bytes.NewBufferString(`{"name":"Renamed via API"}`))
 	req.Header.Set("Content-Type", "application/json")
+	// T10: the handler now reads the server-AUTHORIZED workspace from context
+	// (set by the authz middleware), not the URL param. Inject the authorized
+	// workspace under test so the handler scopes to it instead of 403-ing.
+	req = req.WithContext(authz.WithAuthorized(req.Context(), ws.ID, "test-member"))
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 

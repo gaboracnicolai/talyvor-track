@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -61,7 +62,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	sourceID := chi.URLParam(r, "id")
 	var in struct {
 		TargetID string       `json:"target_id"`
@@ -73,7 +83,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	out, err := h.store.Create(r.Context(), Relation{
 		SourceID: sourceID, TargetID: in.TargetID, Type: in.Type,
 		WorkspaceID: wsID,
-		CreatedBy:   r.Header.Get("X-Member-Id"),
+		CreatedBy:   actorID,
 	})
 	if err != nil {
 		if errors.Is(err, ErrCycle) {
@@ -103,7 +113,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Graph(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	issueID := chi.URLParam(r, "id")
 	depth := 3
 	if v := r.URL.Query().Get("depth"); v != "" {
@@ -122,7 +136,12 @@ func (h *Handler) Graph(w http.ResponseWriter, r *http.Request) {
 // ─── new endpoints ─────────────────────────────────────────
 
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.GetRelationStats(r.Context(), chi.URLParam(r, "wsID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
+	out, err := h.store.GetRelationStats(r.Context(), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "STATS_FAILED", err.Error())
 		return
@@ -131,7 +150,11 @@ func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Blocking(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	var cycleID *string
 	if v := r.URL.Query().Get("cycle_id"); v != "" {
 		cycleID = &v
@@ -148,7 +171,16 @@ func (h *Handler) Blocking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusForbidden, apiError{Error: "not a member of this workspace", Code: "FORBIDDEN"})
+		return
+	}
 	sourceID := chi.URLParam(r, "id")
 	var in struct {
 		TargetIDs []string     `json:"target_ids"`
@@ -160,7 +192,7 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	count, err := h.store.BulkCreateRelations(r.Context(),
 		Relation{
 			SourceID: sourceID, WorkspaceID: wsID, Type: in.Type,
-			CreatedBy: r.Header.Get("X-Member-Id"),
+			CreatedBy: actorID,
 		},
 		in.TargetIDs,
 	)

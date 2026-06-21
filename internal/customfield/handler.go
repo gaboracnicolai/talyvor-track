@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -46,7 +47,11 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var teamID *string
 	if v := r.URL.Query().Get("team_id"); v != "" {
 		teamID = &v
@@ -63,7 +68,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var in CustomField
 	if !httpx.DecodeJSON(w, r, &in) {
 		return

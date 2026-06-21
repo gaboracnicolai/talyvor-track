@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/authz"
 )
 
 type Handler struct{ engine *Engine }
@@ -83,11 +85,16 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Distribution(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	groupBy := r.URL.Query().Get("group_by")
 	if groupBy == "" {
 		groupBy = "status"
 	}
-	out, err := h.engine.GetDistribution(r.Context(), chi.URLParam(r, "wsID"), groupBy, intParam(r, "days", 30))
+	out, err := h.engine.GetDistribution(r.Context(), wsID, groupBy, intParam(r, "days", 30))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "DISTRIBUTION_FAILED", err.Error())
 		return
@@ -99,8 +106,13 @@ func (h *Handler) Distribution(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Resolution(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	out, err := h.engine.GetTimeToResolution(r.Context(),
-		chi.URLParam(r, "wsID"), r.URL.Query().Get("team_id"),
+		wsID, r.URL.Query().Get("team_id"),
 		intParam(r, "days", 30))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "RESOLUTION_FAILED", err.Error())
@@ -110,7 +122,12 @@ func (h *Handler) Resolution(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AICosts(w http.ResponseWriter, r *http.Request) {
-	out, err := h.engine.GetAICostTrends(r.Context(), chi.URLParam(r, "wsID"), intParam(r, "days", 30))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	out, err := h.engine.GetAICostTrends(r.Context(), wsID, intParam(r, "days", 30))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "AICOSTS_FAILED", err.Error())
 		return
@@ -119,7 +136,12 @@ func (h *Handler) AICosts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Workload(w http.ResponseWriter, r *http.Request) {
-	out, err := h.engine.GetWorkload(r.Context(), chi.URLParam(r, "wsID"), r.URL.Query().Get("team_id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	out, err := h.engine.GetWorkload(r.Context(), wsID, r.URL.Query().Get("team_id"))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "WORKLOAD_FAILED", err.Error())
 		return
@@ -134,6 +156,11 @@ func (h *Handler) Workload(w http.ResponseWriter, r *http.Request) {
 // Disposition header pins the filename so browsers offer a download
 // rather than inline display.
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "csv"
@@ -158,13 +185,13 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		teamID := r.URL.Query().Get("team_id")
 		_ = h.engine.ExportVelocityCSV(r.Context(), teamID, intParam(r, "cycles", 5), w)
 	case "ai-costs":
-		_ = h.engine.ExportAICostTrendsCSV(r.Context(), chi.URLParam(r, "wsID"), intParam(r, "days", 30), w)
+		_ = h.engine.ExportAICostTrendsCSV(r.Context(), wsID, intParam(r, "days", 30), w)
 	case "distribution":
 		gb := r.URL.Query().Get("group_by")
 		if gb == "" {
 			gb = "status"
 		}
-		_ = h.engine.ExportDistributionCSV(r.Context(), chi.URLParam(r, "wsID"), gb, intParam(r, "days", 30), w)
+		_ = h.engine.ExportDistributionCSV(r.Context(), wsID, gb, intParam(r, "days", 30), w)
 	default:
 		// Headers are already committed; we can't switch to a JSON
 		// error response. Stream a single-line CSV explaining the

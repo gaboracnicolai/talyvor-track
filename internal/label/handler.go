@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 )
 
@@ -36,11 +37,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var in Label
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	in.WorkspaceID = chi.URLParam(r, "wsID")
+	in.WorkspaceID = wsID
 	out, err := h.store.Create(r.Context(), in)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
@@ -50,7 +56,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.List(r.Context(), chi.URLParam(r, "wsID"), r.URL.Query().Get("team_id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.List(r.Context(), wsID, r.URL.Query().Get("team_id"))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return

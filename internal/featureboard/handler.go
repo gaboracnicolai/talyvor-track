@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
@@ -72,7 +73,12 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 // ─── admin handlers ─────────────────────────────────────────
 
 func (h *Handler) AdminList(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.ListBoards(r.Context(), chi.URLParam(r, "wsID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	out, err := h.store.ListBoards(r.Context(), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
@@ -84,7 +90,11 @@ func (h *Handler) AdminList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AdminCreate(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var in Board
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
@@ -108,6 +118,11 @@ func (h *Handler) AdminStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AdminUpdatePost(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var in struct {
 		Status  PostStatus `json:"status"`
 		IssueID *string    `json:"issue_id"`
@@ -115,7 +130,7 @@ func (h *Handler) AdminUpdatePost(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	if err := h.store.UpdateStatus(r.Context(), chi.URLParam(r, "wsID"), chi.URLParam(r, "boardID"), chi.URLParam(r, "postID"), in.Status, in.IssueID); err != nil {
+	if err := h.store.UpdateStatus(r.Context(), wsID, chi.URLParam(r, "boardID"), chi.URLParam(r, "postID"), in.Status, in.IssueID); err != nil {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
 	}
@@ -126,7 +141,11 @@ func (h *Handler) AdminUpdatePost(w http.ResponseWriter, r *http.Request) {
 // two via feature_posts.issue_id. The team to associate the issue
 // with comes from the request body — admins pick it.
 func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	postID := chi.URLParam(r, "postID")
 	var in struct {
 		TeamID    string `json:"team_id"`

@@ -26,6 +26,7 @@ import (
 
 	"github.com/talyvor/track/internal/ai"
 	"github.com/talyvor/track/internal/analytics"
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/automation"
 	"github.com/talyvor/track/internal/config"
 	"github.com/talyvor/track/internal/customfield"
@@ -286,14 +287,22 @@ func main() {
 		// puts verified identity in context — it does NOT enforce membership or scope the
 		// store (that's T10). MCP at /mcp is on the public router and still bypasses this
 		// boundary — flagged for T11.
-		r.Use(gatewayauth.Middleware(cfg.GatewayAuthSecret, func(p string) bool {
+		gwExempt := func(p string) bool {
 			return strings.HasPrefix(p, "/v1/lens/webhook") ||
 				strings.HasPrefix(p, "/v1/webhooks/") ||
 				strings.HasPrefix(p, "/v1/public/") ||
 				strings.HasPrefix(p, "/v1/invite/") ||
 				strings.HasPrefix(p, "/v1/guest/") ||
 				p == "/v1/ws"
-		}))
+		}
+		r.Use(gatewayauth.Middleware(cfg.GatewayAuthSecret, gwExempt))
+		// T10 workspace authorization, chained after T9: resolve the verified email ->
+		// memberships and, for a {wsID} route, require the caller be a member (else 403);
+		// put the AUTHORIZED workspace_id + the caller's member.id into context. Handlers
+		// read those, NEVER the URL {wsID} or X-Member-Id. Same exempt set — own-auth
+		// paths carry no verified identity. (MCP + importer ?workspace_id= bypass this —
+		// T11.)
+		r.Use(authz.Middleware(authz.NewPGResolver(pool), gwExempt))
 		wsHandler.Mount(r)
 		teamHandler.Mount(r)
 		projectHandler.Mount(r)

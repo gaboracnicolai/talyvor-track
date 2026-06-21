@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
@@ -43,11 +44,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized workspace")
+		return
+	}
 	var in model.Cycle
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	in.WorkspaceID = chi.URLParam(r, "wsID")
+	in.WorkspaceID = wsID
 	in.TeamID = chi.URLParam(r, "teamID")
 	out, err := h.store.Create(r.Context(), in)
 	if err != nil {
@@ -85,7 +91,11 @@ func (h *Handler) GetActive(w http.ResponseWriter, r *http.Request) {
 // Update applies a partial update (name / status / start_date / end_date) to a cycle,
 // scoped to the workspace in the path. Unknown or cross-workspace cycles → 404.
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized workspace")
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var in struct {
 		Name      *string    `json:"name"`

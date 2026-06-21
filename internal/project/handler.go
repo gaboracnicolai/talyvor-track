@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
@@ -46,11 +47,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized workspace")
+		return
+	}
 	var in model.Project
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	in.WorkspaceID = chi.URLParam(r, "wsID")
+	in.WorkspaceID = wsID
 	out, err := h.store.Create(r.Context(), in)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
@@ -60,7 +66,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.ListByWorkspace(r.Context(), chi.URLParam(r, "wsID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized workspace")
+		return
+	}
+	out, err := h.store.ListByWorkspace(r.Context(), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
@@ -105,7 +116,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 // dates may be overridden via ?start_date= and ?end_date= as RFC3339;
 // ?team_id= scopes the roadmap to a single team.
 func (h *Handler) Roadmap(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized workspace")
+		return
+	}
 	now := time.Now().UTC()
 	start := now
 	end := now.AddDate(0, 6, 0)

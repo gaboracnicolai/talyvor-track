@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
@@ -77,7 +78,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 // ─── admin handlers ─────────────────────────────────────────
 
 func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var in struct {
 		Email     string    `json:"email"`
 		Role      GuestRole `json:"role"`
@@ -89,7 +99,7 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 	if in.Role == "" {
 		in.Role = GuestRoleViewer
 	}
-	invitedBy := r.Header.Get("X-Member-Id")
+	invitedBy := actorID
 	out, err := h.store.CreateInvite(r.Context(), wsID, in.ProjectID, in.Email, in.Role, invitedBy)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "INVITE_FAILED", err.Error())
@@ -105,7 +115,11 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "wsID")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	var projectID *string
 	if v := r.URL.Query().Get("project_id"); v != "" {
 		projectID = &v

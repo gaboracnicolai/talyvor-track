@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/dependency"
 	"github.com/talyvor/track/internal/testutil"
 )
@@ -138,6 +139,10 @@ func TestCycle_Handler_Returns409(t *testing.T) {
 	body := `{"target_id":"` + a.ID + `","type":"blocks"}` // B blocks A → cycle
 	req := httptest.NewRequest(http.MethodPost, "/ws/"+ws.ID+"/issues/"+b.ID+"/relations", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	// T10: the handler now reads the authorized workspace + actor from context
+	// (set by the authz middleware in production). Inject the workspace under test
+	// as the authorized one so this exercises the cycle path, not a 403.
+	req = req.WithContext(authz.WithAuthorized(req.Context(), ws.ID, "u"))
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
