@@ -74,6 +74,25 @@ func Memberships(ctx context.Context) ([]Membership, bool) {
 	return ac.memberships, true
 }
 
+// AuthorizeWorkspace authorizes a CALLER-SUPPLIED workspace id (from a query param, a tool
+// argument, a body field — any route where the path did not carry {wsID}) against the
+// verified caller's resolved memberships. It returns the matching Membership (so the caller
+// gets the resolved member.id as the actor) and ok=false when the caller is not a member.
+// This is the single place the "is the caller a member of THIS workspace" rule lives — the
+// importer uses it for ?workspace_id=, and the MCP tools (T11b) will reuse it for their
+// workspace_id argument. Fail-closed: an empty id, or no memberships in context (the
+// request never passed T9/T10), → ok=false.
+func AuthorizeWorkspace(ctx context.Context, workspaceID string) (Membership, bool) {
+	if workspaceID == "" {
+		return Membership{}, false
+	}
+	ms, ok := Memberships(ctx)
+	if !ok {
+		return Membership{}, false
+	}
+	return membershipFor(ms, workspaceID)
+}
+
 // WithAuthorized returns a context carrying an authorized workspace + the caller's member
 // id there. The middleware installs this after the membership check passes; handler tests
 // use it to exercise a {wsID} handler without standing up the full middleware chain.
