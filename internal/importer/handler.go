@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/talyvor/track/internal/authz"
 )
 
 // Handler exposes the importer over HTTP. It owns no state — every
@@ -65,6 +67,15 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request, fn importFn) {
 		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "workspace_id and team_id are required (query string)")
 		return
 	}
+	// This is a flat /v1/import/* route (no path {wsID}), so T10 resolved the caller's
+	// memberships but authorized no single workspace. Authorize the caller-supplied
+	// workspace_id against those memberships — not a member → 403. The workspace then comes
+	// from the membership row (server-resolved), never trusted from the query alone.
+	m, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "NO_FILE", "expected multipart 'file' field")
@@ -72,7 +83,7 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request, fn importFn) {
 	}
 	defer file.Close()
 
-	out, err := fn(r.Context(), workspaceID, teamID, file)
+	out, err := fn(r.Context(), m.WorkspaceID, teamID, file)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "IMPORT_FAILED", err.Error())
 		return
