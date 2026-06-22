@@ -1,0 +1,88 @@
+# workspace-authz.yml — the workspace-authorization IDOR regression lock (T12).
+#
+# Companion to cross-object-tenancy.yml; SAME mechanism — semgrep ERROR rules enforced by
+# the `tenancy-lock` CI job via `semgrep scan --config .semgrep/ --error --metrics=off internal/`.
+# Adding rules here needs no workflow change; the job already loads the whole .semgrep/ dir.
+#
+# WHAT THIS LOCKS (statically detectable — the URL-param and query-param forms):
+#   A. chi.URLParam(_, "wsID")             the pre-T10 IDOR: workspace taken from the caller's URL.
+#                                          Legit path: authz.WorkspaceID(ctx) (set only after the
+#                                          T10 membership check). Allowlisted ONLY for a route that
+#                                          compares claims.WorkspaceID against the URL wsID — i.e.
+#                                          the guest-token guard. The exemption keys on the COMPARISON,
+#                                          not on living in internal/guest: a guest-style handler that
+#                                          reads wsID but omits the check is a guest->other-workspace
+#                                          IDOR and still fires.
+#   B. X-Member-Id reads                   the pre-T10 spoofable actor (fully retired in T10).
+#                                          Legit: authz.MemberID(ctx).
+#   C. r.URL.Query().Get("workspace_id")   a flat /v1 route taking a caller-supplied workspace
+#                                          without authz.AuthorizeWorkspace — the T11a/importer shape.
+#
+# WHAT THIS CANNOT LOCK — a hard limit, NOT a TODO:
+#   The body / JSON-RPC tool-argument form. When workspace_id arrives as a decoded struct field
+#   (in.WorkspaceID), there is NO syntactic difference between a caller-supplied value and one
+#   derived from authz — semgrep does AST pattern-matching, not data-flow provenance, so that form
+#   CANNOT be detected here. It is guarded by the real-PG authz tests + review, NOT by T12.
+#   OPERATIONAL CONSEQUENCE, named explicitly: when T11b lands, MCP's workspace_id is exactly this
+#   body/tool-arg form. MCP's safety rests on each tool calling authz.AuthorizeWorkspace and on the
+#   authz tests — NOT on this lock. Do not read "T12 locks the IDOR class" as "MCP is covered."
+rules:
+  - id: workspace-from-url-param-bypasses-membership
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Reading the workspace from chi.URLParam("wsID") trusts the caller-chosen URL — the pre-T10
+      IDOR shape. Read the server-authorized workspace from authz.WorkspaceID(ctx) instead (set
+      only after the T10 membership check). The ONLY allowed readers are guest-token routes that
+      validate the URL wsID against the token (if claims.WorkspaceID != wsID { reject }); the
+      exemption keys on that comparison, not on the guest package.
+    patterns:
+      - pattern: chi.URLParam($R, "wsID")
+      - pattern-not-inside: |
+          func $F(...) {
+            ...
+            $WS := chi.URLParam($RR, "wsID")
+            ...
+            if $CLAIMS.WorkspaceID != $WS {
+              ...
+            }
+            ...
+          }
+    paths:
+      exclude:
+        - "*_test.go"
+
+  - id: x-member-id-spoofable-actor
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Reading X-Member-Id trusts a spoofable actor header (retired in T10). The actor is the
+      gateway-resolved member: authz.MemberID(ctx).
+    patterns:
+      - pattern-either:
+          - pattern: $R.Header.Get("X-Member-Id")
+          - pattern: $R.Header.Values("X-Member-Id")
+          - pattern: $R.Header["X-Member-Id"]
+    paths:
+      exclude:
+        - "*_test.go"
+
+  - id: caller-workspace-id-query-needs-authorization
+    languages: [go]
+    severity: ERROR
+    message: >-
+      A flat route reads ?workspace_id= from the caller without authorizing it. Pass it through
+      authz.AuthorizeWorkspace(ctx, workspaceID) (-> 403 if not a member), as the importer does.
+      NOTE: this catches the query form only; the body / tool-arg form (in.WorkspaceID) is
+      provenance-dependent and NOT statically detectable — see this file's header.
+    patterns:
+      - pattern: $R.URL.Query().Get("workspace_id")
+      - pattern-not-inside: |
+          func $F(...) {
+            ...
+            authz.AuthorizeWorkspace(...)
+            ...
+          }
+    paths:
+      exclude:
+        - "*_test.go"
