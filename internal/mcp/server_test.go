@@ -13,6 +13,7 @@ import (
 
 	"github.com/talyvor/track/internal/ai"
 	"github.com/talyvor/track/internal/analytics"
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
@@ -96,11 +97,19 @@ func (f *fakeAnalytics) GetAICostTrends(ctx context.Context, ws string, days int
 }
 
 type fakeMembers struct {
-	listFn func(context.Context, string, string) ([]model.Member, error)
+	listFn   func(context.Context, string, string) ([]model.Member, error)
+	teamWsFn func(context.Context, string) (string, error)
 }
 
 func (f *fakeMembers) ListMembers(ctx context.Context, ws, team string) ([]model.Member, error) {
 	return f.listFn(ctx, ws, team)
+}
+
+func (f *fakeMembers) WorkspaceOfTeam(ctx context.Context, teamID string) (string, error) {
+	if f.teamWsFn != nil {
+		return f.teamWsFn(ctx, teamID)
+	}
+	return "ws-1", nil // default: unit tests act in ws-1
 }
 
 // ─── helpers ────────────────────────────────────────────────
@@ -132,6 +141,12 @@ func rpcCall(t *testing.T, s *Server, method string, params any) rpcResponse {
 	}
 	enc, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(enc))
+	// The production chain (gatewayauth + authz) runs before HandleRPC and seeds the
+	// caller's memberships; these unit tests exercise tool logic, so inject a membership for
+	// the workspace they act in (ws-1). The dedicated authz proof (authz_integration_test.go)
+	// drives the REAL middleware to test deny/allow.
+	req = req.WithContext(authz.WithMemberships(req.Context(),
+		[]authz.Membership{{WorkspaceID: "ws-1", MemberID: "m-test"}}))
 	w := httptest.NewRecorder()
 	s.HandleRPC(w, req)
 
@@ -280,13 +295,14 @@ func TestMCP_GetIssue_ReturnsCorrectIssue(t *testing.T) {
 	s.issueStore = &fakeIssueStore{
 		getByIDFn: func(_ context.Context, id string) (*model.Issue, error) {
 			return &model.Issue{
-				ID:         id,
-				Identifier: "ENG-42",
-				Title:      "Slow query",
-				Status:     model.StatusInProgress,
-				Priority:   model.PriorityHigh,
-				AICostUSD:  0.87,
-				AITokens:   1500,
+				ID:          id,
+				WorkspaceID: "ws-1",
+				Identifier:  "ENG-42",
+				Title:       "Slow query",
+				Status:      model.StatusInProgress,
+				Priority:    model.PriorityHigh,
+				AICostUSD:   0.87,
+				AITokens:    1500,
 			}, nil
 		},
 	}
@@ -312,7 +328,7 @@ func TestMCP_GetIssue_LooksUpByIdentifier(t *testing.T) {
 	s.issueStore = &fakeIssueStore{
 		getByIdentFn: func(_ context.Context, ident string) (*model.Issue, error) {
 			called = ident
-			return &model.Issue{ID: "i-9", Identifier: ident, Title: "found by ident"}, nil
+			return &model.Issue{ID: "i-9", WorkspaceID: "ws-1", Identifier: ident, Title: "found by ident"}, nil
 		},
 	}
 	resp := rpcCall(t, s, "tools/call", map[string]any{
@@ -419,6 +435,9 @@ func TestMCP_AddComment_CreatesComment(t *testing.T) {
 	s := newTestServer(t)
 	captured := model.Comment{}
 	s.issueStore = &fakeIssueStore{
+		getByIDFn: func(_ context.Context, id string) (*model.Issue, error) {
+			return &model.Issue{ID: id, WorkspaceID: "ws-1"}, nil
+		},
 		createCommentFn: func(_ context.Context, c model.Comment) (*model.Comment, error) {
 			captured = c
 			return &model.Comment{
@@ -444,8 +463,8 @@ func TestMCP_AddComment_CreatesComment(t *testing.T) {
 	if data["body"] != "LGTM, shipping" {
 		t.Errorf("body = %v", data["body"])
 	}
-	if captured.AuthorID != "agent" {
-		t.Errorf("author_id defaulted to %q, want %q", captured.AuthorID, "agent")
+	if captured.AuthorID != "m-test" {
+		t.Errorf("author_id = %q, want the resolved member %q (not a caller-supplied/agent value)", captured.AuthorID, "m-test")
 	}
 }
 
@@ -548,7 +567,7 @@ func TestMCP_TriageIssue_GracefullyDegradesWhenAIUnavailable(t *testing.T) {
 	s := newTestServer(t)
 	s.issueStore = &fakeIssueStore{
 		getByIDFn: func(_ context.Context, id string) (*model.Issue, error) {
-			return &model.Issue{ID: id, Title: "x", Description: "y"}, nil
+			return &model.Issue{ID: id, WorkspaceID: "ws-1", Title: "x", Description: "y"}, nil
 		},
 	}
 	s.aiEngine = &fakeAIEngine{available: false}
@@ -568,7 +587,7 @@ func TestMCP_TriageIssue_AppliesSuggestions(t *testing.T) {
 	gotUpdates := map[string]any{}
 	s.issueStore = &fakeIssueStore{
 		getByIDFn: func(_ context.Context, id string) (*model.Issue, error) {
-			return &model.Issue{ID: id, Title: "Slow", Description: "x"}, nil
+			return &model.Issue{ID: id, WorkspaceID: "ws-1", Title: "Slow", Description: "x"}, nil
 		},
 		updateFn: func(_ context.Context, _ string, updates map[string]any) (*model.Issue, error) {
 			gotUpdates = updates
@@ -610,6 +629,9 @@ func TestMCP_MoveToCycle_UpdatesIssue(t *testing.T) {
 	s := newTestServer(t)
 	var gotUpdates map[string]any
 	s.issueStore = &fakeIssueStore{
+		getByIDFn: func(_ context.Context, id string) (*model.Issue, error) {
+			return &model.Issue{ID: id, WorkspaceID: "ws-1"}, nil
+		},
 		updateFn: func(_ context.Context, _ string, updates map[string]any) (*model.Issue, error) {
 			gotUpdates = updates
 			return &model.Issue{ID: "i-1"}, nil
@@ -693,17 +715,20 @@ func TestMCP_ListTeamMembers_ReturnsArray(t *testing.T) {
 	}
 }
 
-func TestMCP_UnknownToolReturnsMethodNotFoundError(t *testing.T) {
+// TestMCP_UnmappedTool_DeniedFailClosed — a tool the authz chokepoint doesn't map resolves
+// to ws="" and is DENIED before dispatch. This is the fail-closed property: a new tool
+// added to the dispatch switch but not to toolWorkspace cannot become an open surface.
+func TestMCP_UnmappedTool_DeniedFailClosed(t *testing.T) {
 	s := newTestServer(t)
 	resp := rpcCall(t, s, "tools/call", map[string]any{
 		"name":      "no_such_tool",
 		"arguments": map[string]any{},
 	})
 	if resp.Error == nil {
-		t.Fatal("expected JSON-RPC error for unknown tool")
+		t.Fatal("expected a JSON-RPC error for an unmapped tool")
 	}
-	if resp.Error.Code != -32601 {
-		t.Errorf("error code = %d, want -32601", resp.Error.Code)
+	if resp.Error.Code != rpcErrUnauthorized {
+		t.Errorf("error code = %d, want %d (unauthorized — fail-closed deny before dispatch)", resp.Error.Code, rpcErrUnauthorized)
 	}
 }
 

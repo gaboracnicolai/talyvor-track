@@ -271,38 +271,39 @@ func main() {
 	})
 	r.Handle("/metrics", metrics.Handler())
 
-	// MCP endpoints. Mounted on the public router so they bypass any
-	// future auth middleware — MCP clients authenticate via the
-	// Track-issued workspace API key embedded in tool arguments, not
-	// HTTP headers.
-	r.Post("/mcp", mcpServer.HandleRPC)
-	r.Get("/mcp/sse", mcpServer.HandleSSE)
+	// T9 + T10 auth chain, shared by the /v1 API and the MCP surface. T9: every request
+	// must prove it transited the edge gateway (x-gateway-auth, constant-time-verified)
+	// before any gateway-injected identity is trusted; exempt the own-auth paths that carry
+	// no gateway identity (HMAC webhooks, the anonymous public board, guest-token + invite
+	// routes, the websocket). T10: resolve the verified email -> memberships and, for a
+	// {wsID} route, require membership (else 403), putting the authorized workspace + member
+	// in context. Hoisted so both /v1 and /mcp use the same instances.
+	gwExempt := func(p string) bool {
+		return strings.HasPrefix(p, "/v1/lens/webhook") ||
+			strings.HasPrefix(p, "/v1/webhooks/") ||
+			strings.HasPrefix(p, "/v1/public/") ||
+			strings.HasPrefix(p, "/v1/invite/") ||
+			strings.HasPrefix(p, "/v1/guest/") ||
+			p == "/v1/ws"
+	}
+	gwAuth := gatewayauth.Middleware(cfg.GatewayAuthSecret, gwExempt)
+	wsAuthz := authz.Middleware(authz.NewPGResolver(pool), gwExempt)
+
+	// MCP (T11b): behind the SAME chain as /v1 — a request reaches a tool only with a valid
+	// transit proof + verified identity (no /mcp gets x-gateway-auth + x-user-email like
+	// /v1). /mcp/sse (transport: endpoint event + pings) gets the proof too. Per-tool
+	// workspace authorization is enforced inside HandleRPC's chokepoint (handleToolsCall),
+	// since each tool's workspace_id is a JSON-RPC argument, not a path param.
+	r.Group(func(r chi.Router) {
+		r.Use(gwAuth)
+		r.Use(wsAuthz)
+		r.Post("/mcp", mcpServer.HandleRPC)
+		r.Get("/mcp/sse", mcpServer.HandleSSE)
+	})
 
 	r.Route("/v1", func(r chi.Router) {
-		// T9 auth trust boundary: every user-API request must prove it transited the edge
-		// gateway (x-gateway-auth, constant-time-verified) before any gateway-injected
-		// identity header is trusted. Exempt the own-auth paths that do NOT rely on
-		// gateway identity: HMAC webhooks, the anonymous public board, guest-token +
-		// invite routes, and the websocket upgrade. T9 only establishes the boundary +
-		// puts verified identity in context — it does NOT enforce membership or scope the
-		// store (that's T10). MCP at /mcp is on the public router and still bypasses this
-		// boundary — flagged for T11.
-		gwExempt := func(p string) bool {
-			return strings.HasPrefix(p, "/v1/lens/webhook") ||
-				strings.HasPrefix(p, "/v1/webhooks/") ||
-				strings.HasPrefix(p, "/v1/public/") ||
-				strings.HasPrefix(p, "/v1/invite/") ||
-				strings.HasPrefix(p, "/v1/guest/") ||
-				p == "/v1/ws"
-		}
-		r.Use(gatewayauth.Middleware(cfg.GatewayAuthSecret, gwExempt))
-		// T10 workspace authorization, chained after T9: resolve the verified email ->
-		// memberships and, for a {wsID} route, require the caller be a member (else 403);
-		// put the AUTHORIZED workspace_id + the caller's member.id into context. Handlers
-		// read those, NEVER the URL {wsID} or X-Member-Id. Same exempt set — own-auth
-		// paths carry no verified identity. (MCP + importer ?workspace_id= bypass this —
-		// T11.)
-		r.Use(authz.Middleware(authz.NewPGResolver(pool), gwExempt))
+		r.Use(gwAuth)
+		r.Use(wsAuthz)
 		wsHandler.Mount(r)
 		teamHandler.Mount(r)
 		projectHandler.Mount(r)

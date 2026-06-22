@@ -31,6 +31,7 @@ import (
 
 	"github.com/talyvor/track/internal/ai"
 	"github.com/talyvor/track/internal/analytics"
+	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
@@ -46,6 +47,7 @@ const (
 	rpcErrMethodNotFnd = -32601
 	rpcErrInvalidParam = -32602
 	rpcErrInternal     = -32603
+	rpcErrUnauthorized = -32001 // server-defined (JSON-RPC -32000..-32099): caller not authorized for the workspace
 )
 
 // ─── internal interfaces ─────────────────────────────────────
@@ -89,6 +91,9 @@ type analyticsIface interface {
 // WithMembersPool; tests supply a closure-based fake.
 type memberLister interface {
 	ListMembers(ctx context.Context, workspaceID, teamID string) ([]model.Member, error)
+	// WorkspaceOfTeam resolves a team to its workspace, for the authz chokepoint
+	// (get_sprint_status acts on a team whose GetActive query has no workspace filter).
+	WorkspaceOfTeam(ctx context.Context, teamID string) (string, error)
 }
 
 type Server struct {
@@ -437,6 +442,29 @@ func (s *Server) handleToolsCall(w http.ResponseWriter, ctx context.Context, id,
 		return
 	}
 
+	// ── authz chokepoint ───────────────────────────────────────────────────────────
+	// Every tool's acted-on workspace is authorized HERE, once, before dispatch. The
+	// workspace is the workspace_id argument (workspace-keyed tools) or is resolved from
+	// the object the tool touches (issue-keyed tools -> the issue's workspace;
+	// get_sprint_status -> the team's workspace) so authorizing the workspace also covers
+	// the secondary id. Fail-closed by construction: an unmapped/new tool, a missing
+	// object, or a resolution error yields ws="" and is denied — a new tool cannot be an
+	// open surface. The resolved member becomes the actor (authz.MemberID).
+	// NOTE: the T12 semgrep lock does NOT cover this body/tool-arg form — these authz
+	// tests are MCP's guard.
+	ws, rerr := s.toolWorkspace(ctx, params.Name, params.Arguments)
+	if rerr != nil || ws == "" {
+		s.writeError(w, id, rpcErrUnauthorized, "not authorized for the requested workspace")
+		return
+	}
+	m, ok := authz.AuthorizeWorkspace(ctx, ws)
+	if !ok {
+		s.writeError(w, id, rpcErrUnauthorized, "not a member of this workspace")
+		return
+	}
+	ctx = authz.WithAuthorized(ctx, m.WorkspaceID, m.MemberID)
+	// ───────────────────────────────────────────────────────────────────────────────
+
 	var (
 		result any
 		err    error
@@ -493,6 +521,70 @@ func (s *Server) handleToolsCall(w http.ResponseWriter, ctx context.Context, id,
 	})
 }
 
+// toolWorkspace computes the workspace a tool call acts on, for the authz chokepoint.
+// Workspace-keyed tools carry it as an argument; issue-keyed tools and get_sprint_status
+// derive it from the object they touch, so authorizing the workspace also covers the
+// secondary id (a cross-workspace issue_id or team_id resolves to a workspace the caller
+// is not a member of, and is denied). An unmapped tool returns "" → denied (fail-closed).
+func (s *Server) toolWorkspace(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	switch name {
+	case "create_issue", "list_issues", "search_issues", "get_ai_costs", "create_project", "list_team_members":
+		var a struct {
+			WorkspaceID string `json:"workspace_id"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", err
+		}
+		return a.WorkspaceID, nil
+	case "get_sprint_status":
+		// The sprint belongs to the team's workspace — resolve it so a cross-workspace
+		// team_id (GetActive has no workspace filter) is denied, not leaked.
+		var a struct {
+			TeamID string `json:"team_id"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", err
+		}
+		if a.TeamID == "" {
+			return "", nil
+		}
+		return s.members.WorkspaceOfTeam(ctx, a.TeamID)
+	case "get_issue", "update_issue", "add_comment", "triage_issue", "move_to_cycle":
+		var a struct {
+			IssueID    string `json:"issue_id"`
+			Identifier string `json:"identifier"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", err
+		}
+		return s.workspaceForIssue(ctx, a.IssueID, a.Identifier)
+	default:
+		return "", nil // unmapped/new tool → deny
+	}
+}
+
+// workspaceForIssue resolves an issue (by id or human identifier) to its workspace. A
+// not-found issue or any lookup error yields "" → the chokepoint denies (no existence
+// leak, fail-closed).
+func (s *Server) workspaceForIssue(ctx context.Context, issueID, identifier string) (string, error) {
+	var (
+		iss *model.Issue
+		err error
+	)
+	switch {
+	case issueID != "":
+		iss, err = s.issueStore.GetByID(ctx, issueID)
+	case identifier != "":
+		iss, err = s.issueStore.GetByIdentifier(ctx, identifier)
+	default:
+		return "", nil
+	}
+	if err != nil || iss == nil {
+		return "", nil // treat not-found / error as deny
+	}
+	return iss.WorkspaceID, nil
+}
+
 // ─── tool 1: create_issue ───────────────────────────────────
 
 func (s *Server) toolCreateIssue(ctx context.Context, args json.RawMessage) (any, error) {
@@ -521,6 +613,7 @@ func (s *Server) toolCreateIssue(ctx context.Context, args json.RawMessage) (any
 		return nil, badParam("priority must be 0..4")
 	}
 
+	actor, _ := authz.MemberID(ctx) // resolved member (the chokepoint authorized it); replaces the "agent" constant
 	new := model.Issue{
 		WorkspaceID: in.WorkspaceID,
 		TeamID:      in.TeamID,
@@ -528,7 +621,7 @@ func (s *Server) toolCreateIssue(ctx context.Context, args json.RawMessage) (any
 		Description: in.Description,
 		Priority:    model.IssuePriority(in.Priority),
 		Labels:      in.Labels,
-		CreatorID:   "agent",
+		CreatorID:   actor,
 		Status:      model.StatusTodo,
 	}
 	if in.ProjectID != "" {
@@ -571,7 +664,7 @@ func (s *Server) toolUpdateIssue(ctx context.Context, args json.RawMessage) (any
 	// "no editable fields" error instead of a silently-empty update.
 	updates := map[string]any{}
 	type spec struct {
-		key string
+		key  string
 		kind string // "string" or "int"
 	}
 	for _, f := range []spec{
@@ -723,9 +816,9 @@ func (s *Server) toolAddComment(ctx context.Context, args json.RawMessage) (any,
 	if in.Body == "" {
 		return nil, badParam("body required")
 	}
-	if in.AuthorID == "" {
-		in.AuthorID = "agent"
-	}
+	// The comment author is the resolved, gateway-verified member — never a caller-supplied
+	// author_id (that would let an agent spoof authorship). The author_id argument is ignored.
+	in.AuthorID, _ = authz.MemberID(ctx)
 	out, err := s.issueStore.CreateComment(ctx, model.Comment{
 		IssueID:  in.IssueID,
 		Body:     in.Body,
@@ -1075,6 +1168,16 @@ type membersStore struct {
 	pool *pgxpool.Pool
 }
 
+// WorkspaceOfTeam returns the workspace a team belongs to (teams.workspace_id); a missing
+// team yields an error, which the authz chokepoint treats as a denial (fail-closed).
+func (m *membersStore) WorkspaceOfTeam(ctx context.Context, teamID string) (string, error) {
+	var ws string
+	if err := m.pool.QueryRow(ctx, `SELECT workspace_id FROM teams WHERE id = $1`, teamID).Scan(&ws); err != nil {
+		return "", err
+	}
+	return ws, nil
+}
+
 const memberCols = `id, workspace_id, name, email, avatar_url, role, created_at`
 
 // ListMembers returns workspace members, optionally filtered to those
@@ -1138,6 +1241,10 @@ type nopMembers struct{}
 
 func (nopMembers) ListMembers(_ context.Context, _, _ string) ([]model.Member, error) {
 	return nil, errors.New("members store not configured (call WithMembersPool)")
+}
+
+func (nopMembers) WorkspaceOfTeam(_ context.Context, _ string) (string, error) {
+	return "", errors.New("members store not configured (call WithMembersPool)")
 }
 
 // satisfy unused-import lint when membersStore happens to not be
