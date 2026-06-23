@@ -36,6 +36,7 @@ import (
 	"github.com/talyvor/track/internal/featureboard"
 	"github.com/talyvor/track/internal/gatewayauth"
 	"github.com/talyvor/track/internal/guest"
+	"github.com/talyvor/track/internal/health"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
@@ -271,6 +272,18 @@ func main() {
 	})
 	r.Handle("/metrics", metrics.Handler())
 
+	// T14 liveness/readiness probes. Top-level and unauthenticated — like
+	// /healthz and /metrics — so a load balancer can always reach them. The
+	// static /healthz above is left untouched for backward-compat; these are
+	// additive. /readyz pings Postgres, so during a DB outage it reports 503 and
+	// the LB drains this instance instead of routing traffic to a broken one.
+	// (When realtime HA / T13 is enabled, add a Redis dep here too.) drainer is
+	// shared with the SIGTERM path below so /readyz flips to 503 on shutdown.
+	drainer := &health.Drainer{}
+	probes := health.New("0.1.0", drainer, health.PingDep("database", pool))
+	r.Get("/livez", probes.Live)
+	r.Get("/readyz", probes.Ready)
+
 	// T9 + T10 auth chain, shared by the /v1 API and the MCP surface. T9: every request
 	// must prove it transited the edge gateway (x-gateway-auth, constant-time-verified)
 	// before any gateway-injected identity is trusted; exempt the own-auth paths that carry
@@ -370,7 +383,11 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	// Graceful drain: flip /readyz to 503 so the load balancer stops sending new
+	// requests and pulls this instance from rotation, pause briefly so it
+	// observes the change, then stop accepting and let in-flight requests finish
+	// before the pool closes (deferred above).
+	if err := drainer.Drain(shutdownCtx, 2*time.Second, srv.Shutdown); err != nil {
 		slog.Error("shutdown error", slog.String("err", err.Error()))
 	}
 }
