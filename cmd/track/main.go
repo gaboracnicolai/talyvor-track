@@ -34,6 +34,7 @@ import (
 	"github.com/talyvor/track/internal/customfield"
 	"github.com/talyvor/track/internal/cycle"
 	"github.com/talyvor/track/internal/db"
+	"github.com/talyvor/track/internal/dbresil"
 	"github.com/talyvor/track/internal/dependency"
 	"github.com/talyvor/track/internal/featureboard"
 	"github.com/talyvor/track/internal/gatewayauth"
@@ -310,6 +311,24 @@ func main() {
 	r.Get("/livez", probes.Live)
 	r.Get("/readyz", probes.Ready)
 
+	// T15 DB-outage resilience: a circuit breaker fed by a background health
+	// monitor. While Postgres is unreachable the breaker opens and the Guard
+	// middleware on /v1 + /mcp fast-fails with 503 — a correct status instead of
+	// the misleading 400 a raw connection error would otherwise produce, and with
+	// no per-request hang against a dead pool. Complements /readyz (which drains
+	// the instance from the load balancer) and the statement_timeout set in
+	// db.New. Always on: when Postgres is healthy the breaker stays closed and the
+	// Guard is a cheap atomic read.
+	dbBreaker := dbresil.NewBreaker(dbresil.DefaultFailureThreshold).
+		OnStateChange(func(open bool) {
+			if open {
+				slog.Error("db: circuit opened — Postgres unreachable; /v1 + /mcp now return 503")
+			} else {
+				slog.Info("db: circuit closed — Postgres reachable again")
+			}
+		})
+	dbresil.NewMonitor(pool, dbBreaker, dbresil.DefaultProbeInterval, dbresil.DefaultPingTimeout).Start(ctx)
+
 	// T9 + T10 auth chain, shared by the /v1 API and the MCP surface. T9: every request
 	// must prove it transited the edge gateway (x-gateway-auth, constant-time-verified)
 	// before any gateway-injected identity is trusted; exempt the own-auth paths that carry
@@ -334,6 +353,7 @@ func main() {
 	// workspace authorization is enforced inside HandleRPC's chokepoint (handleToolsCall),
 	// since each tool's workspace_id is a JSON-RPC argument, not a path param.
 	r.Group(func(r chi.Router) {
+		r.Use(dbresil.Guard(dbBreaker))
 		r.Use(gwAuth)
 		r.Use(wsAuthz)
 		r.Post("/mcp", mcpServer.HandleRPC)
@@ -341,6 +361,9 @@ func main() {
 	})
 
 	r.Route("/v1", func(r chi.Router) {
+		// DB-outage guard runs first: if Postgres is down, fast-fail 503 before
+		// auth (which itself reads the DB for membership resolution).
+		r.Use(dbresil.Guard(dbBreaker))
 		r.Use(gwAuth)
 		r.Use(wsAuthz)
 		wsHandler.Mount(r)
