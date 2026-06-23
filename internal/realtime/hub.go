@@ -93,6 +93,11 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan Event
+
+	// bridge, when set, mirrors locally-emitted events to peer instances over
+	// Redis and re-injects theirs (see bridge.go). nil in single-instance mode —
+	// every bridge method is nil-safe, so the hot path stays branch-light.
+	bridge *RedisBridge
 }
 
 func NewHub() *Hub {
@@ -103,6 +108,14 @@ func NewHub() *Hub {
 		unregister: make(chan *Client, 16),
 		broadcast:  make(chan Event, 128),
 	}
+}
+
+// WithBridge attaches a Redis bridge so events fan out across instances. Call it
+// during setup, before Run — the field is not mutated once the event loop is
+// running. Returns the hub for chaining, matching Track's store/handler builders.
+func (h *Hub) WithBridge(b *RedisBridge) *Hub {
+	h.bridge = b
+	return h
 }
 
 // Run is the central event loop. Exits when ctx is cancelled.
@@ -136,14 +149,14 @@ func (h *Hub) handleRegister(c *Client) {
 	h.mu.Unlock()
 
 	// Notify everyone else in the workspace that this member arrived.
-	h.broadcast <- Event{
+	h.emit(Event{
 		Type:        EventMemberJoined,
 		WorkspaceID: c.WorkspaceID,
 		RoomID:      wsRoom,
 		ActorID:     c.MemberID,
 		Payload:     map[string]string{"member_id": c.MemberID},
 		Timestamp:   time.Now().UTC(),
-	}
+	})
 }
 
 func (h *Hub) handleUnregister(c *Client) {
@@ -165,14 +178,14 @@ func (h *Hub) handleUnregister(c *Client) {
 	close(c.send)
 	h.mu.Unlock()
 
-	h.broadcast <- Event{
+	h.emit(Event{
 		Type:        EventMemberLeft,
 		WorkspaceID: c.WorkspaceID,
 		RoomID:      wsRoom,
 		ActorID:     c.MemberID,
 		Payload:     map[string]string{"member_id": c.MemberID},
 		Timestamp:   time.Now().UTC(),
-	}
+	})
 }
 
 func (h *Hub) handleBroadcast(ev Event) {
@@ -221,11 +234,37 @@ func (h *Hub) BroadcastToRoom(roomID string, ev Event) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = time.Now().UTC()
 	}
+	h.emit(ev)
+}
+
+// emit queues ev for delivery to this hub's local clients and, when a Redis
+// bridge is attached, publishes it so peer instances deliver it to THEIR local
+// clients too. Both paths are non-blocking — a full buffer drops the event with
+// a warning rather than stalling the caller (and, since emit also runs on the
+// event loop for member join/leave, a non-blocking send avoids the loop ever
+// blocking on the channel it itself drains).
+func (h *Hub) emit(ev Event) {
 	select {
 	case h.broadcast <- ev:
 	default:
 		slog.Warn("realtime: broadcast channel full; dropping event",
-			slog.String("room", roomID),
+			slog.String("room", ev.RoomID),
+			slog.String("event", string(ev.Type)),
+		)
+	}
+	h.bridge.Publish(ev) // nil-safe; no-op in single-instance mode
+}
+
+// injectRemote queues an event received from a peer instance (via the Redis
+// bridge) for delivery to THIS hub's local clients. It deliberately does NOT
+// re-publish — that, plus the bridge's origin guard, is what stops an event
+// from ping-ponging between instances.
+func (h *Hub) injectRemote(ev Event) {
+	select {
+	case h.broadcast <- ev:
+	default:
+		slog.Warn("realtime: broadcast channel full; dropping remote event",
+			slog.String("room", ev.RoomID),
 			slog.String("event", string(ev.Type)),
 		)
 	}

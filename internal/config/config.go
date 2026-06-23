@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -28,6 +29,14 @@ type Config struct {
 	// Track refuses to start without it — starting without it would mean trusting
 	// spoofable identity headers.
 	GatewayAuthSecret string
+
+	// High-availability realtime fan-out (T13). HAEnabled (TRACK_HA_ENABLED) is
+	// strictly opt-in and OFF by default — when off, Track runs as a single
+	// instance exactly as before and never touches Redis. When on, the realtime
+	// hub mirrors events across instances over Redis pub/sub at RedisURL
+	// (TRACK_REDIS_URL). Both are optional: HA off means RedisURL is ignored.
+	HAEnabled bool
+	RedisURL  string
 }
 
 // MinGatewayAuthSecretLen mirrors the edge gateway's GATEWAY_AUTH_SECRET minimum
@@ -44,6 +53,8 @@ func Load() (*Config, error) {
 		LensAPIKey:        os.Getenv("TRACK_LENS_API_KEY"),
 		LensWebhookSecret: os.Getenv("TRACK_LENS_WEBHOOK_SECRET"),
 		GatewayAuthSecret: os.Getenv("GATEWAY_AUTH_SECRET"),
+		HAEnabled:         parseBool(os.Getenv("TRACK_HA_ENABLED")),
+		RedisURL:          os.Getenv("TRACK_REDIS_URL"),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("%w: TRACK_DATABASE_URL", ErrMissingEnv)
@@ -63,4 +74,15 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseBool treats "1"/"true"/"yes"/"on" (any case) as true; everything else,
+// including empty, is false. Keeps opt-in flags off-by-default and forgiving.
+func parseBool(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

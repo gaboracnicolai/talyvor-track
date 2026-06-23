@@ -6,6 +6,10 @@ services:
     environment:
       - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:-changeme}@postgres:5432/talyvor_track?sslmode=disable
       - TRACK_REDIS_URL=redis://redis:6379
+      # Realtime HA fan-out across instances (T13). OFF by default — this single
+      # bundled instance needs no cross-instance sharing. Set true when scaling
+      # Track to 2+ replicas so live events reach clients on every instance.
+      - TRACK_HA_ENABLED=${TRACK_HA_ENABLED:-false}
       - TRACK_LENS_URL=${TRACK_LENS_URL:-http://localhost:8080}
       - TRACK_LENS_API_KEY=${TRACK_LENS_API_KEY:-}
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}

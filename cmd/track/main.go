@@ -22,7 +22,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/talyvor/track/internal/ai"
 	"github.com/talyvor/track/internal/analytics"
@@ -145,6 +147,30 @@ func main() {
 
 	// Stores own the SQL; handlers own the JSON; main wires them.
 	hub := realtime.NewHub()
+	// T13 HA: opt-in Redis pub/sub so realtime events cross Track instances.
+	// OFF by default — a single instance behaves exactly as before and never
+	// touches Redis. When TRACK_HA_ENABLED is set, mirror events through
+	// TRACK_REDIS_URL; a Redis blip degrades to local-only delivery, never a crash.
+	if cfg.HAEnabled {
+		opts, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			slog.Error("redis url parse failed (TRACK_HA_ENABLED is set)", slog.String("err", err.Error()))
+			os.Exit(1)
+		}
+		rdb := redis.NewClient(opts)
+		defer func() { _ = rdb.Close() }()
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			slog.Warn("redis ping failed; realtime HA will retry in the background", slog.String("err", err.Error()))
+		}
+		bridge := realtime.NewRedisBridge(rdb, hub, uuid.NewString(), true)
+		hub.WithBridge(bridge)
+		if err := bridge.Start(ctx); err != nil {
+			slog.Warn("realtime: redis bridge subscribe failed; running local-only", slog.String("err", err.Error()))
+		} else {
+			slog.Info("realtime: redis HA fan-out enabled")
+		}
+		defer func() { _ = bridge.Close() }()
+	}
 	go hub.Run(ctx)
 	notifier := realtime.NewNotifier(hub)
 
