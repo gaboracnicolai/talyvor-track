@@ -624,51 +624,51 @@ func (s *Store) RecordSpendEvent(ctx context.Context, eventKey, lensFeature stri
 	return int(tag.RowsAffected()), nil
 }
 
-// ReconcileFeatureSpend is the SYNCER's idempotent backfill against the ledger. Given
-// the authoritative running total Lens reports for a feature, it adds to each matching
-// issue ONLY the gap between that total and what Track already recorded
-// (max(lensTotal - ai_cost_usd, 0)), writing that gap as a 'sync-reconcile' ledger row.
-// So repeated polls of the same total are no-ops, and it can never double-count spend
-// the webhook already recorded (the gap is 0 when the webhook is keeping up). FOR
-// UPDATE on the matched issues serializes against concurrent webhook accumulation, and
-// the per-total eventKey makes concurrent identical reconciliations exactly-once.
-// Returns the total USD reconciled this call.
-func (s *Store) ReconcileFeatureSpend(ctx context.Context, eventKey, lensFeature string, lensTotalUSD float64, lensTokens int, workspaceID string) (float64, error) {
-	if eventKey == "" || lensFeature == "" || workspaceID == "" {
-		return 0, errors.New("issue: ReconcileFeatureSpend requires event_key, lens_feature, workspace_id")
+// RecordRequestSpend lands ONE per-request cost on the single issue whose identifier == feature, EXACTLY
+// ONCE. It is the SYNCER's live accumulator (T7 follow-up, Build 2) — replacing the feature-total
+// delta-reconciler (ReconcileFeatureSpend, deleted). Two load-bearing properties:
+//
+//   - NO FANOUT: it resolves the issue by IDENTIFIER — UNIQUE(workspace_id, identifier) ⇒ 0 or 1 issue —
+//     NOT lens_feature. Cost can never land on more than one issue, so shared lens_feature values can't
+//     multiply spend.
+//   - EXACTLY ONCE: INSERT ... ON CONFLICT (request_id) DO NOTHING, and the issue's ai_cost_usd is credited
+//     atomically WITH the insert and ONLY when the insert actually inserted. A re-pulled request_id (the
+//     syncer re-reads the last-24h window ~96×/day) conflicts ⇒ no row, no re-credit. The credit is a
+//     data-modifying CTE that runs iff `ins` produced a row — never a re-sum toward a total.
+//
+// Returns (resolved, landed):
+//
+//	resolved=false → no issue has identifier=feature ⇒ caller SKIPS + logs the orphan (nothing is written).
+//	resolved=true, landed=true  → fresh insert; issue credited once.
+//	resolved=true, landed=false → request_id already recorded (a re-pull) ⇒ issue NOT re-credited.
+func (s *Store) RecordRequestSpend(ctx context.Context, requestID, feature string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error) {
+	if requestID == "" || feature == "" || workspaceID == "" {
+		return false, false, errors.New("issue: RecordRequestSpend requires request_id, feature, workspace_id")
 	}
-	var added float64
-	err := s.pool.QueryRow(ctx, `
-        WITH matched AS (
-            SELECT id, ai_cost_usd, ai_tokens FROM issues
-            WHERE lens_feature = $2 AND workspace_id = $3
-            FOR UPDATE
-        ),
-        deltas AS (
-            SELECT id,
-                   GREATEST($4::float8 - ai_cost_usd, 0) AS d_cost,
-                   GREATEST($5::int - ai_tokens, 0) AS d_tokens
-            FROM matched
+	var resolvedN, insertedN int
+	qErr := s.pool.QueryRow(ctx, `
+        WITH target AS (
+            SELECT id FROM issues WHERE identifier = $2 AND workspace_id = $3
         ),
         ins AS (
-            INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, lens_feature, cost_usd, tokens, source)
-            SELECT $1, $3, id, $2, d_cost, d_tokens, 'sync-reconcile' FROM deltas WHERE d_cost > 0 OR d_tokens > 0
-            ON CONFLICT (event_key, COALESCE(issue_id, '')) DO NOTHING
+            INSERT INTO ai_spend_events (request_id, event_key, workspace_id, issue_id, lens_feature, cost_usd, tokens, source)
+            SELECT $1, 'req:' || $1, $3, t.id, $2, $4, $5, 'sync-request' FROM target t
+            ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING
             RETURNING issue_id, cost_usd, tokens
         ),
         upd AS (
             UPDATE issues i SET ai_cost_usd = ai_cost_usd + ins.cost_usd,
                                 ai_tokens = ai_tokens + ins.tokens, updated_at = NOW()
             FROM ins WHERE i.id = ins.issue_id
-            RETURNING ins.cost_usd
+            RETURNING i.id
         )
-        SELECT COALESCE(SUM(cost_usd), 0) FROM upd`,
-		eventKey, lensFeature, workspaceID, lensTotalUSD, lensTokens,
-	).Scan(&added)
-	if err != nil {
-		return 0, fmt.Errorf("issue: reconcile feature spend: %w", err)
+        SELECT (SELECT count(*) FROM target), (SELECT count(*) FROM ins)`,
+		requestID, feature, workspaceID, costUSD, tokens,
+	).Scan(&resolvedN, &insertedN)
+	if qErr != nil {
+		return false, false, fmt.Errorf("issue: record request spend: %w", qErr)
 	}
-	return added, nil
+	return resolvedN > 0, insertedN > 0, nil
 }
 
 // TopByAICost returns the workspace's most expensive issues in

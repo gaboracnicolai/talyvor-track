@@ -2,9 +2,6 @@ package lensintegration
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"time"
 )
@@ -15,7 +12,9 @@ const defaultSyncInterval = 15 * time.Minute
 // Defined as an interface so tests can drop in a counter mock without
 // spinning up pgxmock or the full Track DB schema.
 type costUpdater interface {
-	ReconcileFeatureSpend(ctx context.Context, eventKey, lensFeature string, lensTotalUSD float64, lensTokens int, workspaceID string) (float64, error)
+	// RecordRequestSpend lands one per-request cost on the single identifier-matched issue, exactly-once by
+	// request_id. resolved=false ⇒ the feature addresses no issue (the caller skips + logs the orphan).
+	RecordRequestSpend(ctx context.Context, requestID, feature string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error)
 }
 
 // workspaceLister returns the workspace IDs the syncer should poll on
@@ -34,15 +33,20 @@ func NewSyncer(client *Client, updater costUpdater, workspaces workspaceLister) 
 	return &Syncer{client: client, updater: updater, workspaces: workspaces}
 }
 
-// SyncFeatureSpend pulls last-24h spend-by-feature from Lens for one
-// workspace and accumulates the cost on every issue whose
-// lens_feature matches. Errors are logged at WARN — a missing Lens
-// or a partial outage never breaks Track.
+// SyncFeatureSpend pulls last-24h PER-REQUEST spend from Lens for one workspace and lands each request's cost
+// on the single identifier-matched issue, exactly-once by request_id (T7 follow-up, Build 2). The cost never
+// fans out (resolution is by identifier, not lens_feature), and a re-pulled window — the syncer re-reads the
+// same 24h ~96×/day — re-credits nothing (ON CONFLICT). Errors are logged at WARN; a missing Lens or a
+// partial outage never breaks Track.
+//
+// FAIL-SAFE: a row whose feature doesn't resolve to exactly one issue (0 identifier matches), or an anonymous
+// / request_id-less row, is SKIPPED and counted — never written as an orphan, never fanned out. The skipped
+// count + skipped cost are logged so orphan spend is observable, not silently dropped.
 func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error {
 	if s.client == nil || !s.client.IsConfigured() {
 		return ErrNotConfigured
 	}
-	features, err := s.client.GetSpendByFeature(ctx, workspaceID, 1)
+	rows, err := s.client.GetSpendByRequest(ctx, workspaceID, 1)
 	if err != nil {
 		slog.Warn("lensintegration: sync failed",
 			slog.String("workspace_id", workspaceID),
@@ -50,33 +54,50 @@ func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error
 		)
 		return nil
 	}
-	synced := 0
-	for _, fs := range features {
-		if fs.Feature == "" {
-			// Anonymous spend (no X-Talyvor-Feature header set on the
-			// originating request) doesn't map to a Track issue.
+	var landed, skipped int
+	var skippedCost float64
+	for _, rs := range rows {
+		if rs.Feature == "" || rs.RequestID == "" {
+			// Anonymous spend (no X-Talyvor-Feature) or a row without a request_id: can't address one issue
+			// or can't dedup exactly-once. Skip rather than risk an orphan or a double-count.
+			skipped++
+			skippedCost += rs.CostUSD
 			continue
 		}
-		// Reconcile against the ledger: the key is the observed (workspace, feature,
-		// total), so a repeated poll of an unchanged total is a no-op, and the
-		// reconciler adds only the gap the webhook hasn't already recorded — it never
-		// double-counts spend the webhook already wrote.
-		sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%v", workspaceID, fs.Feature, fs.CostUSD)))
-		eventKey := "lens-sync:" + hex.EncodeToString(sum[:])
-		if _, err := s.updater.ReconcileFeatureSpend(ctx, eventKey, fs.Feature, fs.CostUSD, fs.InputTokens+fs.OutputTokens, workspaceID); err != nil {
-			slog.Warn("lensintegration: ReconcileFeatureSpend failed",
+		resolved, didLand, err := s.updater.RecordRequestSpend(ctx, rs.RequestID, rs.Feature, rs.CostUSD, rs.InputTokens+rs.OutputTokens, workspaceID)
+		if err != nil {
+			slog.Warn("lensintegration: RecordRequestSpend failed",
 				slog.String("workspace_id", workspaceID),
-				slog.String("feature", fs.Feature),
+				slog.String("feature", rs.Feature),
+				slog.String("request_id", rs.RequestID),
 				slog.String("err", err.Error()),
 			)
 			continue
 		}
-		synced++
+		if !resolved {
+			// FAIL-SAFE: the feature addresses no issue (identifier match = 0). Never write an orphan, never
+			// fall back to the lens_feature fanout. Log so the orphan cost stays observable.
+			skipped++
+			skippedCost += rs.CostUSD
+			slog.Warn("lensintegration: request spend skipped — feature resolves to no issue",
+				slog.String("workspace_id", workspaceID),
+				slog.String("feature", rs.Feature),
+				slog.String("request_id", rs.RequestID),
+				slog.Float64("cost_usd", rs.CostUSD),
+			)
+			continue
+		}
+		if didLand {
+			landed++
+		}
+		// resolved && !didLand ⇒ this request_id already landed on an earlier pull; not re-credited.
 	}
-	slog.Info("lensintegration: feature spend sync complete",
+	slog.Info("lensintegration: per-request spend sync complete",
 		slog.String("workspace_id", workspaceID),
-		slog.Int("synced", synced),
-		slog.Int("total_features", len(features)),
+		slog.Int("landed", landed),
+		slog.Int("skipped", skipped),
+		slog.Float64("skipped_cost_usd", skippedCost),
+		slog.Int("total_rows", len(rows)),
 	)
 	return nil
 }
