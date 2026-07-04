@@ -24,11 +24,27 @@ type issueCreator interface {
 	Create(ctx context.Context, i model.Issue) (*model.Issue, error)
 }
 
-type Importer struct {
-	issues issueCreator
+// issueUpserter is the C.2 re-import write path. A source that supplies an Identifier (the API providers,
+// C.3) routes through it; the CSV path (no Identifier) still uses Create. Optional — a store that lacks it
+// (the CSV-only fake) simply never triggers the upsert branch.
+type issueUpserter interface {
+	UpsertByIdentifier(ctx context.Context, i model.Issue) (*model.Issue, bool, error)
 }
 
-func New(issues issueCreator) *Importer { return &Importer{issues: issues} }
+type Importer struct {
+	issues   issueCreator
+	upserter issueUpserter // set iff the backing store supports upsert; drives the API re-import path
+}
+
+// New keeps its issueCreator-only signature (CSV callers + tests unchanged) and auto-detects upsert support:
+// the real issue.Store implements UpsertByIdentifier, a CSV-only fake does not.
+func New(issues issueCreator) *Importer {
+	imp := &Importer{issues: issues}
+	if up, ok := issues.(issueUpserter); ok {
+		imp.upserter = up
+	}
+	return imp
+}
 
 // ImportResult is the per-call summary returned to API callers. The
 // JSON shape is part of the public API contract — don't rename
