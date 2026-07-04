@@ -1,7 +1,10 @@
 package importer_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -13,6 +16,7 @@ import (
 	"github.com/talyvor/track/internal/gatewayauth"
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/issue"
+	"github.com/talyvor/track/internal/tenancy"
 	"github.com/talyvor/track/internal/testutil"
 )
 
@@ -88,6 +92,64 @@ func statusReq(id, email string) *http.Request {
 	req.Header.Set(gatewayauth.HeaderGatewayAuth, secret)
 	req.Header.Set(gatewayauth.HeaderUserEmail, email)
 	return req
+}
+
+func createReq(wsID, teamID, sourceType, email, csv string) *http.Request {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "import.csv")
+	_, _ = fw.Write([]byte(csv))
+	_ = mw.Close()
+	req := httptest.NewRequest("POST",
+		"/v1/import/jobs?workspace_id="+wsID+"&team_id="+teamID+"&source_type="+sourceType, &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set(gatewayauth.HeaderGatewayAuth, secret)
+	req.Header.Set(gatewayauth.HeaderUserEmail, email)
+	return req
+}
+
+// (guard) CROSS-OBJECT TENANCY GUARD — the .semgrep cross-object-tenancy lock: a job whose team_id belongs to
+// ANOTHER workspace is REJECTED at creation (wrapped ErrCrossWorkspace), and ZERO rows are written — no orphan
+// job, no orphan payload. (Without the guard, the cross-tenant job row + payload would persist.)
+func TestJobStore_Create_RejectsCrossWorkspaceTeam(t *testing.T) {
+	d := testutil.New(t)
+	ctx := context.Background()
+	wsA, wsB := d.Workspace(t), d.Workspace(t)
+	teamB := d.Team(t, wsB.ID) // a team in the OTHER workspace
+	jobs := importer.NewJobStore(d.Pool)
+
+	// Authorized for A, but team_id is B's team → rejected at creation.
+	_, err := jobs.Create(ctx, wsA.ID, teamB.ID, "linear_csv", []byte(asyncLinearCSV))
+	if !errors.Is(err, tenancy.ErrCrossWorkspace) {
+		t.Fatalf("Create with a cross-workspace team must return ErrCrossWorkspace, got %v", err)
+	}
+	var jobRows, payloadRows int
+	_ = d.Pool.QueryRow(ctx, `SELECT count(*) FROM import_jobs`).Scan(&jobRows)
+	_ = d.Pool.QueryRow(ctx, `SELECT count(*) FROM import_job_payloads`).Scan(&payloadRows)
+	if jobRows != 0 || payloadRows != 0 {
+		t.Fatalf("a rejected create must write NOTHING: import_jobs=%d import_job_payloads=%d", jobRows, payloadRows)
+	}
+}
+
+// (guard, HTTP) fail-fast: the async create endpoint returns 400 for a cross-workspace team_id (before any
+// row is written), not a silent downstream skip.
+func TestJobCreate_CrossWorkspaceTeam_400(t *testing.T) {
+	d := testutil.New(t)
+	wsA, wsB := d.Workspace(t), d.Workspace(t)
+	teamB := d.Team(t, wsB.ID)
+	seedMember(t, d, wsA.ID, "a@corp.com") // member of A, authorized for A
+	h := jobChain(d)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, createReq(wsA.ID, teamB.ID, "linear_csv", "a@corp.com", asyncLinearCSV))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("cross-workspace team create = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var n int
+	_ = d.Pool.QueryRow(context.Background(), `SELECT count(*) FROM import_jobs`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("rejected create wrote %d job rows, want 0", n)
+	}
 }
 
 // (b) STATUS TENANCY: a member of the job's workspace can read it; a non-member is DENIED (403), never shown
@@ -185,8 +247,11 @@ func TestRunner_EndToEnd_SourceTypeSelectsMapper(t *testing.T) {
 	_, _ = jobs.Create(ctx, wsL.ID, teamL.ID, "linear_csv", []byte(linCSV))
 	_, _ = jobs.Create(ctx, wsJ.ID, teamJ.ID, "jira_csv", []byte(jiraCSV))
 
-	runner.RunOnce(ctx)
-	runner.RunOnce(ctx)
+	for i := 0; i < 2; i++ { // both jobs must claim + run
+		if did, err := runner.RunOnce(ctx); err != nil || !did {
+			t.Fatalf("RunOnce #%d: did=%v err=%v (both jobs must run)", i, did, err)
+		}
+	}
 
 	lp := issuePriorities(t, d, wsL.ID)
 	if len(lp) != 1 || lp[0] != 1 {

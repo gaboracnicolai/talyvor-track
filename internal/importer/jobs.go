@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // jobs.go — T8 live-importer, Build B: the durable import-job record + its store.
@@ -52,6 +54,14 @@ func NewJobStore(pool *pgxpool.Pool) *JobStore { return &JobStore{pool: pool} }
 func (s *JobStore) Create(ctx context.Context, workspaceID, teamID, sourceType string, payload []byte) (string, error) {
 	if workspaceID == "" || teamID == "" || sourceType == "" {
 		return "", errors.New("importer: Create requires workspace_id, team_id, source_type")
+	}
+	// CROSS-OBJECT TENANCY GUARD (the .semgrep cross-object-tenancy lock): the team_id we persist alongside
+	// workspace_id MUST belong to that workspace — otherwise a caller could link a job to a team in another
+	// workspace. Same guard the sibling stores use (customfield/notification/cycle/template/milestone). Runs
+	// BEFORE tx.Begin, so a rejected team opens no transaction and writes ZERO rows (no orphan job/payload).
+	// Returns a wrapped tenancy.ErrCrossWorkspace → the handler surfaces a 400.
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", teamID, workspaceID); err != nil {
+		return "", err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

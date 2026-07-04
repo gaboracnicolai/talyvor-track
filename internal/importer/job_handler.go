@@ -1,12 +1,14 @@
 package importer
 
 import (
+	"errors"
 	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/talyvor/track/internal/authz"
+	"github.com/talyvor/track/internal/tenancy"
 )
 
 // job_handler.go — T8 Build B: the ASYNC import surface. A SEPARATE handler from the synchronous Handler
@@ -71,6 +73,11 @@ func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
 
 	jobID, err := h.jobs.Create(r.Context(), m.WorkspaceID, teamID, sourceType, payload)
 	if err != nil {
+		// A cross-workspace team_id is a client error (fail-fast, before any row is written), not a 500.
+		if errors.Is(err, tenancy.ErrCrossWorkspace) {
+			writeErr(w, http.StatusBadRequest, "CROSS_WORKSPACE_TEAM", "team_id is not in the authorized workspace")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
 		return
 	}
