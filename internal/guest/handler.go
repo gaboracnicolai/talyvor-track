@@ -13,12 +13,15 @@ import (
 	"github.com/talyvor/track/internal/model"
 )
 
-// issueReader is the subset of issue.Store the guest-scoped read
-// endpoints call into. Keeps this package's dependency surface tiny
-// and avoids a cycle if issue ever needs to import guest later.
+// issueReader is the subset of issue.Store the guest-scoped endpoints call into — reads for the two GET
+// routes, plus CreateComment for guest-write slice 1 (a guest commenter). Keeps this package's dependency
+// surface tiny and avoids a cycle if issue ever needs to import guest later. CreateComment is a pure INSERT
+// (issue/comments.go) — it fires NO member-attributed side-effect, which is why the guest path uses it
+// directly (see GuestCreateComment).
 type issueReader interface {
 	List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error)
 	GetByID(ctx context.Context, id string) (*model.Issue, error)
+	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
 }
 
 type Handler struct {
@@ -58,7 +61,76 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Use(h.store.RequireGuest)
 		r.Get("/guest/workspaces/{wsID}/projects/{projectID}/issues", h.GuestListIssues)
 		r.Get("/guest/workspaces/{wsID}/issues/{id}", h.GuestGetIssue)
+		// Guest-WRITE slice 1: a guest commenter (or editor) posts a comment. Same token-verify chain as the
+		// reads above; the role gate + object-tenancy are enforced inside the handler.
+		r.Post("/guest/workspaces/{wsID}/issues/{id}/comments", h.GuestCreateComment)
 	})
+}
+
+// GuestCreateComment — guest-write slice 1: a guest COMMENTER (or editor) posts a comment on an in-scope
+// issue. Full authz, in order: token-vs-URL workspace match (the .semgrep workspace-authz exemption), the
+// role gate (this WIRES the previously-dead AllowWrite — a viewer is denied here), then the same
+// object-tenancy as GuestGetIssue. Identity comes ONLY from the verified token claims — never a header or a
+// query param.
+//
+// THE GUEST-ACTOR PATH (option i): the comment is stored with AuthorID = claims.GuestID, and the
+// member-attributed realtime notifier is deliberately NOT fired. The guest Handler holds no notifier, and the
+// member CreateComment handler's notifier.CommentCreated broadcasts an ActorID-tagged event into members'
+// issue rooms — firing that with a GuestID would push a guest actor into a member-actor resolution path.
+// Slice 1 stores the comment with guest attribution and skips the member-only side-effect; the comment
+// surfaces on the next read. No member-assuming hook ever sees a guest/empty actor.
+func (h *Handler) GuestCreateComment(w http.ResponseWriter, r *http.Request) {
+	claims := Claims(r.Context())
+	wsID := chi.URLParam(r, "wsID")
+	if claims.WorkspaceID != wsID {
+		writeErr(w, http.StatusForbidden, "WS_MISMATCH", "workspace mismatch")
+		return
+	}
+	// ROLE GATE — wires the previously-dead AllowWrite. Viewer → denied; commenter/editor → pass.
+	if !AllowWrite(claims, "comment") {
+		writeErr(w, http.StatusForbidden, "INSUFFICIENT_ROLE", "guest role may not comment")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	iss, err := h.issues.GetByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	// OBJECT TENANCY — identical to GuestGetIssue: project scope, then object-in-workspace.
+	if claims.ProjectID != "" {
+		if iss.ProjectID == nil || *iss.ProjectID != claims.ProjectID {
+			writeErr(w, http.StatusForbidden, "PROJECT_MISMATCH", "outside guest project scope")
+			return
+		}
+	}
+	if iss.WorkspaceID != wsID {
+		writeErr(w, http.StatusForbidden, "WS_MISMATCH", "workspace mismatch")
+		return
+	}
+
+	var in struct {
+		Body string `json:"body"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	if in.Body == "" {
+		writeErr(w, http.StatusBadRequest, "EMPTY_BODY", "comment body is required")
+		return
+	}
+	// AuthorID is the verified GuestID — server-set, NEVER from the client body (which carries only Body).
+	out, err := h.issues.CreateComment(r.Context(), model.Comment{
+		IssueID:  id,
+		AuthorID: claims.GuestID,
+		Body:     in.Body,
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
+		return
+	}
+	// Deliberately NO notifier — see THE GUEST-ACTOR PATH note above.
+	writeJSON(w, http.StatusCreated, out)
 }
 
 type apiError struct {
