@@ -86,6 +86,26 @@ func (s *JobStore) Create(ctx context.Context, workspaceID, teamID, sourceType s
 	return id, nil
 }
 
+// CreateAPIJob inserts a payload-LESS job for an *_api source (Linear/Jira live import). Unlike Create there
+// is NO import_job_payloads row — its absence is the API-source signal (Build B), and the source config lives
+// in the C.1 integration store. Same team-in-workspace cross-object guard as Create (the .semgrep lock).
+func (s *JobStore) CreateAPIJob(ctx context.Context, workspaceID, teamID, sourceType string) (string, error) {
+	if workspaceID == "" || teamID == "" || sourceType == "" {
+		return "", errors.New("importer: CreateAPIJob requires workspace_id, team_id, source_type")
+	}
+	if err := tenancy.AssertRefInWorkspace(ctx, s.pool, "teams", teamID, workspaceID); err != nil {
+		return "", err
+	}
+	var id string
+	if err := s.pool.QueryRow(ctx,
+		`INSERT INTO import_jobs (workspace_id, team_id, source_type, status)
+		 VALUES ($1, $2, $3, 'pending') RETURNING id`,
+		workspaceID, teamID, sourceType).Scan(&id); err != nil {
+		return "", fmt.Errorf("importer: insert api job: %w", err)
+	}
+	return id, nil
+}
+
 // ClaimNext atomically claims the oldest pending job (FOR UPDATE SKIP LOCKED — safe across HA instances),
 // marks it running, and returns it (only the fields the runner needs). (nil, nil) when nothing is pending.
 func (s *JobStore) ClaimNext(ctx context.Context) (*Job, error) {

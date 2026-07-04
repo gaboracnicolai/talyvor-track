@@ -83,6 +83,18 @@ func (s *Store) GetDecrypted(ctx context.Context, workspaceID, provider string) 
 	return string(plaintext), projectKey, baseURL, nil
 }
 
+// Configured reports whether the workspace has an integration for the provider — a tenancy-scoped existence
+// check that does NOT decrypt the token (used by the *_api enqueue fail-fast path, C.4).
+func (s *Store) Configured(ctx context.Context, workspaceID, provider string) (bool, error) {
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM workspace_integrations WHERE workspace_id=$1 AND provider=$2)`,
+		workspaceID, provider).Scan(&exists); err != nil {
+		return false, fmt.Errorf("integrations: configured check: %w", err)
+	}
+	return exists, nil
+}
+
 // Get returns the NON-SECRET status view — provider/project/base_url/configured, NEVER the token. Tenancy
 // scoped. (nil, nil) when the workspace has no integration for the provider.
 func (s *Store) Get(ctx context.Context, workspaceID, provider string) (*Integration, error) {

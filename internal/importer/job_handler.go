@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -15,14 +16,42 @@ import (
 // (handler.go), so the sync endpoints + their tenancy regression lock (authz_test.go) stay byte-identical.
 // It reuses the same authz.AuthorizeWorkspace gate and the same writeErr/writeJSON helpers.
 
-type JobHandler struct{ jobs *JobStore }
+// integrationChecker is the tenancy-scoped existence check for a workspace's provider integration (C.1's
+// store satisfies it). A local interface — job_handler does NOT import integrations; main.go injects it.
+type integrationChecker interface {
+	Configured(ctx context.Context, workspaceID, provider string) (bool, error)
+}
+
+type JobHandler struct {
+	jobs         *JobStore
+	integrations integrationChecker // nil ⇒ live API (*_api) import disabled
+}
 
 func NewJobHandler(jobs *JobStore) *JobHandler { return &JobHandler{jobs: jobs} }
 
+// WithIntegrationChecker enables *_api enqueue by wiring the credential store's existence check. Absent ⇒
+// an *_api enqueue returns a clean 409 (live API import unavailable), never a panic.
+func (h *JobHandler) WithIntegrationChecker(c integrationChecker) *JobHandler {
+	h.integrations = c
+	return h
+}
+
 const jobMaxUploadBytes = 64 << 20 // 64 MiB — mirrors the sync handler cap
 
-// validSourceTypes is the closed set this build accepts. The '*_api' pair arrives in Build C.
+// validSourceTypes is the CSV (file-upload) set. validAPISourceTypes is the payload-less live-import set.
 var validSourceTypes = map[string]bool{"linear_csv": true, "jira_csv": true}
+var validAPISourceTypes = map[string]bool{"linear_api": true, "jira_api": true}
+
+func providerFromAPISource(sourceType string) string {
+	switch sourceType {
+	case "linear_api":
+		return "linear"
+	case "jira_api":
+		return "jira"
+	default:
+		return ""
+	}
+}
 
 func (h *JobHandler) Mount(r chi.Router) {
 	r.Post("/import/jobs", h.create)
@@ -33,6 +62,13 @@ func (h *JobHandler) Mount(r chi.Router) {
 // atomically, and returns 202 + job_id. The workspace written to the job row is the SERVER-RESOLVED
 // m.WorkspaceID — never the raw query param.
 func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
+	// T8 C.4 enqueue: an *_api job carries NO file/payload — its source config lives in the C.1 integration
+	// store. Intercept it before the multipart path; every other source_type (the *_csv pair + any invalid
+	// value) falls through to the UNCHANGED upload path below.
+	if validAPISourceTypes[r.URL.Query().Get("source_type")] {
+		h.createAPI(w, r)
+		return
+	}
 	if err := r.ParseMultipartForm(jobMaxUploadBytes); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())
 		return
@@ -74,6 +110,55 @@ func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
 	jobID, err := h.jobs.Create(r.Context(), m.WorkspaceID, teamID, sourceType, payload)
 	if err != nil {
 		// A cross-workspace team_id is a client error (fail-fast, before any row is written), not a 500.
+		if errors.Is(err, tenancy.ErrCrossWorkspace) {
+			writeErr(w, http.StatusBadRequest, "CROSS_WORKSPACE_TEAM", "team_id is not in the authorized workspace")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": jobID, "status": JobPending})
+}
+
+// createAPI enqueues a payload-less *_api job (Linear/Jira live import). No file: the source config lives in
+// the C.1 integration store. Same authz gate + same team cross-object guard as the *_csv path; adds a
+// fail-fast check that the authorized workspace actually HAS the provider integration (tenancy-scoped) so a
+// doomed job is never created.
+func (h *JobHandler) createAPI(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	teamID := r.URL.Query().Get("team_id")
+	sourceType := r.URL.Query().Get("source_type")
+	if workspaceID == "" || teamID == "" {
+		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "workspace_id and team_id are required (query string)")
+		return
+	}
+	// SAME tenancy gate as the *_csv path (and the sync path). A caller not a member of workspaceID is 403 —
+	// they cannot enqueue for another workspace, and the check below runs only against m.WorkspaceID.
+	m, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	// Integrations disabled (no encryption key) ⇒ live API import unavailable — clean 409, mirrors the runner.
+	if h.integrations == nil {
+		writeErr(w, http.StatusConflict, "API_IMPORT_DISABLED", "live API import unavailable (integrations not configured)")
+		return
+	}
+	provider := providerFromAPISource(sourceType)
+	// FAIL-FAST: the authorized workspace must have the provider integration. Tenancy-scoped to m.WorkspaceID
+	// — never reads another workspace's integrations. Absent ⇒ 400, and NO job row is created.
+	configured, err := h.integrations.Configured(r.Context(), m.WorkspaceID, provider)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "LOOKUP_FAILED", err.Error())
+		return
+	}
+	if !configured {
+		writeErr(w, http.StatusBadRequest, "NO_INTEGRATION", "no "+provider+" integration configured for this workspace")
+		return
+	}
+	// Payload-less job; same team cross-object guard as *_csv (a team from another workspace ⇒ 400, no row).
+	jobID, err := h.jobs.CreateAPIJob(r.Context(), m.WorkspaceID, teamID, sourceType)
+	if err != nil {
 		if errors.Is(err, tenancy.ErrCrossWorkspace) {
 			writeErr(w, http.StatusBadRequest, "CROSS_WORKSPACE_TEAM", "team_id is not in the authorized workspace")
 			return
