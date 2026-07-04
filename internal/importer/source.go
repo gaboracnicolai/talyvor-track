@@ -60,7 +60,16 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		issueModel.TeamID = teamID
 		issueModel.CreatorID = "importer"
 
-		if _, err := imp.issues.Create(ctx, issueModel); err != nil {
+		// An issue carrying an Identifier came from an API provider (C.3) → route through C.2's re-import
+		// upsert (land on the provider-key, INSERT-or-UPDATE). CSV rows carry no Identifier → Create, as
+		// before. The upserter is nil for CSV-only backing stores, so that branch is never taken there.
+		if issueModel.Identifier != "" && imp.upserter != nil {
+			if _, _, err := imp.upserter.UpsertByIdentifier(ctx, issueModel); err != nil {
+				out.Skipped++
+				out.Errors = append(out.Errors, fmt.Sprintf("row %d: upsert: %v", row.RowNum, err))
+				continue
+			}
+		} else if _, err := imp.issues.Create(ctx, issueModel); err != nil {
 			out.Skipped++
 			out.Errors = append(out.Errors, fmt.Sprintf("row %d: create: %v", row.RowNum, err))
 			continue

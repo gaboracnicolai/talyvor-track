@@ -14,12 +14,23 @@ import (
 // 30s HTTP timeout with its state durable in import_jobs. Mirrors the Start(ctx) idiom already used by
 // dbresil.Monitor and lensintegration.Syncer.StartSync.
 
+// providerConfig loads a workspace's decrypted provider credentials (C.1's integration store satisfies it).
+// A local interface — the importer package does NOT import integrations; main.go injects the concrete store.
+type providerConfig interface {
+	GetDecrypted(ctx context.Context, workspaceID, provider string) (token, projectKey, baseURL string, err error)
+}
+
 type Runner struct {
-	jobs *JobStore
-	imp  *Importer
+	jobs    *JobStore
+	imp     *Importer
+	configs providerConfig // nil ⇒ *_api jobs fail cleanly (integrations disabled)
 }
 
 func NewRunner(jobs *JobStore, imp *Importer) *Runner { return &Runner{jobs: jobs, imp: imp} }
+
+// WithProviderConfig wires the credential store so linear_api/jira_api jobs can load their token. Absent ⇒
+// those jobs fail with a clear error (never a panic).
+func (r *Runner) WithProviderConfig(pc providerConfig) *Runner { r.configs = pc; return r }
 
 const defaultRunnerInterval = 2 * time.Second
 
@@ -107,8 +118,34 @@ func (r *Runner) sourceFor(ctx context.Context, job *Job) (IssueSource, error) {
 		return r.csvSourceFor(ctx, job.ID, linearRowMapper)
 	case "jira_csv":
 		return r.csvSourceFor(ctx, job.ID, jiraRowMapper)
+	case "linear_api":
+		return r.apiSourceFor(ctx, job, "linear")
+	case "jira_api":
+		return r.apiSourceFor(ctx, job, "jira")
 	default:
 		return nil, fmt.Errorf("importer: unsupported source_type %q", job.SourceType)
+	}
+}
+
+// apiSourceFor builds a provider IssueSource for an *_api job. There is NO payload row — the provider config
+// (token, project/team key, base URL) is loaded from the credential store BY THE JOB'S workspace_id (the
+// Build-B tenancy re-enforcement: workspace comes only from the job row). No integration / no key ⇒ a clean
+// error → the job fails observably, never a panic.
+func (r *Runner) apiSourceFor(ctx context.Context, job *Job, provider string) (IssueSource, error) {
+	if r.configs == nil {
+		return nil, fmt.Errorf("importer: %s_api import unavailable — integrations not configured", provider)
+	}
+	token, projectKey, baseURL, err := r.configs.GetDecrypted(ctx, job.WorkspaceID, provider)
+	if err != nil {
+		return nil, fmt.Errorf("importer: load %s integration: %w", provider, err)
+	}
+	switch provider {
+	case "linear":
+		return newLinearSource(token, projectKey, baseURL), nil
+	case "jira":
+		return newJiraSource(token, projectKey, baseURL), nil
+	default:
+		return nil, fmt.Errorf("importer: unknown provider %q", provider)
 	}
 }
 

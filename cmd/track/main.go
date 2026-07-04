@@ -279,23 +279,33 @@ func main() {
 	// endpoints above stay as-is); mirrors the Start(ctx) idiom of the other background goroutines.
 	importJobs := importer.NewJobStore(pool)
 	importJobHandler := importer.NewJobHandler(importJobs)
-	go importer.NewRunner(importJobs, importer.New(issueStore)).Start(ctx, 0)
 
 	// T8 Build C.1 — per-workspace provider credential store (Linear/Jira API tokens, AES-256-GCM at rest).
 	// Enabled ONLY when TRACK_INTEGRATION_ENCRYPTION_KEY is set (config already validated it decodes to 32
 	// bytes at boot); absent ⇒ live API import is unavailable but Track runs normally.
 	var integrationHandler *integrations.Handler
+	var integrationStore *integrations.Store
 	if len(cfg.IntegrationEncryptionKey) > 0 {
 		cipher, err := integrations.NewCipher(cfg.IntegrationEncryptionKey)
 		if err != nil { // unreachable (config validated the length) — fail loud rather than run broken crypto
 			slog.Error("integrations: cipher init failed", slog.String("err", err.Error()))
 			os.Exit(1)
 		}
-		integrationHandler = integrations.NewHandler(integrations.NewStore(pool, cipher))
+		integrationStore = integrations.NewStore(pool, cipher)
+		integrationHandler = integrations.NewHandler(integrationStore)
 		slog.Info("integrations: provider credential store enabled")
 	} else {
 		slog.Info("integrations: TRACK_INTEGRATION_ENCRYPTION_KEY unset — live API import disabled")
 	}
+
+	// T8 Build B + C.3 — the async import-job runner. C.3 wires the credential store so linear_api/jira_api
+	// jobs load their token by the job's workspace_id (Build-B tenancy re-enforcement); absent ⇒ *_api jobs
+	// fail cleanly. The runner reads workspace ONLY from the job row.
+	importRunner := importer.NewRunner(importJobs, importer.New(issueStore))
+	if integrationStore != nil {
+		importRunner = importRunner.WithProviderConfig(integrationStore)
+	}
+	go importRunner.Start(ctx, 0)
 
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
