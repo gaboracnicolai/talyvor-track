@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,17 @@ type Config struct {
 	// (TRACK_REDIS_URL). Both are optional: HA off means RedisURL is ignored.
 	HAEnabled bool
 	RedisURL  string
+
+	// IntegrationEncryptionKey is the 32-byte AES-256-GCM key that encrypts per-workspace provider API tokens
+	// (Build C, workspace_integrations) before they touch the DB. Supplied base64-encoded via
+	// TRACK_INTEGRATION_ENCRYPTION_KEY (`openssl rand -base64 32`). OPTIONAL: unset ⇒ the integration store is
+	// disabled and live API import is unavailable (Track still runs). SET ⇒ validated to exactly 32 decoded
+	// bytes at boot — a wrong length is fail-LOUD at startup, never a broken-crypto surprise at first use.
+	IntegrationEncryptionKey []byte
 }
+
+// IntegrationEncryptionKeyLen is the required decoded key length: 32 bytes for AES-256.
+const IntegrationEncryptionKeyLen = 32
 
 // MinGatewayAuthSecretLen mirrors the edge gateway's GATEWAY_AUTH_SECRET minimum
 // (edge-infra auth-service config.rs); a shorter shared secret on either side is a
@@ -63,6 +74,19 @@ func Load() (*Config, error) {
 	// than the gateway's minimum → refuse to start rather than run insecure.
 	if len(c.GatewayAuthSecret) < MinGatewayAuthSecretLen {
 		return nil, fmt.Errorf("%w: GATEWAY_AUTH_SECRET must be set and >= %d chars (Track's copy of the edge gateway transit-proof secret)", ErrMissingEnv, MinGatewayAuthSecretLen)
+	}
+	// Integration token-encryption key — OPTIONAL, but if provided it must decode to exactly 32 bytes.
+	// Fail-LOUD at boot on a misconfigured key (wrong length / not base64), never a broken-crypto surprise at
+	// first use. Absent ⇒ IntegrationEncryptionKey stays nil ⇒ the integration store is disabled.
+	if v := os.Getenv("TRACK_INTEGRATION_ENCRYPTION_KEY"); v != "" {
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(v))
+		if err != nil {
+			return nil, fmt.Errorf("%w: TRACK_INTEGRATION_ENCRYPTION_KEY must be valid base64: %v", ErrMissingEnv, err)
+		}
+		if len(key) != IntegrationEncryptionKeyLen {
+			return nil, fmt.Errorf("%w: TRACK_INTEGRATION_ENCRYPTION_KEY must decode to exactly %d bytes (AES-256), got %d", ErrMissingEnv, IntegrationEncryptionKeyLen, len(key))
+		}
+		c.IntegrationEncryptionKey = key
 	}
 	return c, nil
 }

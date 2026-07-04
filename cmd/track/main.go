@@ -42,6 +42,7 @@ import (
 	"github.com/talyvor/track/internal/health"
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/importer"
+	"github.com/talyvor/track/internal/integrations"
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/lensintegration"
@@ -280,6 +281,22 @@ func main() {
 	importJobHandler := importer.NewJobHandler(importJobs)
 	go importer.NewRunner(importJobs, importer.New(issueStore)).Start(ctx, 0)
 
+	// T8 Build C.1 — per-workspace provider credential store (Linear/Jira API tokens, AES-256-GCM at rest).
+	// Enabled ONLY when TRACK_INTEGRATION_ENCRYPTION_KEY is set (config already validated it decodes to 32
+	// bytes at boot); absent ⇒ live API import is unavailable but Track runs normally.
+	var integrationHandler *integrations.Handler
+	if len(cfg.IntegrationEncryptionKey) > 0 {
+		cipher, err := integrations.NewCipher(cfg.IntegrationEncryptionKey)
+		if err != nil { // unreachable (config validated the length) — fail loud rather than run broken crypto
+			slog.Error("integrations: cipher init failed", slog.String("err", err.Error()))
+			os.Exit(1)
+		}
+		integrationHandler = integrations.NewHandler(integrations.NewStore(pool, cipher))
+		slog.Info("integrations: provider credential store enabled")
+	} else {
+		slog.Info("integrations: TRACK_INTEGRATION_ENCRYPTION_KEY unset — live API import disabled")
+	}
+
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
 	if ids, err := workspaceStore.ListIDs(ctx); err == nil {
@@ -386,6 +403,9 @@ func main() {
 		analyticsHandler.Mount(r)
 		importerHandler.Mount(r)
 		importJobHandler.Mount(r) // T8 Build B: async POST /import/jobs + GET /import/jobs/{id}
+		if integrationHandler != nil {
+			integrationHandler.Mount(r) // T8 Build C.1: POST /integrations + GET /integrations/{provider}
+		}
 		customFieldHandler.Mount(r)
 		dependencyHandler.Mount(r)
 		timeHandler.Mount(r)
