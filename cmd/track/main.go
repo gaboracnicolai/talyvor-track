@@ -274,6 +274,11 @@ func main() {
 	// one curl call. Mounted under /v1/import/* so it inherits the
 	// auth surface every other /v1 endpoint sits behind.
 	importerHandler := importer.NewHandler(importer.New(issueStore))
+	// T8 Build B — the async import-job spine. The runner drains pending jobs off-request (the sync
+	// endpoints above stay as-is); mirrors the Start(ctx) idiom of the other background goroutines.
+	importJobs := importer.NewJobStore(pool)
+	importJobHandler := importer.NewJobHandler(importJobs)
+	go importer.NewRunner(importJobs, importer.New(issueStore)).Start(ctx, 0)
 
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
@@ -380,6 +385,7 @@ func main() {
 		automationHandler.Mount(r)
 		analyticsHandler.Mount(r)
 		importerHandler.Mount(r)
+		importJobHandler.Mount(r) // T8 Build B: async POST /import/jobs + GET /import/jobs/{id}
 		customFieldHandler.Mount(r)
 		dependencyHandler.Mount(r)
 		timeHandler.Mount(r)
