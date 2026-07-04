@@ -10,9 +10,7 @@ package importer
 
 import (
 	"context"
-	"encoding/csv"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
@@ -82,7 +80,11 @@ func (ci columnIndex) get(row []string, key string) string {
 //
 //	Urgent → 1 · High → 2 · Medium → 3 · Low → 4 · No priority → 0
 func (imp *Importer) ImportLinearCSV(ctx context.Context, workspaceID, teamID string, r io.Reader) (*ImportResult, error) {
-	return imp.run(ctx, workspaceID, teamID, r, linearRowMapper)
+	src, err := newCSVSource(r, linearRowMapper)
+	if err != nil {
+		return nil, err
+	}
+	return imp.run(ctx, workspaceID, teamID, src)
 }
 
 func linearRowMapper(ci columnIndex, row []string) (model.Issue, error) {
@@ -151,7 +153,11 @@ func mapLinearPriority(p string) model.IssuePriority {
 //	Highest → 1 (urgent) · High / Major → 2 (high)
 //	Medium → 3 · Low → 4 · Lowest / Trivial → 4 · other → 0
 func (imp *Importer) ImportJiraCSV(ctx context.Context, workspaceID, teamID string, r io.Reader) (*ImportResult, error) {
-	return imp.run(ctx, workspaceID, teamID, r, jiraRowMapper)
+	src, err := newCSVSource(r, jiraRowMapper)
+	if err != nil {
+		return nil, err
+	}
+	return imp.run(ctx, workspaceID, teamID, src)
 }
 
 func jiraRowMapper(ci columnIndex, row []string) (model.Issue, error) {
@@ -215,70 +221,9 @@ var errEmptyTitle = errors.New("row has no title; skipping")
 
 type rowMapper func(columnIndex, []string) (model.Issue, error)
 
-// run is the per-file pipeline shared by both Linear and Jira import.
-// One CSV reader with FieldsPerRecord=-1 (allow variable column count)
-// — that way a single malformed mid-stream row is counted in Skipped
-// instead of aborting the whole batch.
-func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, r io.Reader, mapper rowMapper) (*ImportResult, error) {
-	if workspaceID == "" || teamID == "" {
-		return nil, errors.New("importer: workspace_id and team_id are required")
-	}
-
-	rd := csv.NewReader(r)
-	rd.FieldsPerRecord = -1
-	rd.TrimLeadingSpace = true
-
-	header, err := rd.Read()
-	if errors.Is(err, io.EOF) {
-		return &ImportResult{Errors: []string{}}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("importer: read header: %w", err)
-	}
-	ci := buildIndex(header)
-	expectedCols := len(header)
-
-	out := &ImportResult{Errors: []string{}}
-	rowNum := 1 // header was row 1
-	for {
-		row, err := rd.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		rowNum++
-		if err != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("row %d: %v", rowNum, err))
-			continue
-		}
-		// Catch raggedly-short rows that csv.Read tolerates because of
-		// FieldsPerRecord=-1. The expected column count is fixed by
-		// the header; anything shorter is malformed.
-		if len(row) < expectedCols {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("row %d: expected %d columns, got %d", rowNum, expectedCols, len(row)))
-			continue
-		}
-
-		issueModel, err := mapper(ci, row)
-		if err != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("row %d: %v", rowNum, err))
-			continue
-		}
-		issueModel.WorkspaceID = workspaceID
-		issueModel.TeamID = teamID
-		issueModel.CreatorID = "importer"
-
-		if _, err := imp.issues.Create(ctx, issueModel); err != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("row %d: create: %v", rowNum, err))
-			continue
-		}
-		out.Imported++
-	}
-	return out, nil
-}
+// The per-provider CSV parse + the shared write pipeline now live behind the IssueSource seam in source.go
+// (csvSource + run). ImportLinearCSV / ImportJiraCSV above build a csvSource and feed it to run — behaviour
+// unchanged; the extraction lets Build C plug a paginated API source into the same run + tenancy path.
 
 // splitLabels turns Linear/Jira's comma-separated label string into a
 // trimmed slice. Returns an empty (non-nil) slice for empty input so
