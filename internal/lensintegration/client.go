@@ -152,6 +152,58 @@ func (c *Client) GetSpendByFeature(ctx context.Context, workspaceID string, days
 	return out, nil
 }
 
+// RequestSpend is one row of the Lens /v1/api/spend/by-request response — per-request grain, so each row
+// carries the RequestID that keys Track's exactly-once accumulation. Feature is the X-Talyvor-Feature the
+// caller set (Track convention = the issue identifier).
+type RequestSpend struct {
+	RequestID    string  `json:"request_id"`
+	Feature      string  `json:"feature"`
+	CostUSD      float64 `json:"cost_usd"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	TS           string  `json:"ts"`
+}
+
+// byRequestPage mirrors the bounded /v1/api/spend/by-request envelope: a capped page of rows plus a
+// next_cursor to walk. Empty next_cursor ⇒ the walk is complete.
+type byRequestPage struct {
+	Rows       []RequestSpend `json:"rows"`
+	NextCursor string         `json:"next_cursor"`
+}
+
+// byRequestMaxPages bounds the cursor walk so a misbehaving endpoint can't loop forever. At the Lens page cap
+// of 1000 rows, 1000 pages = 1M rows/window/workspace — far above any real 24h volume.
+const byRequestMaxPages = 1000
+
+// GetSpendByRequest pulls per-request spend for a workspace over the last `days`, walking the keyset cursor to
+// completion (bounded pages). Same window semantics as GetSpendByFeature. Returns every request row in the
+// window so the syncer can land each one exactly-once by request_id.
+func (c *Client) GetSpendByRequest(ctx context.Context, workspaceID string, days int) ([]RequestSpend, error) {
+	if days <= 0 {
+		days = 30
+	}
+	var all []RequestSpend
+	cursor := ""
+	for page := 0; page < byRequestMaxPages; page++ {
+		q := url.Values{}
+		q.Set("workspace_id", workspaceID)
+		q.Set("days", strconv.Itoa(days))
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		var pg byRequestPage
+		if err := c.do(ctx, "/v1/api/spend/by-request?"+q.Encode(), &pg); err != nil {
+			return nil, err
+		}
+		all = append(all, pg.Rows...)
+		if pg.NextCursor == "" {
+			return all, nil
+		}
+		cursor = pg.NextCursor
+	}
+	return all, fmt.Errorf("lens: by-request walk exceeded %d pages for workspace %s", byRequestMaxPages, workspaceID)
+}
+
 func (c *Client) GetAnomalies(ctx context.Context, workspaceID string) ([]map[string]any, error) {
 	q := url.Values{}
 	q.Set("workspace_id", workspaceID)

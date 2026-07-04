@@ -76,67 +76,10 @@ func TestRecordSpendEvent_WebhookRedelivery_ExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestReconcile_RepeatedPolls_ExactlyOnce — the syncer's repeated polls of the same
-// rolling 24h total must not inflate cost. Different keys per poll prove the LEDGER
-// DELTA (not just key dedup) makes polls after the first no-ops.
-func TestReconcile_RepeatedPolls_ExactlyOnce(t *testing.T) {
-	d := testutil.New(t)
-	ctx := context.Background()
-	ws := d.Workspace(t)
-	iss := seedFeatureIssue(t, d, ws.ID, "ENG-2")
-	st := issue.NewStore(d.Pool)
-
-	for i := 0; i < 5; i++ {
-		key := "lens-sync:poll-" + string(rune('a'+i)) // distinct key each poll
-		if _, err := st.ReconcileFeatureSpend(ctx, key, "ENG-2", 4.00, 0, ws.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if cost := issueCost(t, d, iss); cost != 4.00 {
-		t.Errorf("LEAK: 5 polls of $4 total → cost %.2f, want 4.00 (re-added total each poll)", cost)
-	}
-	sum, rows := ledger(t, d, iss)
-	if rows != 1 {
-		t.Errorf("ledger rows = %d, want 1 (only the first poll records the gap)", rows)
-	}
-	if sum != 4.00 {
-		t.Errorf("ledger sum = %.2f, want 4.00", sum)
-	}
-}
-
-// TestReconcile_BackfillsMissedWebhook_Once — webhook records part of the spend; a
-// later sync sees Lens's higher total and backfills exactly the gap, once. Proves the
-// combined webhook + syncer invariant: issue cost == SUM(ledger rows).
-func TestReconcile_BackfillsMissedWebhook_Once(t *testing.T) {
-	d := testutil.New(t)
-	ctx := context.Background()
-	ws := d.Workspace(t)
-	iss := seedFeatureIssue(t, d, ws.ID, "ENG-4")
-	st := issue.NewStore(d.Pool)
-
-	// Webhook recorded $2 of a feature whose true total (per Lens) is $5.
-	if _, err := st.RecordSpendEvent(ctx, "lens-spend:e1", "ENG-4", 2.00, 0, ws.ID, "webhook"); err != nil {
-		t.Fatal(err)
-	}
-	// Sync sees total $5 → backfills the $3 gap.
-	if _, err := st.ReconcileFeatureSpend(ctx, "lens-sync:s1", "ENG-4", 5.00, 0, ws.ID); err != nil {
-		t.Fatal(err)
-	}
-	// Sync again (still $5) → no-op.
-	if _, err := st.ReconcileFeatureSpend(ctx, "lens-sync:s2", "ENG-4", 5.00, 0, ws.ID); err != nil {
-		t.Fatal(err)
-	}
-	if cost := issueCost(t, d, iss); cost != 5.00 {
-		t.Errorf("cost = %.2f, want 5.00 (2 webhook + 3 reconcile gap, no double)", cost)
-	}
-	sum, rows := ledger(t, d, iss)
-	if rows != 2 {
-		t.Errorf("ledger rows = %d, want 2 (1 webhook + 1 reconcile)", rows)
-	}
-	if sum != issueCost(t, d, iss) {
-		t.Errorf("ledger != aggregate: %.2f vs %.2f", sum, issueCost(t, d, iss))
-	}
-}
+// NOTE (T7 fu Build 2): the ReconcileFeatureSpend feature-total delta-reconciler was DELETED — the syncer
+// now accumulates per-request additively (RecordRequestSpend, keyed exactly-once on request_id, resolving
+// the single issue by identifier). Its exactly-once / no-fanout / fail-safe proofs live in
+// aicost_per_request_test.go. The RecordSpendEvent (dead webhook path) tests below are retained unchanged.
 
 // TestRecordSpendEvent_ConcurrentIdentical_ExactlyOnce — 16 identical events delivered
 // concurrently still credit exactly once (the unique key holds under a race). Run with
