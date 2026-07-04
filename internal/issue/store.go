@@ -215,12 +215,9 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 		}
 	}
 
-	var nextNumber int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`,
-		issue.TeamID,
-	).Scan(&nextNumber); err != nil {
-		return nil, fmt.Errorf("issue: compute next number: %w", err)
+	nextNumber, err := s.nextIssueNumber(ctx, issue.TeamID)
+	if err != nil {
+		return nil, err
 	}
 	issue.Number = nextNumber
 	issue.Identifier = fmt.Sprintf("%s-%d", teamIdentifier, nextNumber)
@@ -238,6 +235,117 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID,
 		issue.DueDate, issue.LensFeature, issue.Labels, issue.SortOrder,
 	))
+}
+
+// nextIssueNumber computes the next per-team issue number (COALESCE(MAX(number),0)+1). Shared by Create and
+// UpsertByIdentifier so both allocate numbers identically. The (team_id, number) UNIQUE constraint catches
+// the race between two concurrent allocators picking the same number — callers retry.
+func (s *Store) nextIssueNumber(ctx context.Context, teamID string) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`, teamID,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("issue: compute next number: %w", err)
+	}
+	return n, nil
+}
+
+// UpsertByIdentifier lands a provider-imported issue on its identifier (the provider-key, e.g. ENG-123):
+// INSERT when the (workspace_id, identifier) pair is new, UPDATE its content when it already exists. Unlike
+// Create — which AUTO-generates a TEAM-N identifier — the identifier here is CALLER-SUPPLIED, so the imported
+// issue is addressable by its provider key and PR #30's cost attribution (WHERE identifier=$feature) resolves
+// it. Returns the issue and inserted=true when this call INSERTed (xmax=0), false when it UPDATEd (so the
+// C.3 runner can count created vs updated).
+//
+// RE-IMPORT POLICY — the locked (c) field-class split. On the UPDATE branch:
+//
+//	CLOBBER  (provider is source of truth):        title, description, labels   → in the UPDATE SET
+//	PRESERVE (a Track user's local workflow action): status, priority           → OMITTED (deliberately kept)
+//	NEVER TOUCH (money-path + attribution, locked):  ai_cost_usd, ai_tokens, lens_feature → OMITTED (untouched)
+//
+// Two omission classes, different reasons. number is allocated on INSERT and left alone on UPDATE — a
+// re-imported issue keeps its identity.
+func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*model.Issue, bool, error) {
+	if s.pool == nil {
+		return nil, false, errors.New("issue: store has no pool")
+	}
+	if issue.WorkspaceID == "" || issue.TeamID == "" || issue.Title == "" || issue.CreatorID == "" || issue.Identifier == "" {
+		return nil, false, errors.New("issue: WorkspaceID, TeamID, Title, CreatorID, and Identifier are required")
+	}
+	if issue.Status == "" {
+		issue.Status = model.StatusBacklog
+	}
+	if issue.Labels == nil {
+		issue.Labels = []string{}
+	}
+
+	// Team-in-workspace tenancy — same lookup Create uses; a team from another workspace is rejected.
+	var teamIdentifier string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT identifier FROM teams WHERE id = $1 AND workspace_id = $2`,
+		issue.TeamID, issue.WorkspaceID,
+	).Scan(&teamIdentifier); err != nil {
+		return nil, false, fmt.Errorf("issue: team not found in workspace: %w", err)
+	}
+	// Object-graph integrity: optional cross-object refs must be in this workspace (same guard as Create —
+	// also what keeps this INSERT clear of the .semgrep cross-object-tenancy lock).
+	for field, p := range map[string]*string{
+		"project_id":  issue.ProjectID,
+		"cycle_id":    issue.CycleID,
+		"assignee_id": issue.AssigneeID,
+		"parent_id":   issue.ParentID,
+	} {
+		if p == nil || *p == "" {
+			continue
+		}
+		if err := s.assertRefInWorkspace(ctx, issueRefQueries[field], field, *p, issue.WorkspaceID); err != nil {
+			return nil, false, err
+		}
+	}
+
+	// A number for the INSERT branch (shared with Create). On CONFLICT this value is discarded — the existing
+	// row keeps its number.
+	nextNumber, err := s.nextIssueNumber(ctx, issue.TeamID)
+	if err != nil {
+		return nil, false, err
+	}
+	issue.Number = nextNumber
+
+	const upsertSQL = `INSERT INTO issues
+        (workspace_id, team_id, project_id, number, identifier,
+         title, description, status, priority,
+         assignee_id, creator_id, cycle_id, parent_id,
+         due_date, lens_feature, labels, sort_order)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    ON CONFLICT (workspace_id, identifier) DO UPDATE SET
+        title       = EXCLUDED.title,        -- CLOBBER: provider is source of truth
+        description = EXCLUDED.description,   -- CLOBBER
+        labels      = EXCLUDED.labels,       -- CLOBBER
+        updated_at  = NOW()
+        -- OMITTED (PRESERVE local workflow):        status, priority
+        -- OMITTED (NEVER TOUCH money + attribution): ai_cost_usd, ai_tokens, lens_feature
+    RETURNING (xmax = 0) AS inserted, ` + issueColumns
+
+	var inserted bool
+	out, err := scanIssue(insertedScanner{
+		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.LensFeature, issue.Labels, issue.SortOrder),
+		inserted: &inserted,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return out, inserted, nil
+}
+
+// insertedScanner adapts a row whose projection is `(xmax=0) AS inserted, ` + issueColumns so scanIssue (which
+// scans exactly issueColumns) can be reused unchanged: it prepends &inserted to the scan destinations.
+type insertedScanner struct {
+	row      pgx.Row
+	inserted *bool
+}
+
+func (s insertedScanner) Scan(dest ...any) error {
+	return s.row.Scan(append([]any{s.inserted}, dest...)...)
 }
 
 func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
