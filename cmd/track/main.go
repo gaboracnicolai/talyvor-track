@@ -293,6 +293,7 @@ func main() {
 		}
 		integrationStore = integrations.NewStore(pool, cipher)
 		integrationHandler = integrations.NewHandler(integrationStore)
+		importJobHandler = importJobHandler.WithIntegrationChecker(integrationStore) // enable *_api enqueue
 		slog.Info("integrations: provider credential store enabled")
 	} else {
 		slog.Info("integrations: TRACK_INTEGRATION_ENCRYPTION_KEY unset — live API import disabled")
