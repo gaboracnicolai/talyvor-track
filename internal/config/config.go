@@ -45,7 +45,30 @@ type Config struct {
 	// disabled and live API import is unavailable (Track still runs). SET ⇒ validated to exactly 32 decoded
 	// bytes at boot — a wrong length is fail-LOUD at startup, never a broken-crypto surprise at first use.
 	IntegrationEncryptionKey []byte
+
+	// MemberSyncSecret is the bearer token the service-authenticated members endpoint
+	// (GET /v1/service/members) constant-time-compares. OPTIONAL: unset ⇒ Track boots
+	// but that endpoint 401s all requests (member-sync disabled). If SET it must be
+	// >= MinMemberSyncSecretLen — a weak secret would leak every tenant's roster, so a
+	// misconfigured one fails LOUD at boot, not silently at first use.
+	//
+	// OPERATIONAL CONTRACT (not just code posture — ops MUST honor this):
+	//   - This one token gates ALL-TENANT member data: a valid holder can read EVERY
+	//     workspace's roster via /v1/service/members. Treat it as top-tier.
+	//   - It MUST be a DEDICATED secret — never reused for any other purpose or service.
+	//   - It MUST live only in the member-sync consumer's server-side environment
+	//     (the Docs sync). NEVER client-side, NEVER in any browser-reachable config.
+	//   - Rotation is expected. Rotating it requires updating BOTH sides in lockstep:
+	//     this env on Track AND the Docs sync consumer (PR-2). A strong secret copied
+	//     into three configs is no longer strong.
+	//   - Every pull is audit-logged (event=service_member_pull, workspace_id + count);
+	//     a leaked-token mass-enumeration is detectable there.
+	MemberSyncSecret string
 }
+
+// MinMemberSyncSecretLen mirrors GATEWAY_AUTH_SECRET's minimum — this token gates the
+// highest-value cross-tenant data (every workspace's member roster).
+const MinMemberSyncSecretLen = 16
 
 // IntegrationEncryptionKeyLen is the required decoded key length: 32 bytes for AES-256.
 const IntegrationEncryptionKeyLen = 32
@@ -87,6 +110,12 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("%w: TRACK_INTEGRATION_ENCRYPTION_KEY must decode to exactly %d bytes (AES-256), got %d", ErrMissingEnv, IntegrationEncryptionKeyLen, len(key))
 		}
 		c.IntegrationEncryptionKey = key
+	}
+	// Member-sync bearer secret — OPTIONAL, but if set must be strong (it gates every
+	// tenant's roster). Boot-fail-closed on a weak value; unset leaves the endpoint 401.
+	c.MemberSyncSecret = os.Getenv("TRACK_MEMBER_SYNC_SECRET")
+	if c.MemberSyncSecret != "" && len(c.MemberSyncSecret) < MinMemberSyncSecretLen {
+		return nil, fmt.Errorf("%w: TRACK_MEMBER_SYNC_SECRET, if set, must be >= %d chars (it gates every tenant's member roster)", ErrMissingEnv, MinMemberSyncSecretLen)
 	}
 	return c, nil
 }
