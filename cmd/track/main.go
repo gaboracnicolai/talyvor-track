@@ -47,6 +47,7 @@ import (
 	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/mcp"
+	"github.com/talyvor/track/internal/member"
 	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/migrate"
 	"github.com/talyvor/track/internal/milestone"
@@ -372,6 +373,7 @@ func main() {
 	gwExempt := func(p string) bool {
 		return strings.HasPrefix(p, "/v1/lens/webhook") ||
 			strings.HasPrefix(p, "/v1/webhooks/") ||
+			strings.HasPrefix(p, "/v1/service/") || // service-authed endpoints (own bearer secret); e.g. member-sync
 			strings.HasPrefix(p, "/v1/public/") ||
 			strings.HasPrefix(p, "/v1/invite/") ||
 			strings.HasPrefix(p, "/v1/guest/") ||
@@ -413,7 +415,8 @@ func main() {
 		automationHandler.Mount(r)
 		analyticsHandler.Mount(r)
 		importerHandler.Mount(r)
-		importJobHandler.Mount(r) // T8 Build B: async POST /import/jobs + GET /import/jobs/{id}
+		importJobHandler.Mount(r)                                               // T8 Build B: async POST /import/jobs + GET /import/jobs/{id}
+		member.NewHandler(member.NewStore(pool), cfg.MemberSyncSecret).Mount(r) // A0b: GET /v1/service/members (gwExempt, bearer)
 		if integrationHandler != nil {
 			integrationHandler.Mount(r) // T8 Build C.1: POST /integrations + GET /integrations/{provider}
 		}
