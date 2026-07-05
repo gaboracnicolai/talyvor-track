@@ -2,6 +2,16 @@
 // (GET /v1/service/members) that a Docs background sync pulls. It exposes the
 // MINIMUM — (email, role, member_id) tuples — scoped to one workspace, behind a
 // bearer service token. It never returns richer member PII (name/avatar/created_at).
+//
+// SECURITY POSTURE. The bearer token (config.MemberSyncSecret) authorizes reads of
+// ANY workspace's roster — the caller is a trusted service principal, not a
+// per-workspace member. Containment for that broad grant, not just forgery-resistance:
+//   - constant-time bearer compare; unset secret ⇒ 401-refuses-all (see handler.go);
+//   - every post-auth pull is audit-logged (workspace_id + COUNT, never the roster —
+//     a log that copies emails would be a second leak) so a leaked-token
+//     cross-workspace enumeration is visible;
+//   - the operational secret contract (dedicated, server-side only, lockstep rotation)
+//     is documented on config.MemberSyncSecret.
 package member
 
 import (

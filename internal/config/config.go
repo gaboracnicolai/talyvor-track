@@ -51,6 +51,18 @@ type Config struct {
 	// but that endpoint 401s all requests (member-sync disabled). If SET it must be
 	// >= MinMemberSyncSecretLen — a weak secret would leak every tenant's roster, so a
 	// misconfigured one fails LOUD at boot, not silently at first use.
+	//
+	// OPERATIONAL CONTRACT (not just code posture — ops MUST honor this):
+	//   - This one token gates ALL-TENANT member data: a valid holder can read EVERY
+	//     workspace's roster via /v1/service/members. Treat it as top-tier.
+	//   - It MUST be a DEDICATED secret — never reused for any other purpose or service.
+	//   - It MUST live only in the member-sync consumer's server-side environment
+	//     (the Docs sync). NEVER client-side, NEVER in any browser-reachable config.
+	//   - Rotation is expected. Rotating it requires updating BOTH sides in lockstep:
+	//     this env on Track AND the Docs sync consumer (PR-2). A strong secret copied
+	//     into three configs is no longer strong.
+	//   - Every pull is audit-logged (event=service_member_pull, workspace_id + count);
+	//     a leaked-token mass-enumeration is detectable there.
 	MemberSyncSecret string
 }
 

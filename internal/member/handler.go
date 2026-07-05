@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,16 +50,34 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id") // nosemgrep: caller-workspace-id-query-needs-authorization
 	if workspaceID == "" {
 		// A scoped read REQUIRES an explicit workspace — never a full-table dump.
+		auditPull(workspaceID, 0, http.StatusBadRequest)
 		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "workspace_id is required")
 		return
 	}
 	limit, offset := pageParams(r)
 	members, err := h.store.ListWorkspaceMembers(r.Context(), workspaceID, limit, offset)
 	if err != nil {
+		auditPull(workspaceID, 0, http.StatusInternalServerError)
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
 	}
+	// A non-existent workspace_id simply yields an empty roster (200) — and is audited
+	// the same way (count=0) so sequential-ID probing by a leaked token is VISIBLE.
+	auditPull(workspaceID, len(members), http.StatusOK)
 	writeJSON(w, http.StatusOK, members)
+}
+
+// auditPull emits the CONTAINMENT signal for every post-auth pull: a leaked token doing
+// mass cross-workspace enumeration must be visible in logs. It logs the workspace_id, the
+// row COUNT (never the roster — a log that copies emails is a second leak), and the
+// outcome, under a stable event marker.
+func auditPull(workspaceID string, count, status int) {
+	slog.Info("service member pull",
+		slog.String("event", "service_member_pull"),
+		slog.String("workspace_id", workspaceID),
+		slog.Int("count", count),
+		slog.Int("status", status),
+	)
 }
 
 // authorized constant-time-compares the bearer token's digest against the secret's.
