@@ -31,7 +31,7 @@ var identifierRE = regexp.MustCompile(`(#?\d+|[A-Z]+-\d+)`)
 // keep dependencies narrow, keep tests cheap.
 type issueLookup interface {
 	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
-	Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error)
+	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
 }
 
@@ -116,7 +116,7 @@ func (h *GitHubWebhookHandler) handleMerged(ctx context.Context, refs []string, 
 		if err != nil || iss == nil {
 			continue
 		}
-		if _, err := h.issues.Update(ctx, iss.ID, map[string]any{
+		if _, err := h.issues.Update(ctx, iss.ID, iss.WorkspaceID, map[string]any{
 			"status": string(model.StatusDone),
 		}); err != nil {
 			slog.Warn("automation: PR-merged auto-close failed",

@@ -153,13 +153,13 @@ func TestGetBurndown_ReturnsCorrectDataPoints(t *testing.T) {
 func TestComplete_DetachesIncompleteIssues(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`UPDATE cycles SET status = 'completed'`).
-		WithArgs("c-1").
+		WithArgs("c-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE issues SET cycle_id = NULL`).
 		WithArgs("c-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 3))
 
-	if err := store.Complete(context.Background(), "c-1"); err != nil {
+	if err := store.Complete(context.Background(), "c-1", "ws-1"); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 }

@@ -288,7 +288,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "EMPTY_UPDATE", "no fields provided")
 		return
 	}
-	out, err := h.store.Update(r.Context(), id, updates)
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.Update(r.Context(), id, wsID, updates)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
@@ -405,7 +414,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	out, err := h.store.UpdateComment(r.Context(), chi.URLParam(r, "commentID"), in.Body)
+	out, err := h.store.UpdateComment(r.Context(), chi.URLParam(r, "commentID"), wsID, in.Body)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
@@ -428,7 +441,11 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	commentID := chi.URLParam(r, "commentID")
-	if err := h.store.DeleteComment(r.Context(), commentID); err != nil {
+	if err := h.store.DeleteComment(r.Context(), commentID, wsID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}

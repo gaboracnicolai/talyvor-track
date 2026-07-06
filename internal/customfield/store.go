@@ -250,7 +250,26 @@ func (s *Store) GetField(ctx context.Context, id string) (*CustomField, error) {
 // editable — switching from "text" to "select" would invalidate every
 // stored value. Workflows that need a type change should create a new
 // field and re-import values.
-func (s *Store) UpdateField(ctx context.Context, id, name string, options []string, required bool) (*CustomField, error) {
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("customfield: not found in workspace")
+
+// assertInWorkspace returns ErrNotFound unless field id lives in workspaceID.
+func (s *Store) assertInWorkspace(ctx context.Context, id, workspaceID string) error {
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM custom_fields WHERE id = $1 AND workspace_id = $2)`,
+		id, workspaceID,
+	).Scan(&exists); err != nil {
+		return fmt.Errorf("customfield: scope check: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateField(ctx context.Context, id, workspaceID, name string, options []string, required bool) (*CustomField, error) {
 	if s.pool == nil {
 		return nil, errors.New("customfield: store has no pool")
 	}
@@ -263,19 +282,27 @@ func (s *Store) UpdateField(ctx context.Context, id, name string, options []stri
 	if options == nil {
 		options = []string{}
 	}
+	if err := s.assertInWorkspace(ctx, id, workspaceID); err != nil { // SEC-5: never a foreign field
+		return nil, err
+	}
 	return scanField(s.pool.QueryRow(ctx,
 		`UPDATE custom_fields SET name = $1, options = $2, required = $3
-        WHERE id = $4 RETURNING `+fieldColumns,
-		strings.TrimSpace(name), options, required, id,
+        WHERE id = $4 AND workspace_id = $5 RETURNING `+fieldColumns,
+		strings.TrimSpace(name), options, required, id, workspaceID,
 	))
 }
 
 // DeleteField removes the field and every value attached to it.
 // The DELETE on issue_field_values runs first so an abort half-way
 // can never leave orphan values pointing at a missing field.
-func (s *Store) DeleteField(ctx context.Context, id string) error {
+func (s *Store) DeleteField(ctx context.Context, id, workspaceID string) error {
 	if s.pool == nil {
 		return errors.New("customfield: store has no pool")
+	}
+	// SEC-5: verify the field is in the caller's workspace BEFORE touching its values — a
+	// foreign field is ErrNotFound and nothing is deleted.
+	if err := s.assertInWorkspace(ctx, id, workspaceID); err != nil {
+		return err
 	}
 	if _, err := s.pool.Exec(ctx,
 		`DELETE FROM issue_field_values WHERE field_id = $1`, id,
@@ -283,7 +310,7 @@ func (s *Store) DeleteField(ctx context.Context, id string) error {
 		return fmt.Errorf("customfield: delete values: %w", err)
 	}
 	if _, err := s.pool.Exec(ctx,
-		`DELETE FROM custom_fields WHERE id = $1`, id,
+		`DELETE FROM custom_fields WHERE id = $1 AND workspace_id = $2`, id, workspaceID,
 	); err != nil {
 		return fmt.Errorf("customfield: delete field: %w", err)
 	}

@@ -95,10 +95,10 @@ func TestList_ReturnsBothWorkspaceAndTeamLabels(t *testing.T) {
 func TestDelete_RemovesLabel(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`DELETE FROM labels`).
-		WithArgs("l-1").
+		WithArgs("l-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
 
-	if err := store.Delete(context.Background(), "l-1"); err != nil {
+	if err := store.Delete(context.Background(), "l-1", "ws-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 }

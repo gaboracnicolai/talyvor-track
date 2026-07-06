@@ -90,7 +90,7 @@ type pgxDB interface {
 // issueUpdater is the slice of internal/issue.Store the engine uses.
 // Local interface keeps tests cheap (no pgxmock for the full store).
 type issueUpdater interface {
-	Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error)
+	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	Create(ctx context.Context, issue model.Issue) (*model.Issue, error)
 	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
 }
@@ -338,17 +338,17 @@ func compareLabels(labels []string, op, value string) bool {
 func (e *Engine) executeAction(ctx context.Context, action RuleAction, data map[string]string, issue model.Issue) error {
 	switch action {
 	case ActionSetStatus:
-		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"status": data["status"]})
+		_, err := e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"status": data["status"]})
 		return err
 	case ActionSetPriority:
 		n, err := strconv.Atoi(data["priority"])
 		if err != nil {
 			return fmt.Errorf("set_priority: priority must be int: %w", err)
 		}
-		_, err = e.issues.Update(ctx, issue.ID, map[string]any{"priority": n})
+		_, err = e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"priority": n})
 		return err
 	case ActionSetAssignee:
-		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"assignee_id": data["assignee_id"]})
+		_, err := e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"assignee_id": data["assignee_id"]})
 		return err
 	case ActionAddLabel:
 		label := data["label"]
@@ -356,7 +356,7 @@ func (e *Engine) executeAction(ctx context.Context, action RuleAction, data map[
 			return errors.New("add_label: missing label in action_data")
 		}
 		updated := append(append([]string(nil), issue.Labels...), label)
-		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"labels": updated})
+		_, err := e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"labels": updated})
 		return err
 	case ActionRemoveLabel:
 		label := data["label"]
@@ -366,13 +366,13 @@ func (e *Engine) executeAction(ctx context.Context, action RuleAction, data map[
 				filtered = append(filtered, l)
 			}
 		}
-		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"labels": filtered})
+		_, err := e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"labels": filtered})
 		return err
 	case ActionCloseIssue:
-		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"status": string(model.StatusDone)})
+		_, err := e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"status": string(model.StatusDone)})
 		return err
 	case ActionMoveToCycle:
-		_, err := e.issues.Update(ctx, issue.ID, map[string]any{"cycle_id": data["cycle_id"]})
+		_, err := e.issues.Update(ctx, issue.ID, issue.WorkspaceID, map[string]any{"cycle_id": data["cycle_id"]})
 		return err
 	case ActionCreateIssue:
 		// Create a real child issue linked to the triggering issue. Attribution: the

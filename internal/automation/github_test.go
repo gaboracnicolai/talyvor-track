@@ -28,7 +28,7 @@ func (f *fakeIssueLookup) GetByIdentifier(_ context.Context, ident string) (*mod
 	}
 	return nil, nil
 }
-func (f *fakeIssueLookup) Update(_ context.Context, _ string, updates map[string]any) (*model.Issue, error) {
+func (f *fakeIssueLookup) Update(_ context.Context, _, _ string, updates map[string]any) (*model.Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updates = append(f.updates, updates)

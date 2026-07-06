@@ -114,7 +114,17 @@ func (s *Store) List(ctx context.Context, workspaceID, teamID string) ([]Label, 
 	return out, rows.Err()
 }
 
-func (s *Store) Delete(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM labels WHERE id = $1`, id)
-	return err
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("label: not found in workspace")
+
+func (s *Store) Delete(ctx context.Context, id, workspaceID string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM labels WHERE id = $1 AND workspace_id = $2`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

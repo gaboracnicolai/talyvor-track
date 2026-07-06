@@ -40,19 +40,19 @@ func TestIssueRefs_ObjectGraph_RejectCrossWorkspace(t *testing.T) {
 		t.Fatalf("seed member B: %v", err)
 	}
 
-	// (Update) cross-workspace parent_id must be refused.
-	if _, err := iss.Update(ctx, issueB.ID, map[string]any{"parent_id": parentA.ID}); err == nil {
+	// (Update) cross-workspace parent_id must be refused (issueB is in WS-B).
+	if _, err := iss.Update(ctx, issueB.ID, issueB.WorkspaceID, map[string]any{"parent_id": parentA.ID}); err == nil {
 		t.Error("LEAK: issueB (WS-B) accepted a parent_id from WS-A")
 	}
 	// (Update) cross-workspace assignee_id must be refused.
-	if _, err := iss.Update(ctx, issueB.ID, map[string]any{"assignee_id": memberA}); err == nil {
+	if _, err := iss.Update(ctx, issueB.ID, issueB.WorkspaceID, map[string]any{"assignee_id": memberA}); err == nil {
 		t.Error("LEAK: issueB (WS-B) accepted an assignee_id from WS-A")
 	}
 	// (Update) positive controls: same-workspace references work.
-	if _, err := iss.Update(ctx, issueB.ID, map[string]any{"parent_id": parentB.ID}); err != nil {
+	if _, err := iss.Update(ctx, issueB.ID, issueB.WorkspaceID, map[string]any{"parent_id": parentB.ID}); err != nil {
 		t.Errorf("same-workspace parent_id must be accepted: %v", err)
 	}
-	if _, err := iss.Update(ctx, issueB.ID, map[string]any{"assignee_id": memberB}); err != nil {
+	if _, err := iss.Update(ctx, issueB.ID, issueB.WorkspaceID, map[string]any{"assignee_id": memberB}); err != nil {
 		t.Errorf("same-workspace assignee_id must be accepted: %v", err)
 	}
 

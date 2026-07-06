@@ -271,10 +271,10 @@ func TestEstimateIssueCost_ReturnsReasonableEstimates(t *testing.T) {
 	engine := New(lensintegration.New("", ""), nil, nil)
 
 	cases := []struct {
-		name   string
-		issue  model.Issue
-		min    float64
-		max    float64
+		name  string
+		issue model.Issue
+		min   float64
+		max   float64
 	}{
 		{"bug", model.Issue{Labels: []string{"bug"}}, 2.0, 5.0},
 		{"feature", model.Issue{Labels: []string{"feature"}}, 10.0, 30.0},

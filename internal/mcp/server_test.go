@@ -48,7 +48,7 @@ func (f *fakeIssueStore) GetByIdentifier(ctx context.Context, ident string) (*mo
 func (f *fakeIssueStore) List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error) {
 	return f.listFn(ctx, filter)
 }
-func (f *fakeIssueStore) Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error) {
+func (f *fakeIssueStore) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error) {
 	return f.updateFn(ctx, id, updates)
 }
 func (f *fakeIssueStore) Search(ctx context.Context, ws, q string, limit int) ([]model.Issue, error) {

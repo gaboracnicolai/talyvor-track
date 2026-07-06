@@ -36,14 +36,11 @@ rules:
       #
       #   Group 2-4 operate-by-id holes (user-facing by-id DELETE/UPDATE — to fix, then remove):
       exclude:
-        - "internal/customfield/store.go"     # DELETE custom_fields (Group: fields)
-        - "internal/cycle/store.go"           # UPDATE cycles Complete (Group: cycles)
-        - "internal/guest/store.go"           # guest_invites / guests (Group: guest — own auth model, assess)
-        - "internal/label/store.go"           # DELETE labels (Group: labels)
-        - "internal/notification/store.go"    # UPDATE notifications MarkRead (Group: notifications + identity)
-        - "internal/template/store.go"        # DELETE issue_templates (Group: templates)
-        - "internal/timetracking/store.go"    # DELETE time_entries (Group: time)
-        - "internal/issue/comments.go"        # UpdateComment / DeleteComment (Group: comments)
+        # Group 2 CLEARED (guard now ENFORCES on these — customfield/cycle/label/template/
+        # timetracking/issue-comments are scoped; milestone.Update is dynamic SQL the literal
+        # rule doesn't match). Removed from the exclude list in the Group 2 PR.
+        - "internal/guest/store.go"           # guest_invites / guests (Group 3/4: guest — own auth model, assess)
+        - "internal/notification/store.go"    # UPDATE notifications MarkRead (Group 4: notifications + identity)
         # Not the user-facing class (assessed safe-by-context — internal engines resolve the id
         # from a workspace-scoped query; the importer is authz-locked; workspaces is self-scoping):
         - "internal/automation/engine.go"     # rule engine, id resolved in-workspace
