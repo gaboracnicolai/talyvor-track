@@ -263,10 +263,10 @@ func TestListGuests_FiltersByProject(t *testing.T) {
 func TestRevokeGuest_DeactivatesGuest(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`UPDATE guests SET active = false`).
-		WithArgs("g-1").
+		WithArgs("g-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	if err := store.RevokeGuest(context.Background(), "g-1"); err != nil {
+	if err := store.RevokeGuest(context.Background(), "g-1", "ws-1"); err != nil {
 		t.Fatalf("RevokeGuest: %v", err)
 	}
 }

@@ -202,7 +202,7 @@ func TestGetScore_ReturnsStoredScore(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT .* FROM issue_scores WHERE issue_id`).
-		WithArgs("i-1").
+		WithArgs("i-1", "ws-1").
 		WillReturnRows(scoreRows().AddRow(
 			"s-1", "i-1", "ws-1", "rice",
 			ptr(float64(500)), ptr(float64(1)), ptr(float64(60)), ptr(float64(2)), ptr(float64(150)),
@@ -210,7 +210,7 @@ func TestGetScore_ReturnsStoredScore(t *testing.T) {
 			"go go go", "member-1", now, now,
 		))
 
-	out, err := store.GetScore(context.Background(), "i-1")
+	out, err := store.GetScore(context.Background(), "i-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetScore: %v", err)
 	}
@@ -227,9 +227,9 @@ func TestGetScore_ReturnsStoredScore(t *testing.T) {
 func TestDeleteScore_RemovesRow(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`DELETE FROM issue_scores WHERE issue_id`).
-		WithArgs("i-1").
+		WithArgs("i-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
-	if err := store.DeleteScore(context.Background(), "i-1"); err != nil {
+	if err := store.DeleteScore(context.Background(), "i-1", "ws-1"); err != nil {
 		t.Fatalf("DeleteScore: %v", err)
 	}
 }

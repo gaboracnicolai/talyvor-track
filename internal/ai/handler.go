@@ -60,7 +60,13 @@ func (h *Handler) Triage(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	iss, err := h.issues.GetByID(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	// SEC-5: scoped read — a foreign issue id yields ErrNotFound → 404 (no cross-tenant disclosure).
+	iss, err := h.issues.GetInWorkspace(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil || iss == nil {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "issue not found")
 		return
@@ -78,11 +84,8 @@ func (h *Handler) Triage(w http.ResponseWriter, r *http.Request) {
 			"priority": int(result.SuggestedPriority),
 			"labels":   result.SuggestedLabels,
 		}
-		// SEC-5: scope the apply-write to the caller's authorized workspace — a foreign
-		// issue yields ErrNotFound and the best-effort update is a no-op.
-		if wsID, ok := authz.WorkspaceID(r.Context()); ok {
-			_, _ = h.issues.Update(r.Context(), iss.ID, wsID, updates)
-		}
+		// SEC-5: apply-write scoped to the same authorized workspace.
+		_, _ = h.issues.Update(r.Context(), iss.ID, wsID, updates)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -98,7 +101,8 @@ func (h *Handler) FindDuplicates(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	iss, err := h.issues.GetByID(r.Context(), chi.URLParam(r, "id"))
+	// SEC-5: scoped read — a foreign issue id yields ErrNotFound → 404 (no cross-tenant disclosure).
+	iss, err := h.issues.GetInWorkspace(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil || iss == nil {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "issue not found")
 		return
@@ -124,12 +128,18 @@ func (h *Handler) FindDuplicates(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Summary(w http.ResponseWriter, r *http.Request) {
-	iss, err := h.issues.GetByID(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	// SEC-5: scoped read + scoped comment thread — a foreign issue id never discloses its content.
+	iss, err := h.issues.GetInWorkspace(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil || iss == nil {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "issue not found")
 		return
 	}
-	comments, _ := h.issues.ListComments(r.Context(), iss.ID)
+	comments, _ := h.issues.ListComments(r.Context(), iss.ID, wsID)
 	out, err := h.engine.SummarizeThread(r.Context(), *iss, comments)
 	if err != nil {
 		if err == ErrAIUnavailable {

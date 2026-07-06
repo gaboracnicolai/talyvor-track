@@ -109,7 +109,12 @@ func (h *Handler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AdminStats(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.GetStats(r.Context(), chi.URLParam(r, "boardID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.GetStats(r.Context(), chi.URLParam(r, "boardID"), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "STATS_FAILED", err.Error())
 		return
@@ -223,7 +228,7 @@ func (h *Handler) PublicBoard(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "READ_FAILED", err.Error())
 		return
 	}
-	stats, _ := h.store.GetStats(r.Context(), board.ID)
+	stats, _ := h.store.GetStats(r.Context(), board.ID, board.WorkspaceID) // public board resolved by slug
 	writeJSON(w, http.StatusOK, map[string]any{
 		"board": board,
 		"stats": stats,

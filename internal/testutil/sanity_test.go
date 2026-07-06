@@ -52,7 +52,7 @@ func TestHarness_Sanity_RealPostgres(t *testing.T) {
 
 	// Comment seed helper round-trips.
 	c := d.Comment(t, issA.ID, "first comment")
-	comments, err := store.ListComments(ctx, issA.ID)
+	comments, err := store.ListComments(ctx, issA.ID, issA.WorkspaceID)
 	if err != nil {
 		t.Fatalf("list comments: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestHarness_Sanity_RealPostgres(t *testing.T) {
 	// Custom-field seed helpers round-trip.
 	f := d.CustomField(t, wsA.ID, "Severity")
 	d.SetFieldValue(t, issA.ID, f.ID, "high")
-	vals, err := customfield.NewStore(d.Pool).GetValues(ctx, issA.ID)
+	vals, err := customfield.NewStore(d.Pool).GetValues(ctx, issA.ID, wsA.ID)
 	if err != nil {
 		t.Fatalf("get field values: %v", err)
 	}

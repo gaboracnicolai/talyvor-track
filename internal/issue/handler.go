@@ -43,7 +43,7 @@ type automationFirer interface {
 // customfield package directly into issue.
 type customFields interface {
 	ValidateRequired(ctx context.Context, workspaceID string, teamID *string, provided map[string]string) error
-	SetValue(ctx context.Context, issueID, fieldID, value string) error
+	SetValue(ctx context.Context, issueID, fieldID, workspaceID, value string) error
 }
 
 // templateApplier merges an IssueTemplate's defaults into an Issue.
@@ -203,7 +203,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	// drops; the issue itself stays — the user can retry SetValue.
 	if h.customFields != nil && len(provided) > 0 {
 		for fieldID, value := range provided {
-			if err := h.customFields.SetValue(r.Context(), out.ID, fieldID, value); err != nil {
+			// out.WorkspaceID is the just-created issue's workspace (the caller's authorized one).
+			if err := h.customFields.SetValue(r.Context(), out.ID, fieldID, out.WorkspaceID, value); err != nil {
 				writeErr(w, http.StatusBadRequest, "FIELD_VALUE_FAILED", err.Error())
 				return
 			}
@@ -269,10 +270,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	out, err := h.store.GetByID(r.Context(), id)
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	// SEC-5: scoped read — foreign id → ErrNotFound → 404 (no disclosure, no oracle).
+	out, err := h.store.getInWorkspace(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -376,9 +382,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.IssueID = issueID
-	if in.AuthorID == "" {
-		in.AuthorID = actorID
-	}
+	// SEC-5 (identity): the author is ALWAYS the verified session member — a supplied author_id
+	// is ignored, so no caller can attribute a comment to another member (SEC-4 forged-actor class).
+	in.AuthorID = actorID
 	out, err := h.store.CreateComment(r.Context(), in)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
@@ -391,7 +397,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.ListComments(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.ListComments(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return

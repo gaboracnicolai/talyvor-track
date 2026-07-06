@@ -120,8 +120,15 @@ func (s *Store) List(ctx context.Context, memberID string, unreadOnly bool, limi
 	return out, rows.Err()
 }
 
-func (s *Store) MarkRead(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE notifications SET read = true WHERE id = $1`, id)
+// MarkRead marks one notification read, scoped to its owner (SEC-5 identity): the member_id is the
+// verified session member, so a caller can never mark another member's notification read. A foreign
+// id simply affects 0 rows (idempotent no-op, no existence oracle).
+func (s *Store) MarkRead(ctx context.Context, id, memberID, workspaceID string) error {
+	// Scoped by BOTH the owning member (identity) AND the workspace (tenancy) — member_id is the
+	// verified session member; workspace_id keeps the class-guard satisfied and adds defense-in-depth.
+	_, err := s.pool.Exec(ctx,
+		`UPDATE notifications SET read = true WHERE id = $1 AND member_id = $2 AND workspace_id = $3`,
+		id, memberID, workspaceID)
 	return err
 }
 

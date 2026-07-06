@@ -30,21 +30,14 @@ rules:
                 metavariable: $SQL
                 regex: (?s).*workspace_id
     paths:
-      # SEC-5 BACKLOG + carve-outs. The rule ENFORCES on project/team/issue (Group 1, fixed)
-      # and all NEW code; these files are excluded until their group lands. Remove a file from
-      # this list in the PR that scopes it, so the guard turns on there.
+      # SEC-5 CLOSED. The exclude list is EMPTY: this rule now ENFORCES on the ENTIRE by-id
+      # write surface (internal/) with no file carve-outs. Groups 1-4 scoped every user-facing
+      # by-id DELETE/UPDATE (AND workspace_id, or a workspace_id-bearing subquery join).
       #
-      #   Group 2-4 operate-by-id holes (user-facing by-id DELETE/UPDATE — to fix, then remove):
-      exclude:
-        # Group 2 CLEARED (guard now ENFORCES on these — customfield/cycle/label/template/
-        # timetracking/issue-comments are scoped; milestone.Update is dynamic SQL the literal
-        # rule doesn't match). Removed from the exclude list in the Group 2 PR.
-        - "internal/guest/store.go"           # guest_invites / guests (Group 3/4: guest — own auth model, assess)
-        - "internal/notification/store.go"    # UPDATE notifications MarkRead (Group 4: notifications + identity)
-        # Not the user-facing class (assessed safe-by-context — internal engines resolve the id
-        # from a workspace-scoped query; the importer is authz-locked; workspaces is self-scoping):
-        - "internal/automation/engine.go"     # rule engine, id resolved in-workspace
-        - "internal/workflow/engine.go"       # transition engine, id resolved in-workspace
-        - "internal/importer/jobs.go"         # importer (authz_test.go-locked path)
-        - "internal/featureboard/store.go"    # board ops (AssertRefInWorkspace-guarded)
-        - "internal/workspace/store.go"       # DELETE workspaces — id IS the authorized workspace (self-scoping)
+      # The only remaining suppressions are three INLINE `nosemgrep` lines, each with a written
+      # justification at the code, for by-id writes that are genuinely NOT workspace-membership
+      # scoped (a reviewer sees the reason in context, not hidden in a path glob):
+      #   - workspace/store.go Delete   — self-scoping: id IS the authorized workspace (tenant root)
+      #   - guest/store.go invite-accept — token-scoped: id resolved from a secret bearer token
+      #   - featureboard/store.go vote×2 — public board: assertPostOnPublicBoard-guarded, email-identified
+      exclude: []

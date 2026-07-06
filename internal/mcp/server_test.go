@@ -71,10 +71,10 @@ type fakeCycleStore struct {
 	getProgressFn func(context.Context, string) (*cycle.CycleProgress, error)
 }
 
-func (f *fakeCycleStore) GetActive(ctx context.Context, teamID string) (*model.Cycle, error) {
+func (f *fakeCycleStore) GetActive(ctx context.Context, teamID, workspaceID string) (*model.Cycle, error) {
 	return f.getActiveFn(ctx, teamID)
 }
-func (f *fakeCycleStore) GetProgress(ctx context.Context, cycleID string) (*cycle.CycleProgress, error) {
+func (f *fakeCycleStore) GetProgress(ctx context.Context, cycleID, workspaceID string) (*cycle.CycleProgress, error) {
 	return f.getProgressFn(ctx, cycleID)
 }
 

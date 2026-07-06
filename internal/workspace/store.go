@@ -238,6 +238,7 @@ func joinComma(parts []string) string {
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- self-scoping: id IS the caller's authorized workspace (handler passes authz.WorkspaceID). The workspace is the tenant root; there is no parent workspace to scope to.
 	_, err := s.pool.Exec(ctx, `DELETE FROM workspaces WHERE id = $1`, id)
 	return err
 }

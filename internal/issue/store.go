@@ -37,7 +37,7 @@ type pgxDB interface {
 // store behaves exactly as before, returning issues with no
 // FieldValues populated.
 type fieldFetcher interface {
-	GetValues(ctx context.Context, issueID string) (map[string]string, error)
+	GetValues(ctx context.Context, issueID, workspaceID string) (map[string]string, error)
 	GetValuesBulk(ctx context.Context, issueIDs []string) (map[string]map[string]string, error)
 }
 
@@ -387,7 +387,7 @@ func (s *Store) attachFieldValues(ctx context.Context, i *model.Issue) {
 	if s.fetcher == nil || i == nil {
 		return
 	}
-	vals, err := s.fetcher.GetValues(ctx, i.ID)
+	vals, err := s.fetcher.GetValues(ctx, i.ID, i.WorkspaceID)
 	if err != nil || len(vals) == 0 {
 		return
 	}
@@ -634,6 +634,12 @@ func (s *Store) validateRefWorkspaces(ctx context.Context, issueID string, updat
 		}
 	}
 	return nil
+}
+
+// GetInWorkspace is the exported scoped read for cross-package user-facing callers (ai/…): a foreign
+// id yields ErrNotFound, never a cross-tenant disclosure. Same-package handlers use getInWorkspace.
+func (s *Store) GetInWorkspace(ctx context.Context, id, workspaceID string) (*model.Issue, error) {
+	return s.getInWorkspace(ctx, id, workspaceID)
 }
 
 // getInWorkspace is the scoped read the by-id ops fall back to (never the unscoped GetByID).

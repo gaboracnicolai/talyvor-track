@@ -116,10 +116,10 @@ func TestList_UnreadOnlyFiltersOut(t *testing.T) {
 func TestMarkRead_UpdatesSingle(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`UPDATE notifications SET read = true WHERE id`).
-		WithArgs("n-1").
+		WithArgs("n-1", "m-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	if err := store.MarkRead(context.Background(), "n-1"); err != nil {
+	if err := store.MarkRead(context.Background(), "n-1", "m-1", "ws-1"); err != nil {
 		t.Fatalf("MarkRead: %v", err)
 	}
 }

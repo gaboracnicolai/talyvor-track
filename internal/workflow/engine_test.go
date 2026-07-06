@@ -104,13 +104,13 @@ func TestCreateStatus_AddsToTeam(t *testing.T) {
 func TestDeleteStatus_FailsWithActiveIssues(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	pool.ExpectQuery(`SELECT team_id, name FROM workflow_statuses`).
-		WithArgs("s-x").
+		WithArgs("s-x", "ws-1").
 		WillReturnRows(pgxmock.NewRows([]string{"team_id", "name"}).AddRow("team-1", "Blocked"))
 	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM issues`).
 		WithArgs("team-1", "Blocked").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(3)))
 
-	err := engine.DeleteStatus(context.Background(), "s-x")
+	err := engine.DeleteStatus(context.Background(), "s-x", "ws-1")
 	if err == nil {
 		t.Fatal("DeleteStatus should error when active issues exist")
 	}

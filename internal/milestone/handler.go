@@ -59,7 +59,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.ListByProject(r.Context(), chi.URLParam(r, "projectID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.ListByProject(r.Context(), chi.URLParam(r, "projectID"), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
@@ -93,7 +98,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Progress(w http.ResponseWriter, r *http.Request) {
-	p, err := h.store.GetProgress(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	p, err := h.store.GetProgress(r.Context(), chi.URLParam(r, "id"), wsID)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "PROGRESS_FAILED", err.Error())
 		return

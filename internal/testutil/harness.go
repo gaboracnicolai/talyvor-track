@@ -212,10 +212,15 @@ func (d *DB) CustomField(t *testing.T, workspaceID, name string) *customfield.Cu
 	return f
 }
 
-// SetFieldValue sets a custom-field value on issueID.
+// SetFieldValue sets a custom-field value on issueID. Resolves the issue's workspace internally so
+// the seeder signature stays stable while SetValue is workspace-scoped (SEC-5).
 func (d *DB) SetFieldValue(t *testing.T, issueID, fieldID, value string) {
 	t.Helper()
-	if err := customfield.NewStore(d.Pool).SetValue(context.Background(), issueID, fieldID, value); err != nil {
+	var ws string
+	if err := d.Pool.QueryRow(context.Background(), `SELECT workspace_id FROM issues WHERE id=$1`, issueID).Scan(&ws); err != nil {
+		t.Fatalf("testutil: resolve issue workspace: %v", err)
+	}
+	if err := customfield.NewStore(d.Pool).SetValue(context.Background(), issueID, fieldID, ws, value); err != nil {
 		t.Fatalf("testutil: set field value: %v", err)
 	}
 }

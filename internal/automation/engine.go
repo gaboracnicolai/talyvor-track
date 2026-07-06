@@ -443,10 +443,19 @@ func (e *Engine) logRun(ctx context.Context, ruleID, issueID string, trigger Rul
 
 // DeleteRule removes a rule from the cache + DB. Calling on an
 // unknown rule is a no-op.
-func (e *Engine) DeleteRule(ctx context.Context, ruleID string) error {
+// ErrNotFound is the SEC-5 sentinel: a by-id rule op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("automation: rule not found in workspace")
+
+func (e *Engine) DeleteRule(ctx context.Context, ruleID, workspaceID string) error {
 	if e.pool != nil {
-		if _, err := e.pool.Exec(ctx, `DELETE FROM automation_rules WHERE id = $1`, ruleID); err != nil {
+		// SEC-5: scope the delete to the caller's authorized workspace — a foreign rule is ErrNotFound.
+		ct, err := e.pool.Exec(ctx, `DELETE FROM automation_rules WHERE id = $1 AND workspace_id = $2`, ruleID, workspaceID)
+		if err != nil {
 			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return ErrNotFound
 		}
 	}
 	e.mu.Lock()

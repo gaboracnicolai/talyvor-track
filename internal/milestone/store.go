@@ -91,11 +91,12 @@ func (s *Store) GetByID(ctx context.Context, id string) (*Milestone, error) {
 	))
 }
 
-func (s *Store) ListByProject(ctx context.Context, projectID string) ([]Milestone, error) {
+func (s *Store) ListByProject(ctx context.Context, projectID, workspaceID string) ([]Milestone, error) {
+	// SEC-5: scoped to the caller's workspace — a foreign project's milestones are never enumerated.
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+milestoneColumns+` FROM milestones WHERE project_id = $1
+		`SELECT `+milestoneColumns+` FROM milestones WHERE project_id = $1 AND workspace_id = $2
         ORDER BY target_date NULLS LAST, created_at ASC`,
-		projectID,
+		projectID, workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("milestone: list: %w", err)
@@ -177,7 +178,12 @@ func joinComma(parts []string) string {
 
 // GetProgress counts issues attached to this milestone and the
 // fraction that have reached the done status. One query.
-func (s *Store) GetProgress(ctx context.Context, id string) (*Progress, error) {
+func (s *Store) GetProgress(ctx context.Context, id, workspaceID string) (*Progress, error) {
+	// SEC-5: only expose progress for a milestone in the caller's authorized workspace — a foreign
+	// id yields ErrNotFound → 404 (no cross-tenant derived-data disclosure).
+	if _, err := s.getInWorkspace(ctx, id, workspaceID); err != nil {
+		return nil, err
+	}
 	p := &Progress{MilestoneID: id}
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'done')

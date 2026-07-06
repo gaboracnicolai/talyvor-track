@@ -60,6 +60,20 @@ func scanCycle(s interface{ Scan(...any) error }) (*model.Cycle, error) {
 // ErrNotFound is returned when a cycle does not exist in the given workspace.
 var ErrNotFound = errors.New("cycle: not found")
 
+// assertInWorkspace returns ErrNotFound unless cycle cycleID lives in workspaceID — the SEC-5 gate
+// the by-id derived reads (progress/burndown) call before exposing a cycle's aggregates.
+func (s *Store) assertInWorkspace(ctx context.Context, cycleID, workspaceID string) error {
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM cycles WHERE id = $1 AND workspace_id = $2)`, cycleID, workspaceID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
+}
+
 var validStatuses = map[string]struct{}{"upcoming": {}, "active": {}, "completed": {}}
 
 // CycleUpdate is a partial update; nil fields are left unchanged.
@@ -154,10 +168,11 @@ func (s *Store) GetByID(ctx context.Context, id string) (*model.Cycle, error) {
 	))
 }
 
-func (s *Store) ListByTeam(ctx context.Context, teamID string) ([]model.Cycle, error) {
+func (s *Store) ListByTeam(ctx context.Context, teamID, workspaceID string) ([]model.Cycle, error) {
+	// SEC-5: scoped to the caller's workspace — a foreign team's cycles are never enumerated.
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+cycleColumns+` FROM cycles WHERE team_id = $1 ORDER BY number DESC`,
-		teamID,
+		`SELECT `+cycleColumns+` FROM cycles WHERE team_id = $1 AND workspace_id = $2 ORDER BY number DESC`,
+		teamID, workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("cycle: list: %w", err)
@@ -177,13 +192,14 @@ func (s *Store) ListByTeam(ctx context.Context, teamID string) ([]model.Cycle, e
 // GetActive returns the active cycle for a team, or nil if none. The
 // query enforces "currently within the date window" so a misconfigured
 // status='active' on a future cycle doesn't accidentally appear.
-func (s *Store) GetActive(ctx context.Context, teamID string) (*model.Cycle, error) {
+func (s *Store) GetActive(ctx context.Context, teamID, workspaceID string) (*model.Cycle, error) {
+	// SEC-5: scoped to the caller's workspace — a foreign team's active cycle is never exposed.
 	c, err := scanCycle(s.pool.QueryRow(ctx,
 		`SELECT `+cycleColumns+` FROM cycles
-        WHERE team_id = $1 AND status = 'active'
+        WHERE team_id = $1 AND workspace_id = $2 AND status = 'active'
           AND NOW() BETWEEN start_date AND end_date
         LIMIT 1`,
-		teamID,
+		teamID, workspaceID,
 	))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -231,7 +247,10 @@ type CycleProgress struct {
 
 // GetProgress aggregates issue counts + AI spend for the cycle. One
 // query: GROUP BY status bucket using FILTER, plus SUM(ai_cost_usd).
-func (s *Store) GetProgress(ctx context.Context, cycleID string) (*CycleProgress, error) {
+func (s *Store) GetProgress(ctx context.Context, cycleID, workspaceID string) (*CycleProgress, error) {
+	if err := s.assertInWorkspace(ctx, cycleID, workspaceID); err != nil {
+		return nil, err
+	}
 	p := &CycleProgress{CycleID: cycleID}
 	err := s.pool.QueryRow(ctx,
 		`SELECT
@@ -263,7 +282,10 @@ type BurndownPoint struct {
 // Remaining is the count of issues NOT done as of end-of-day for that
 // date; Ideal is the linear interpolation from start to end. Computed
 // on the fly so the chart always reflects the latest data.
-func (s *Store) GetBurndown(ctx context.Context, cycleID string) ([]BurndownPoint, error) {
+func (s *Store) GetBurndown(ctx context.Context, cycleID, workspaceID string) ([]BurndownPoint, error) {
+	if err := s.assertInWorkspace(ctx, cycleID, workspaceID); err != nil {
+		return nil, err
+	}
 	c, err := s.GetByID(ctx, cycleID)
 	if err != nil {
 		return nil, err
