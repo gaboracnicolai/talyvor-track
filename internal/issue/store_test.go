@@ -151,7 +151,7 @@ func TestList_FiltersByAssignee(t *testing.T) {
 func TestUpdate_StatusToDoneSetsCompletedAt(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`UPDATE issues SET`).
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "workspace_id", "team_id", "project_id", "number", "identifier",
 			"title", "description", "status", "priority",
@@ -168,7 +168,7 @@ func TestUpdate_StatusToDoneSetsCompletedAt(t *testing.T) {
 			[]string{}, 0.0, time.Now().UTC(), time.Now().UTC(),
 		))
 
-	out, err := store.Update(context.Background(), "issue-1", map[string]any{
+	out, err := store.Update(context.Background(), "issue-1", "ws-1", map[string]any{
 		"status": "done",
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestUpdate_StatusToDoneSetsCompletedAt(t *testing.T) {
 func TestUpdate_StatusFromDoneClearsCompletedAt(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`UPDATE issues SET`).
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "workspace_id", "team_id", "project_id", "number", "identifier",
 			"title", "description", "status", "priority",
@@ -199,7 +199,7 @@ func TestUpdate_StatusFromDoneClearsCompletedAt(t *testing.T) {
 			[]string{}, 0.0, time.Now().UTC(), time.Now().UTC(),
 		))
 
-	out, err := store.Update(context.Background(), "issue-1", map[string]any{
+	out, err := store.Update(context.Background(), "issue-1", "ws-1", map[string]any{
 		"status": "in_progress",
 	})
 	if err != nil {

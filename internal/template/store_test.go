@@ -284,6 +284,7 @@ func TestUpdate_ChangesFields(t *testing.T) {
 		WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(),
 		).
 		WillReturnRows(templateCols().AddRow(
 			"t-1", "ws-1", (*string)(nil), "Renamed", "new desc", "🐛",
@@ -292,7 +293,7 @@ func TestUpdate_ChangesFields(t *testing.T) {
 			now, now,
 		))
 
-	out, err := store.Update(context.Background(), "t-1", map[string]any{
+	out, err := store.Update(context.Background(), "t-1", "ws-1", map[string]any{
 		"name":        "Renamed",
 		"description": "new desc",
 	})
@@ -309,9 +310,9 @@ func TestUpdate_ChangesFields(t *testing.T) {
 func TestDelete_RemovesTemplate(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`DELETE FROM issue_templates`).
-		WithArgs("t-1").
+		WithArgs("t-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
-	if err := store.Delete(context.Background(), "t-1"); err != nil {
+	if err := store.Delete(context.Background(), "t-1", "ws-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 }

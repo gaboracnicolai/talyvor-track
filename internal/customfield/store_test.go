@@ -264,14 +264,18 @@ func TestListFields_NoTeamID_ReturnsWorkspaceWideOnly(t *testing.T) {
 func TestUpdateField_UpdatesNameAndOptions(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
+	// SEC-5: UpdateField asserts the field is in the workspace first.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("f-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`UPDATE custom_fields`).
-		WithArgs("Customer Renamed", []string{"a", "b", "c"}, false, "f-1").
+		WithArgs("Customer Renamed", []string{"a", "b", "c"}, false, "f-1", "ws-1").
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "workspace_id", "team_id", "name", "type", "options", "required", "position", "created_at",
 		}).AddRow("f-1", "ws-1", (*string)(nil), "Customer Renamed", "select",
 			[]string{"a", "b", "c"}, false, 0, now))
 
-	out, err := store.UpdateField(context.Background(), "f-1", "Customer Renamed", []string{"a", "b", "c"}, false)
+	out, err := store.UpdateField(context.Background(), "f-1", "ws-1", "Customer Renamed", []string{"a", "b", "c"}, false)
 	if err != nil {
 		t.Fatalf("UpdateField: %v", err)
 	}
@@ -284,15 +288,19 @@ func TestUpdateField_UpdatesNameAndOptions(t *testing.T) {
 
 func TestDeleteField_RemovesField(t *testing.T) {
 	store, pool := newMockStore(t)
+	// SEC-5: DeleteField asserts the field is in the workspace before touching anything.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("f-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	// DELETE values first so referencing constraint won't fight us.
 	pool.ExpectExec(`DELETE FROM issue_field_values WHERE field_id`).
 		WithArgs("f-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 4))
 	pool.ExpectExec(`DELETE FROM custom_fields`).
-		WithArgs("f-1").
+		WithArgs("f-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
 
-	if err := store.DeleteField(context.Background(), "f-1"); err != nil {
+	if err := store.DeleteField(context.Background(), "f-1", "ws-1"); err != nil {
 		t.Fatalf("DeleteField: %v", err)
 	}
 }

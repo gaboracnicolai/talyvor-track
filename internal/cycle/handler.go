@@ -121,7 +121,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.Complete(r.Context(), chi.URLParam(r, "id")); err != nil {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if err := h.store.Complete(r.Context(), chi.URLParam(r, "id"), wsID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "COMPLETE_FAILED", err.Error())
 		return
 	}

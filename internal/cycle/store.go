@@ -197,13 +197,20 @@ func (s *Store) GetActive(ctx context.Context, teamID string) (*model.Cycle, err
 // Complete marks the cycle done and detaches any remaining incomplete
 // issues so the next planning window starts clean. Incomplete issues
 // have their cycle_id cleared — they fall back to the team backlog.
-func (s *Store) Complete(ctx context.Context, cycleID string) error {
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE cycles SET status = 'completed', updated_at = NOW() WHERE id = $1`, cycleID,
-	); err != nil {
+func (s *Store) Complete(ctx context.Context, cycleID, workspaceID string) error {
+	// SEC-5: scope the cycle to the caller's authorized workspace. 0 rows → ErrNotFound BEFORE
+	// the issue-nullify runs, so a foreign cycle is never touched.
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE cycles SET status = 'completed', updated_at = NOW() WHERE id = $1 AND workspace_id = $2`,
+		cycleID, workspaceID,
+	)
+	if err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx,
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	_, err = s.pool.Exec(ctx,
 		`UPDATE issues SET cycle_id = NULL, updated_at = NOW()
         WHERE cycle_id = $1 AND status NOT IN ('done', 'cancelled')`,
 		cycleID,

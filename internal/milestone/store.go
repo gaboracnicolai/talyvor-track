@@ -116,10 +116,21 @@ var updatable = map[string]struct{}{
 	"name": {}, "description": {}, "status": {}, "target_date": {}, "completed_at": {},
 }
 
-func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*Milestone, error) {
-	if len(updates) == 0 {
-		return s.GetByID(ctx, id)
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("milestone: not found in workspace")
+
+func (s *Store) getInWorkspace(ctx context.Context, id, workspaceID string) (*Milestone, error) {
+	m, err := scanMilestone(s.pool.QueryRow(ctx,
+		`SELECT `+milestoneColumns+` FROM milestones WHERE id = $1 AND workspace_id = $2`, id, workspaceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
 	}
+	return m, err
+}
+
+// Update mutates a milestone only within workspaceID — SEC-5: a foreign id yields ErrNotFound.
+func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*Milestone, error) {
 	var (
 		setClauses []string
 		args       []any
@@ -134,15 +145,23 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 		args = append(args, v)
 	}
 	if len(setClauses) == 0 {
-		return s.GetByID(ctx, id)
+		return s.getInWorkspace(ctx, id, workspaceID)
 	}
 	argN++
+	idN := argN
 	args = append(args, id)
+	argN++
+	wsN := argN
+	args = append(args, workspaceID)
 	sql := fmt.Sprintf(
-		`UPDATE milestones SET %s, updated_at = NOW() WHERE id = $%d RETURNING %s`,
-		joinComma(setClauses), argN, milestoneColumns,
+		`UPDATE milestones SET %s, updated_at = NOW() WHERE id = $%d AND workspace_id = $%d RETURNING %s`,
+		joinComma(setClauses), idN, wsN, milestoneColumns,
 	)
-	return scanMilestone(s.pool.QueryRow(ctx, sql, args...))
+	m, err := scanMilestone(s.pool.QueryRow(ctx, sql, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return m, err
 }
 
 func joinComma(parts []string) string {

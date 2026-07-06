@@ -457,10 +457,20 @@ func (s *Store) IssueTotalSec(ctx context.Context, issueID string) (int, error) 
 // Delete is a hard delete on the entry. Used by the API to support
 // "remove this row from billing" without a corresponding soft-delete
 // status — entries are immutable bookkeeping.
-func (s *Store) Delete(ctx context.Context, id string) error {
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("timetracking: not found in workspace")
+
+func (s *Store) Delete(ctx context.Context, id, workspaceID string) error {
 	if s.pool == nil {
 		return errors.New("timetracking: store has no pool")
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM time_entries WHERE id = $1`, id)
-	return err
+	ct, err := s.pool.Exec(ctx, `DELETE FROM time_entries WHERE id = $1 AND workspace_id = $2`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

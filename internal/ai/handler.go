@@ -78,7 +78,11 @@ func (h *Handler) Triage(w http.ResponseWriter, r *http.Request) {
 			"priority": int(result.SuggestedPriority),
 			"labels":   result.SuggestedLabels,
 		}
-		_, _ = h.issues.Update(r.Context(), iss.ID, updates)
+		// SEC-5: scope the apply-write to the caller's authorized workspace — a foreign
+		// issue yields ErrNotFound and the best-effort update is a no-op.
+		if wsID, ok := authz.WorkspaceID(r.Context()); ok {
+			_, _ = h.issues.Update(r.Context(), iss.ID, wsID, updates)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, result)

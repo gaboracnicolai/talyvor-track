@@ -61,24 +61,37 @@ func (s *Store) ListComments(ctx context.Context, issueID string) ([]model.Comme
 // UpdateComment changes the body and stamps edited_at so the UI can
 // show a "(edited)" badge. Only the body is editable — author, issue,
 // and timestamps are immutable.
-func (s *Store) UpdateComment(ctx context.Context, id, body string) (*model.Comment, error) {
+// UpdateComment / DeleteComment are SEC-5 scoped via the comment's issue: comments carry no
+// workspace_id, so the id is gated by `issue_id IN (SELECT id FROM issues WHERE workspace_id=$n)`.
+// A comment on another workspace's issue → ErrNotFound (reuses the issue-package sentinel).
+func (s *Store) UpdateComment(ctx context.Context, id, workspaceID, body string) (*model.Comment, error) {
 	if body == "" {
 		return nil, errors.New("comment: body required")
 	}
-	return scanComment(s.pool.QueryRow(ctx,
+	c, err := scanComment(s.pool.QueryRow(ctx,
 		`UPDATE comments SET body = $2, edited_at = $3, updated_at = NOW()
-        WHERE id = $1 RETURNING `+commentColumns,
-		id, body, time.Now().UTC(),
+        WHERE id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $4)
+        RETURNING `+commentColumns,
+		id, body, time.Now().UTC(), workspaceID,
 	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
 }
 
-// DeleteComment is a hard delete. Issues are soft-cancelled to keep
-// identifiers stable; comments don't carry identifiers so dropping
-// them outright is fine. The CASCADE on the issues FK takes care of
-// orphans if the parent issue is removed.
-func (s *Store) DeleteComment(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM comments WHERE id = $1`, id)
-	return err
+func (s *Store) DeleteComment(ctx context.Context, id, workspaceID string) error {
+	ct, err := s.pool.Exec(ctx,
+		`DELETE FROM comments WHERE id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $2)`,
+		id, workspaceID,
+	)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // silence unused import warning during the build dance — pgx itself

@@ -2,6 +2,7 @@ package customfield
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -96,7 +97,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	out, err := h.store.UpdateField(r.Context(), id, in.Name, in.Options, in.Required)
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.UpdateField(r.Context(), id, wsID, in.Name, in.Options, in.Required)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
@@ -106,7 +116,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.store.DeleteField(r.Context(), id); err != nil {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if err := h.store.DeleteField(r.Context(), id, wsID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}

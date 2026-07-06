@@ -636,9 +636,21 @@ func (s *Store) validateRefWorkspaces(ctx context.Context, issueID string, updat
 	return nil
 }
 
-func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error) {
+// getInWorkspace is the scoped read the by-id ops fall back to (never the unscoped GetByID).
+func (s *Store) getInWorkspace(ctx context.Context, id, workspaceID string) (*model.Issue, error) {
+	i, err := scanIssue(s.pool.QueryRow(ctx,
+		`SELECT `+issueColumns+` FROM issues WHERE id = $1 AND workspace_id = $2`, id, workspaceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return i, err
+}
+
+// Update mutates an issue only within workspaceID (the caller's authorized workspace) — SEC-5:
+// a foreign id yields ErrNotFound, never a cross-tenant write.
+func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error) {
 	if len(updates) == 0 {
-		return s.GetByID(ctx, id)
+		return s.getInWorkspace(ctx, id, workspaceID)
 	}
 
 	// Stamp completed_at based on the incoming status, if any.
@@ -670,21 +682,29 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 		args = append(args, v)
 	}
 	if len(setClauses) == 0 {
-		return s.GetByID(ctx, id)
+		return s.getInWorkspace(ctx, id, workspaceID)
 	}
 	// updated_at is always bumped — never trust the caller's value.
 	argN++
 	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argN))
 	args = append(args, time.Now().UTC())
-	// id is the final positional arg for the WHERE clause.
+	// id + workspace_id are the final positional args for the SEC-5-scoped WHERE clause.
 	argN++
+	idN := argN
 	args = append(args, id)
+	argN++
+	wsN := argN
+	args = append(args, workspaceID)
 
 	sql := fmt.Sprintf(
-		`UPDATE issues SET %s WHERE id = $%d RETURNING %s`,
-		strings.Join(setClauses, ", "), argN, issueColumns,
+		`UPDATE issues SET %s WHERE id = $%d AND workspace_id = $%d RETURNING %s`,
+		strings.Join(setClauses, ", "), idN, wsN, issueColumns,
 	)
-	return scanIssue(s.pool.QueryRow(ctx, sql, args...))
+	i, err := scanIssue(s.pool.QueryRow(ctx, sql, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return i, err
 }
 
 // Delete is a soft delete: the row stays but the status becomes

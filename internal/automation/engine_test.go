@@ -20,7 +20,7 @@ type fakeIssueUpdater struct {
 	created  []model.Issue
 }
 
-func (f *fakeIssueUpdater) Update(_ context.Context, _ string, updates map[string]any) (*model.Issue, error) {
+func (f *fakeIssueUpdater) Update(_ context.Context, _, _ string, updates map[string]any) (*model.Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updates = append(f.updates, updates)

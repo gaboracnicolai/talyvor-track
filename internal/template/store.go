@@ -252,12 +252,23 @@ var updatableFields = map[string]struct{}{
 	"field_defaults":   {},
 }
 
-func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*IssueTemplate, error) {
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("template: not found in workspace")
+
+func (s *Store) getInWorkspace(ctx context.Context, id, workspaceID string) (*IssueTemplate, error) {
+	t, err := scanTemplate(s.pool.QueryRow(ctx,
+		`SELECT `+templateColumns+` FROM issue_templates WHERE id = $1 AND workspace_id = $2`, id, workspaceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
+}
+
+// Update mutates a template only within workspaceID — SEC-5: a foreign id yields ErrNotFound.
+func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*IssueTemplate, error) {
 	if s.pool == nil {
 		return nil, errors.New("template: store has no pool")
-	}
-	if len(updates) == 0 {
-		return s.GetByID(ctx, id)
 	}
 	var (
 		set  []string
@@ -282,19 +293,27 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 		args = append(args, v)
 	}
 	if len(set) == 0 {
-		return s.GetByID(ctx, id)
+		return s.getInWorkspace(ctx, id, workspaceID)
 	}
 	n++
 	set = append(set, fmt.Sprintf("updated_at = $%d", n))
 	args = append(args, time.Now().UTC())
 	n++
+	idN := n
 	args = append(args, id)
+	n++
+	wsN := n
+	args = append(args, workspaceID)
 
 	sql := fmt.Sprintf(
-		`UPDATE issue_templates SET %s WHERE id = $%d RETURNING %s`,
-		strings.Join(set, ", "), n, templateColumns,
+		`UPDATE issue_templates SET %s WHERE id = $%d AND workspace_id = $%d RETURNING %s`,
+		strings.Join(set, ", "), idN, wsN, templateColumns,
 	)
-	return scanTemplate(s.pool.QueryRow(ctx, sql, args...))
+	t, err := scanTemplate(s.pool.QueryRow(ctx, sql, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
 }
 
 // ApplyTemplate is the thin convenience the issue handler calls when
@@ -322,12 +341,18 @@ func (s *Store) ApplyTemplate(ctx context.Context, templateID string, into *mode
 
 // ─── Delete ─────────────────────────────────────────────────
 
-func (s *Store) Delete(ctx context.Context, id string) error {
+func (s *Store) Delete(ctx context.Context, id, workspaceID string) error {
 	if s.pool == nil {
 		return errors.New("template: store has no pool")
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM issue_templates WHERE id = $1`, id)
-	return err
+	ct, err := s.pool.Exec(ctx, `DELETE FROM issue_templates WHERE id = $1 AND workspace_id = $2`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ─── SeedDefaults ──────────────────────────────────────────

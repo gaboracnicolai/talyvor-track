@@ -63,7 +63,7 @@ type issueStoreIface interface {
 	GetByID(ctx context.Context, id string) (*model.Issue, error)
 	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
 	List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error)
-	Update(ctx context.Context, id string, updates map[string]any) (*model.Issue, error)
+	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	Search(ctx context.Context, workspaceID, query string, limit int) ([]model.Issue, error)
 	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
 }
@@ -694,7 +694,8 @@ func (s *Server) toolUpdateIssue(ctx context.Context, args json.RawMessage) (any
 		}
 	}
 
-	out, err := s.issueStore.Update(ctx, id, updates)
+	wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (set by the tools/call chokepoint)
+	out, err := s.issueStore.Update(ctx, id, wsID, updates)
 	if err != nil {
 		return nil, fmt.Errorf("update_issue: %w", err)
 	}
@@ -918,7 +919,8 @@ func (s *Server) toolTriageIssue(ctx context.Context, args json.RawMessage) (any
 		if len(tri.SuggestedLabels) > 0 {
 			updates["labels"] = tri.SuggestedLabels
 		}
-		if _, err := s.issueStore.Update(ctx, iss.ID, updates); err != nil {
+		wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (chokepoint)
+		if _, err := s.issueStore.Update(ctx, iss.ID, wsID, updates); err != nil {
 			return nil, fmt.Errorf("triage_issue apply: %w", err)
 		}
 		applied = true
@@ -1001,7 +1003,8 @@ func (s *Server) toolMoveToCycle(ctx context.Context, args json.RawMessage) (any
 	if in.CycleID == "" {
 		return nil, badParam("cycle_id required")
 	}
-	if _, err := s.issueStore.Update(ctx, in.IssueID, map[string]any{
+	wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (chokepoint)
+	if _, err := s.issueStore.Update(ctx, in.IssueID, wsID, map[string]any{
 		"cycle_id": in.CycleID,
 	}); err != nil {
 		return nil, fmt.Errorf("move_to_cycle: %w", err)
