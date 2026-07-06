@@ -444,6 +444,7 @@ func (s *Store) Vote(ctx context.Context, wsSlug, boardSlug, postID, email strin
 	}
 
 	var count int64
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- public feedback board: assertPostOnPublicBoard(wsSlug, boardSlug, postID) above proves the post is on the named public board before this recount. Votes are email-identified, not workspace-membership — there is no authorized workspace to scope to.
 	if err := tx.QueryRow(ctx,
 		`UPDATE feature_posts
         SET vote_count = (SELECT COUNT(*) FROM feature_votes WHERE post_id = $1),
@@ -485,6 +486,7 @@ func (s *Store) Unvote(ctx context.Context, wsSlug, boardSlug, postID, email str
 		return 0, fmt.Errorf("featureboard: unvote delete: %w", err)
 	}
 	var count int64
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- public feedback board: assertPostOnPublicBoard(wsSlug, boardSlug, postID) above proves the post is on the named public board before this recount. Votes are email-identified, not workspace-membership — there is no authorized workspace to scope to.
 	if err := tx.QueryRow(ctx,
 		`UPDATE feature_posts
         SET vote_count = (SELECT COUNT(*) FROM feature_votes WHERE post_id = $1),
@@ -563,8 +565,18 @@ func (s *Store) UpdateStatus(ctx context.Context, wsID, boardID, postID string, 
 
 // ─── GetStats ──────────────────────────────────────────────
 
-func (s *Store) GetStats(ctx context.Context, boardID string) (*BoardStats, error) {
+func (s *Store) GetStats(ctx context.Context, boardID, workspaceID string) (*BoardStats, error) {
 	if s.pool == nil {
+		return &BoardStats{ByStatus: map[string]int{}}, nil
+	}
+	// SEC-5: only expose stats for a board in the caller's workspace — a foreign board id returns
+	// empty stats (no cross-tenant disclosure, no existence oracle).
+	var inWS bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM feature_boards WHERE id = $1 AND workspace_id = $2)`, boardID, workspaceID).Scan(&inWS); err != nil {
+		return nil, fmt.Errorf("featureboard: stats scope: %w", err)
+	}
+	if !inWS {
 		return &BoardStats{ByStatus: map[string]int{}}, nil
 	}
 	out := &BoardStats{ByStatus: map[string]int{}}

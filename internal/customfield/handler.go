@@ -133,8 +133,13 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetValues(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
-	values, err := h.store.GetValues(r.Context(), id)
+	values, err := h.store.GetValues(r.Context(), id, wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "GET_VALUES_FAILED", err.Error())
 		return
@@ -143,6 +148,11 @@ func (h *Handler) GetValues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SetValue(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
 	fieldID := chi.URLParam(r, "fieldID")
 	var in struct {
@@ -151,7 +161,11 @@ func (h *Handler) SetValue(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	if err := h.store.SetValue(r.Context(), id, fieldID, in.Value); err != nil {
+	if err := h.store.SetValue(r.Context(), id, fieldID, wsID, in.Value); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "SET_VALUE_FAILED", err.Error())
 		return
 	}

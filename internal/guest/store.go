@@ -322,6 +322,7 @@ func (s *Store) AcceptInvite(ctx context.Context, token, name string) (*AcceptRe
 		return nil, fmt.Errorf("guest: insert: %w", err)
 	}
 
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- token-scoped: invite.ID is resolved from a secret bearer invite token (GetGuestByToken), not from workspace membership. The accepter is pre-membership, so there is no authorized workspace to scope to.
 	if _, err := s.pool.Exec(ctx,
 		`UPDATE guest_invites SET accepted_at = NOW() WHERE id = $1`,
 		invite.ID,
@@ -390,15 +391,25 @@ func (s *Store) ListGuests(ctx context.Context, workspaceID string, projectID *s
 // remain in circulation until their own TTL expires — that's a
 // known trade-off for stateless auth; if you need immediate cutoff,
 // rotate GUEST_SECRET (invalidates every token in flight).
-func (s *Store) RevokeGuest(ctx context.Context, guestID string) error {
+// ErrNotFound is the SEC-5 sentinel: a by-id guest op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("guest: not found in workspace")
+
+func (s *Store) RevokeGuest(ctx context.Context, guestID, workspaceID string) error {
 	if s.pool == nil {
 		return errors.New("guest: store has no pool")
 	}
-	_, err := s.pool.Exec(ctx,
-		`UPDATE guests SET active = false WHERE id = $1`,
-		guestID,
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE guests SET active = false WHERE id = $1 AND workspace_id = $2`,
+		guestID, workspaceID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ─── ValidateGuestAccess ────────────────────────────────────

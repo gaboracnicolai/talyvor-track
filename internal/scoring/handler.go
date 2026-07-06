@@ -75,7 +75,12 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.GetScore(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.GetScore(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "no score for this issue")
@@ -88,7 +93,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.DeleteScore(r.Context(), chi.URLParam(r, "id")); err != nil {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if err := h.store.DeleteScore(r.Context(), chi.URLParam(r, "id"), wsID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}

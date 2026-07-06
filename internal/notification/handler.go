@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/talyvor/track/internal/httpx"
+	"github.com/talyvor/track/internal/authz"
 )
 
 type Handler struct{ store *Store }
@@ -35,10 +35,14 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, apiError{Error: msg, Code: code})
 }
 
+// SEC-5 (identity): notifications belong to the verified session member. The actor is always
+// authz.MemberID(ctx) — a supplied member_id (query or body) is retired as an identity source,
+// so no caller can read or mutate another member's notifications.
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	memberID := r.URL.Query().Get("member_id")
-	if memberID == "" {
-		writeErr(w, http.StatusBadRequest, "MISSING_MEMBER", "member_id query parameter required")
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
 		return
 	}
 	unreadOnly := r.URL.Query().Get("unread_only") == "true"
@@ -54,13 +58,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		MemberID string `json:"member_id"`
-	}
-	if !httpx.DecodeJSON(w, r, &in) {
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
 		return
 	}
-	if err := h.store.MarkAllRead(r.Context(), in.MemberID); err != nil {
+	if err := h.store.MarkAllRead(r.Context(), memberID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "MARK_FAILED", err.Error())
 		return
 	}
@@ -68,7 +71,17 @@ func (h *Handler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) MarkRead(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.MarkRead(r.Context(), chi.URLParam(r, "id")); err != nil {
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
+		return
+	}
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if err := h.store.MarkRead(r.Context(), chi.URLParam(r, "id"), memberID, wsID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "MARK_FAILED", err.Error())
 		return
 	}

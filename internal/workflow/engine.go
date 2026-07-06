@@ -139,11 +139,20 @@ func (e *Engine) CreateStatus(ctx context.Context, status WorkflowStatus) (*Work
 // UpdateStatus changes the user-facing fields of a status — name,
 // color, position. Category is locked after creation since reports
 // across the workspace depend on the category mapping.
-func (e *Engine) UpdateStatus(ctx context.Context, id, name, color string, position int) (*WorkflowStatus, error) {
+// ErrNotFound is the SEC-5 sentinel: a by-id status op resolved to no row in the caller's authorized
+// workspace (statuses are scoped via their team). Handlers map it to 404 (no cross-tenant write, no oracle).
+var ErrNotFound = errors.New("workflow: status not found in workspace")
+
+func (e *Engine) UpdateStatus(ctx context.Context, id, workspaceID, name, color string, position int) (*WorkflowStatus, error) {
+	// SEC-5: the status must belong to a team in workspaceID (the caller's authorized workspace).
 	updated, err := scanStatus(e.pool.QueryRow(ctx,
-		`UPDATE workflow_statuses SET name = $2, color = $3, position = $4 WHERE id = $1 RETURNING `+statusColumns,
-		id, name, color, position,
+		`UPDATE workflow_statuses SET name = $2, color = $3, position = $4
+        WHERE id = $1 AND team_id IN (SELECT id FROM teams WHERE workspace_id = $5) RETURNING `+statusColumns,
+		id, name, color, position, workspaceID,
 	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -154,13 +163,18 @@ func (e *Engine) UpdateStatus(ctx context.Context, id, name, color string, posit
 // DeleteStatus refuses to drop a status that's still referenced by
 // issues — orphaning issues would break the dashboard's group-by-status
 // view. Callers should reassign the issues first.
-func (e *Engine) DeleteStatus(ctx context.Context, id string) error {
-	// Look up the status to find its team (for cache invalidation)
-	// AND its name (issues reference statuses by name string today).
+func (e *Engine) DeleteStatus(ctx context.Context, id, workspaceID string) error {
+	// Look up the status to find its team (for cache invalidation) AND its name (issues reference
+	// statuses by name string today). SEC-5: scoped to a team in the caller's authorized workspace,
+	// so a foreign status is ErrNotFound and nothing is deleted.
 	var teamID, name string
 	if err := e.pool.QueryRow(ctx,
-		`SELECT team_id, name FROM workflow_statuses WHERE id = $1`, id,
+		`SELECT team_id, name FROM workflow_statuses
+        WHERE id = $1 AND team_id IN (SELECT id FROM teams WHERE workspace_id = $2)`, id, workspaceID,
 	).Scan(&teamID, &name); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
 
@@ -174,7 +188,9 @@ func (e *Engine) DeleteStatus(ctx context.Context, id string) error {
 		return fmt.Errorf("workflow: cannot delete status with %d active issues", active)
 	}
 
-	if _, err := e.pool.Exec(ctx, `DELETE FROM workflow_statuses WHERE id = $1`, id); err != nil {
+	if _, err := e.pool.Exec(ctx,
+		`DELETE FROM workflow_statuses WHERE id = $1 AND team_id IN (SELECT id FROM teams WHERE workspace_id = $2)`,
+		id, workspaceID); err != nil {
 		return err
 	}
 	e.invalidate(teamID)

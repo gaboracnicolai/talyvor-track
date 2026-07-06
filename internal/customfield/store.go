@@ -322,7 +322,7 @@ func (s *Store) DeleteField(ctx context.Context, id, workspaceID string) error {
 // SetValue validates the incoming value against the field's type
 // then UPSERTs. Validation runs server-side so a misbehaving client
 // (or someone hand-crafting a curl) can't bypass the per-type rules.
-func (s *Store) SetValue(ctx context.Context, issueID, fieldID, value string) error {
+func (s *Store) SetValue(ctx context.Context, issueID, fieldID, workspaceID, value string) error {
 	if s.pool == nil {
 		return errors.New("customfield: store has no pool")
 	}
@@ -342,6 +342,11 @@ func (s *Store) SetValue(ctx context.Context, issueID, fieldID, value string) er
 	}
 	if issueWS != field.WorkspaceID {
 		return errors.New("customfield: field and issue belong to different workspaces")
+	}
+	// SEC-5: the target issue must be in the caller's authorized workspace — a member of one
+	// workspace can never set a field value on another workspace's issue by bare id.
+	if issueWS != workspaceID {
+		return ErrNotFound
 	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO issue_field_values (issue_id, field_id, value)
@@ -416,14 +421,17 @@ func contains(haystack []string, needle string) bool {
 // GetValues returns the field-id → value map for one issue. Empty
 // map (not nil) is returned for issues with no values so JSON encodes
 // `{}` rather than `null`.
-func (s *Store) GetValues(ctx context.Context, issueID string) (map[string]string, error) {
+func (s *Store) GetValues(ctx context.Context, issueID, workspaceID string) (map[string]string, error) {
 	out := map[string]string{}
 	if s.pool == nil {
 		return out, nil
 	}
+	// SEC-5: issue_field_values carry no workspace_id — scope via the parent issue so a foreign
+	// issue's field values are never disclosed (empty result for an out-of-workspace issue id).
 	rows, err := s.pool.Query(ctx,
-		`SELECT field_id, value FROM issue_field_values WHERE issue_id = $1`,
-		issueID,
+		`SELECT field_id, value FROM issue_field_values
+        WHERE issue_id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $2)`,
+		issueID, workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("customfield: get values: %w", err)

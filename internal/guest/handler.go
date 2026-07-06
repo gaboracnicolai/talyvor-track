@@ -3,6 +3,7 @@ package guest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -208,7 +209,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.RevokeGuest(r.Context(), chi.URLParam(r, "id")); err != nil {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if err := h.store.RevokeGuest(r.Context(), chi.URLParam(r, "id"), wsID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "REVOKE_FAILED", err.Error())
 		return
 	}

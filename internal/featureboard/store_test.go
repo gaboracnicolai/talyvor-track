@@ -272,6 +272,10 @@ func TestUpdateStatus_LinksIssue(t *testing.T) {
 func TestGetStats_ReturnsCounts(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
+	// SEC-5: GetStats asserts the board is in the workspace first.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("b-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`SELECT COUNT.*SUM.*FROM feature_posts`).
 		WithArgs("b-1").
 		WillReturnRows(pgxmock.NewRows([]string{"total_posts", "total_votes"}).
@@ -289,7 +293,7 @@ func TestGetStats_ReturnsCounts(t *testing.T) {
 			42, (*string)(nil), "x", "x@x.com", now, now,
 		))
 
-	out, err := store.GetStats(context.Background(), "b-1")
+	out, err := store.GetStats(context.Background(), "b-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}

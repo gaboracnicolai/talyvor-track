@@ -73,8 +73,8 @@ type projectStoreIface interface {
 }
 
 type cycleStoreIface interface {
-	GetActive(ctx context.Context, teamID string) (*model.Cycle, error)
-	GetProgress(ctx context.Context, cycleID string) (*cycle.CycleProgress, error)
+	GetActive(ctx context.Context, teamID, workspaceID string) (*model.Cycle, error)
+	GetProgress(ctx context.Context, cycleID, workspaceID string) (*cycle.CycleProgress, error)
 }
 
 type aiEngineIface interface {
@@ -853,7 +853,8 @@ func (s *Server) toolGetSprintStatus(ctx context.Context, args json.RawMessage) 
 	if in.TeamID == "" {
 		return nil, badParam("team_id required")
 	}
-	active, err := s.cycleStore.GetActive(ctx, in.TeamID)
+	wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (chokepoint)
+	active, err := s.cycleStore.GetActive(ctx, in.TeamID, wsID)
 	if err != nil {
 		// No active cycle is not an error condition — agents should
 		// see a clear "no active sprint" signal instead of a 500.
@@ -862,7 +863,7 @@ func (s *Server) toolGetSprintStatus(ctx context.Context, args json.RawMessage) 
 			"team_id": in.TeamID,
 		}, nil
 	}
-	progress, err := s.cycleStore.GetProgress(ctx, active.ID)
+	progress, err := s.cycleStore.GetProgress(ctx, active.ID, wsID)
 	if err != nil {
 		return nil, fmt.Errorf("get_sprint_status: %w", err)
 	}

@@ -38,10 +38,14 @@ func (s *Store) CreateComment(ctx context.Context, c model.Comment) (*model.Comm
 // ListComments returns every comment for an issue, oldest first.
 // The conversation flow is chronological; new comments appear at the
 // bottom of the thread.
-func (s *Store) ListComments(ctx context.Context, issueID string) ([]model.Comment, error) {
+func (s *Store) ListComments(ctx context.Context, issueID, workspaceID string) ([]model.Comment, error) {
+	// SEC-5: comments carry no workspace_id — scope via the parent issue so a foreign issue's
+	// comments are never enumerated (empty result for an out-of-workspace issue id).
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+commentColumns+` FROM comments WHERE issue_id = $1 ORDER BY created_at ASC`,
-		issueID,
+		`SELECT `+commentColumns+` FROM comments
+        WHERE issue_id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $2)
+        ORDER BY created_at ASC`,
+		issueID, workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("comment: list: %w", err)

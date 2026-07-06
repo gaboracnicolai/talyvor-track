@@ -245,13 +245,14 @@ func (s *Store) SetScore(ctx context.Context, issueID, workspaceID, memberID str
 
 // ─── GetScore ───────────────────────────────────────────────
 
-func (s *Store) GetScore(ctx context.Context, issueID string) (*IssueScore, error) {
+func (s *Store) GetScore(ctx context.Context, issueID, workspaceID string) (*IssueScore, error) {
 	if s.pool == nil {
 		return nil, errors.New("scoring: store has no pool")
 	}
+	// SEC-5: scoped to the caller's workspace — a foreign issue's score is never disclosed.
 	return scanScore(s.pool.QueryRow(ctx,
-		`SELECT `+scoreColumns+` FROM issue_scores WHERE issue_id = $1`,
-		issueID,
+		`SELECT `+scoreColumns+` FROM issue_scores WHERE issue_id = $1 AND workspace_id = $2`,
+		issueID, workspaceID,
 	))
 }
 
@@ -279,11 +280,13 @@ func (s *Store) IssueScores(ctx context.Context, issueID string) (*float64, *flo
 
 // ─── DeleteScore ────────────────────────────────────────────
 
-func (s *Store) DeleteScore(ctx context.Context, issueID string) error {
+func (s *Store) DeleteScore(ctx context.Context, issueID, workspaceID string) error {
 	if s.pool == nil {
 		return errors.New("scoring: store has no pool")
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM issue_scores WHERE issue_id = $1`, issueID)
+	// SEC-5: scoped to the caller's workspace — a member of one workspace can never delete
+	// another workspace's issue score by bare issue id.
+	_, err := s.pool.Exec(ctx, `DELETE FROM issue_scores WHERE issue_id = $1 AND workspace_id = $2`, issueID, workspaceID)
 	return err
 }
 

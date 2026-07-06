@@ -88,9 +88,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.GetByID(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authorizedWorkspace(r)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	// SEC-5: scoped read — a foreign id yields ErrNotFound → 404 (no cross-tenant disclosure,
+	// no existence oracle), never the unscoped GetByID.
+	out, err := h.store.getInWorkspace(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, out)

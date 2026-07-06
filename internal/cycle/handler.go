@@ -64,7 +64,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.ListByTeam(r.Context(), chi.URLParam(r, "teamID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.ListByTeam(r.Context(), chi.URLParam(r, "teamID"), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
@@ -76,7 +81,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetActive(w http.ResponseWriter, r *http.Request) {
-	out, err := h.store.GetActive(r.Context(), chi.URLParam(r, "teamID"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.GetActive(r.Context(), chi.URLParam(r, "teamID"), wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "ACTIVE_FAILED", err.Error())
 		return
@@ -138,7 +148,16 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Progress(w http.ResponseWriter, r *http.Request) {
-	p, err := h.store.GetProgress(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	p, err := h.store.GetProgress(r.Context(), chi.URLParam(r, "id"), wsID)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "PROGRESS_FAILED", err.Error())
 		return
@@ -147,7 +166,16 @@ func (h *Handler) Progress(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
-	pts, err := h.store.GetBurndown(r.Context(), chi.URLParam(r, "id"))
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	pts, err := h.store.GetBurndown(r.Context(), chi.URLParam(r, "id"), wsID)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "BURNDOWN_FAILED", err.Error())
 		return

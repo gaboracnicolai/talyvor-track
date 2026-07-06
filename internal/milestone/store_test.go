@@ -56,12 +56,12 @@ func TestCreate_RejectsMissingFields(t *testing.T) {
 func TestListByProject_ReturnsMilestones(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`FROM milestones WHERE project_id`).
-		WithArgs("p-1").
+		WithArgs("p-1", "ws-1").
 		WillReturnRows(milestoneRow("a", "v1.0", "upcoming").AddRow(
 			"b", "ws-1", "p-1", "v1.1", "", "upcoming", nil, nil, time.Now().UTC(), time.Now().UTC(),
 		))
 
-	out, err := store.ListByProject(context.Background(), "p-1")
+	out, err := store.ListByProject(context.Background(), "p-1", "ws-1")
 	if err != nil {
 		t.Fatalf("ListByProject: %v", err)
 	}
@@ -72,11 +72,15 @@ func TestListByProject_ReturnsMilestones(t *testing.T) {
 
 func TestGetProgress_CountsIssuesCorrectly(t *testing.T) {
 	store, pool := newMockStore(t)
+	// SEC-5: GetProgress asserts the milestone is in the workspace (getInWorkspace) first.
+	pool.ExpectQuery(`FROM milestones WHERE id = \$1 AND workspace_id = \$2`).
+		WithArgs("m-1", "ws-1").
+		WillReturnRows(milestoneRow("m-1", "v1.0", "active"))
 	pool.ExpectQuery(`FROM issues WHERE milestone_id`).
 		WithArgs("m-1").
 		WillReturnRows(pgxmock.NewRows([]string{"total", "completed"}).AddRow(8, 3))
 
-	p, err := store.GetProgress(context.Background(), "m-1")
+	p, err := store.GetProgress(context.Background(), "m-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetProgress: %v", err)
 	}

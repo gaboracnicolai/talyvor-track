@@ -127,7 +127,9 @@ func (s *JobStore) ClaimNext(ctx context.Context) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE import_jobs SET status='running', started_at=NOW() WHERE id=$1`, j.ID); err != nil {
+	// SEC-5: self-evidently workspace-scoped (j.WorkspaceID comes from the claim query above; the
+	// job runner is a background path, not a user-facing by-id op) so the class-guard enforces here.
+	if _, err := tx.Exec(ctx, `UPDATE import_jobs SET status='running', started_at=NOW() WHERE id=$1 AND workspace_id=$2`, j.ID, j.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -148,11 +150,12 @@ func (s *JobStore) LoadPayload(ctx context.Context, jobID string) ([]byte, error
 }
 
 // Finish records the terminal status + counts.
-func (s *JobStore) Finish(ctx context.Context, jobID, status string, imported, skipped, failed int, errSummary string) error {
+func (s *JobStore) Finish(ctx context.Context, jobID, workspaceID, status string, imported, skipped, failed int, errSummary string) error {
+	// SEC-5: workspace-scoped (workspaceID is the runner's own job.WorkspaceID) so the class-guard enforces here.
 	_, err := s.pool.Exec(ctx,
 		`UPDATE import_jobs SET status=$2, imported=$3, skipped=$4, failed=$5,
-		        error_summary=NULLIF($6,''), finished_at=NOW() WHERE id=$1`,
-		jobID, status, imported, skipped, failed, errSummary)
+		        error_summary=NULLIF($6,''), finished_at=NOW() WHERE id=$1 AND workspace_id=$7`,
+		jobID, status, imported, skipped, failed, errSummary, workspaceID)
 	if err != nil {
 		return fmt.Errorf("importer: finish job: %w", err)
 	}

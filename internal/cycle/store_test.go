@@ -74,11 +74,11 @@ func TestGetActive_ReturnsCurrentCycle(t *testing.T) {
 	start := time.Now().UTC().Add(-7 * 24 * time.Hour)
 	end := time.Now().UTC().Add(7 * 24 * time.Hour)
 
-	pool.ExpectQuery(`FROM cycles\s+WHERE team_id = \$1 AND status = 'active'`).
-		WithArgs("team-1").
+	pool.ExpectQuery(`FROM cycles\s+WHERE team_id = \$1 AND workspace_id = \$2 AND status = 'active'`).
+		WithArgs("team-1", "ws-1").
 		WillReturnRows(cycleRow("c-active", 5, "active", start, end))
 
-	out, err := store.GetActive(context.Background(), "team-1")
+	out, err := store.GetActive(context.Background(), "team-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetActive: %v", err)
 	}
@@ -89,13 +89,16 @@ func TestGetActive_ReturnsCurrentCycle(t *testing.T) {
 
 func TestGetProgress_CalculatesCompletionCorrectly(t *testing.T) {
 	store, pool := newMockStore(t)
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("c-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`COUNT.*FILTER.*FROM issues WHERE cycle_id`).
 		WithArgs("c-1").
 		WillReturnRows(pgxmock.NewRows([]string{
 			"total", "completed", "in_progress", "not_started", "total_ai_cost",
 		}).AddRow(10, 4, 3, 3, 0.85))
 
-	p, err := store.GetProgress(context.Background(), "c-1")
+	p, err := store.GetProgress(context.Background(), "c-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetProgress: %v", err)
 	}
@@ -119,6 +122,9 @@ func TestGetBurndown_ReturnsCorrectDataPoints(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(4 * 24 * time.Hour) // 5-day inclusive window
 
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("c-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`FROM cycles WHERE id`).
 		WithArgs("c-1").
 		WillReturnRows(cycleRow("c-1", 1, "active", start, end))
@@ -133,7 +139,7 @@ func TestGetBurndown_ReturnsCorrectDataPoints(t *testing.T) {
 			WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(i * 2))
 	}
 
-	out, err := store.GetBurndown(context.Background(), "c-1")
+	out, err := store.GetBurndown(context.Background(), "c-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetBurndown: %v", err)
 	}

@@ -54,9 +54,10 @@ func (h *Handler) GetTimer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
 		return
 	}
-	memberID := r.URL.Query().Get("member_id")
-	if memberID == "" {
-		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "member_id required")
+	// SEC-5 (identity): the timer belongs to the verified session member, never a supplied id.
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
 		return
 	}
 	out, err := h.store.GetRunningTimer(r.Context(), memberID, wsID)
@@ -75,13 +76,18 @@ func (h *Handler) StartTimer(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		IssueID     string `json:"issue_id"`
-		MemberID    string `json:"member_id"`
 		Description string `json:"description"`
 	}
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	out, err := h.store.StartTimer(r.Context(), in.IssueID, wsID, in.MemberID, in.Description)
+	// SEC-5 (identity): actor is the session member; a supplied member_id is retired.
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
+		return
+	}
+	out, err := h.store.StartTimer(r.Context(), in.IssueID, wsID, memberID, in.Description)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "START_FAILED", err.Error())
 		return
@@ -95,13 +101,13 @@ func (h *Handler) StopTimer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not a member of this workspace")
 		return
 	}
-	var in struct {
-		MemberID string `json:"member_id"`
-	}
-	if !httpx.DecodeJSON(w, r, &in) {
+	// SEC-5 (identity): stop the session member's own timer, never a supplied member's.
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
 		return
 	}
-	out, err := h.store.StopTimer(r.Context(), in.MemberID, wsID)
+	out, err := h.store.StopTimer(r.Context(), memberID, wsID)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "STOP_FAILED", err.Error())
 		return
@@ -121,7 +127,6 @@ func (h *Handler) StopTimer(w http.ResponseWriter, r *http.Request) {
 // explicit `"billable": false` from non-billable internal work.
 type logTimeRequest struct {
 	IssueID     string     `json:"issue_id"`
-	MemberID    string     `json:"member_id"`
 	Description string     `json:"description"`
 	StartedAt   time.Time  `json:"started_at"`
 	StoppedAt   *time.Time `json:"stopped_at"`
@@ -138,6 +143,12 @@ func (h *Handler) LogTime(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
+	// SEC-5 (identity): logged time is attributed to the session member, never a supplied id.
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no authorized member")
+		return
+	}
 	billable := true
 	if in.Billable != nil {
 		billable = *in.Billable
@@ -145,7 +156,7 @@ func (h *Handler) LogTime(w http.ResponseWriter, r *http.Request) {
 	entry := TimeEntry{
 		IssueID:     in.IssueID,
 		WorkspaceID: wsID,
-		MemberID:    in.MemberID,
+		MemberID:    memberID,
 		Description: in.Description,
 		StartedAt:   in.StartedAt,
 		StoppedAt:   in.StoppedAt,
