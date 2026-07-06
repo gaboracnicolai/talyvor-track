@@ -2,6 +2,7 @@ package project
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/talyvor/track/internal/httpx"
 	"github.com/talyvor/track/internal/model"
 )
+
+// authorizedWorkspace returns the caller's server-authorized workspace (from the authz
+// middleware). ok=false ⇒ the handler must refuse — the SEC-5 scope source, never the URL/body.
+func authorizedWorkspace(r *http.Request) (string, bool) { return authz.WorkspaceID(r.Context()) }
 
 type Handler struct{ store *Store }
 
@@ -96,7 +101,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &updates) {
 		return
 	}
-	out, err := h.store.Update(r.Context(), chi.URLParam(r, "id"), updates)
+	wsID, ok := authorizedWorkspace(r)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.Update(r.Context(), chi.URLParam(r, "id"), wsID, updates)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
@@ -105,7 +119,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.Delete(r.Context(), chi.URLParam(r, "id")); err != nil {
+	wsID, ok := authorizedWorkspace(r)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if err := h.store.Delete(r.Context(), chi.URLParam(r, "id"), wsID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}

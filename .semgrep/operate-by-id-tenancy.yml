@@ -1,0 +1,53 @@
+rules:
+  - id: operate-by-id-write-requires-workspace-scope
+    languages: [go]
+    severity: ERROR
+    message: >-
+      SEC-5: this store performs a by-id DELETE/UPDATE (WHERE id = $n) with NO workspace_id
+      predicate — the operate-by-id cross-tenant IDOR class. A caller authorized for workspace
+      A can act on another workspace's object by passing its id. Add "AND workspace_id = $n",
+      take the workspace from the authz-authorized context (authz.WorkspaceID — never the URL
+      or body), and return a not-found sentinel on 0 rows so a foreign id 404s. Reference:
+      project.Store.Delete / cycle.Store.Update (WHERE id=$1 AND workspace_id=$n).
+    patterns:
+      # A pgx Exec/QueryRow whose SQL LITERAL is a by-id DELETE or UPDATE ... WHERE id = $n.
+      # NOTE: metavariable-regex is re.match-anchored and the value includes the leading
+      # backtick/quote, so the pattern must start with (?s).* to search the whole literal.
+      - pattern-either:
+          - pattern: $Q.Exec($CTX, $SQL, ...)
+          - pattern: $Q.QueryRow($CTX, $SQL, ...)
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$
+      # Excluded when the SAME statement is already workspace-scoped (…AND workspace_id = $n):
+      # the by-id op provably acts within one workspace and is safe.
+      - pattern-not:
+          patterns:
+            - pattern-either:
+                - pattern: $Q.Exec($CTX, $SQL, ...)
+                - pattern: $Q.QueryRow($CTX, $SQL, ...)
+            - metavariable-regex:
+                metavariable: $SQL
+                regex: (?s).*workspace_id
+    paths:
+      # SEC-5 BACKLOG + carve-outs. The rule ENFORCES on project/team/issue (Group 1, fixed)
+      # and all NEW code; these files are excluded until their group lands. Remove a file from
+      # this list in the PR that scopes it, so the guard turns on there.
+      #
+      #   Group 2-4 operate-by-id holes (user-facing by-id DELETE/UPDATE — to fix, then remove):
+      exclude:
+        - "internal/customfield/store.go"     # DELETE custom_fields (Group: fields)
+        - "internal/cycle/store.go"           # UPDATE cycles Complete (Group: cycles)
+        - "internal/guest/store.go"           # guest_invites / guests (Group: guest — own auth model, assess)
+        - "internal/label/store.go"           # DELETE labels (Group: labels)
+        - "internal/notification/store.go"    # UPDATE notifications MarkRead (Group: notifications + identity)
+        - "internal/template/store.go"        # DELETE issue_templates (Group: templates)
+        - "internal/timetracking/store.go"    # DELETE time_entries (Group: time)
+        - "internal/issue/comments.go"        # UpdateComment / DeleteComment (Group: comments)
+        # Not the user-facing class (assessed safe-by-context — internal engines resolve the id
+        # from a workspace-scoped query; the importer is authz-locked; workspaces is self-scoping):
+        - "internal/automation/engine.go"     # rule engine, id resolved in-workspace
+        - "internal/workflow/engine.go"       # transition engine, id resolved in-workspace
+        - "internal/importer/jobs.go"         # importer (authz_test.go-locked path)
+        - "internal/featureboard/store.go"    # board ops (AssertRefInWorkspace-guarded)
+        - "internal/workspace/store.go"       # DELETE workspaces — id IS the authorized workspace (self-scoping)

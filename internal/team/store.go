@@ -87,10 +87,13 @@ var teamUpdatable = map[string]struct{}{
 	"name": {}, "identifier": {}, "color": {}, "icon": {},
 }
 
-func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*model.Team, error) {
-	if len(updates) == 0 {
-		return s.GetByID(ctx, id)
-	}
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. Handlers map it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("team: not found in workspace")
+
+// Update mutates a team only within workspaceID (the caller's authorized workspace) — SEC-5:
+// a foreign id yields ErrNotFound, never a cross-tenant write.
+func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Team, error) {
 	var (
 		setClauses []string
 		args       []any
@@ -105,20 +108,43 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 		args = append(args, v)
 	}
 	if len(setClauses) == 0 {
-		return s.GetByID(ctx, id)
+		return s.getInWorkspace(ctx, id, workspaceID)
 	}
 	argN++
+	idN := argN
 	args = append(args, id)
+	argN++
+	wsN := argN
+	args = append(args, workspaceID)
 	sql := fmt.Sprintf(
-		`UPDATE teams SET %s, updated_at = NOW() WHERE id = $%d RETURNING %s`,
-		joinComma(setClauses), argN, teamColumns,
+		`UPDATE teams SET %s, updated_at = NOW() WHERE id = $%d AND workspace_id = $%d RETURNING %s`,
+		joinComma(setClauses), idN, wsN, teamColumns,
 	)
-	return scanTeam(s.pool.QueryRow(ctx, sql, args...))
+	tm, err := scanTeam(s.pool.QueryRow(ctx, sql, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return tm, err
 }
 
-func (s *Store) Delete(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM teams WHERE id = $1`, id)
-	return err
+func (s *Store) getInWorkspace(ctx context.Context, id, workspaceID string) (*model.Team, error) {
+	tm, err := scanTeam(s.pool.QueryRow(ctx,
+		`SELECT `+teamColumns+` FROM teams WHERE id = $1 AND workspace_id = $2`, id, workspaceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return tm, err
+}
+
+func (s *Store) Delete(ctx context.Context, id, workspaceID string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM teams WHERE id = $1 AND workspace_id = $2`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func joinComma(parts []string) string {

@@ -74,10 +74,10 @@ func TestListByWorkspace_ReturnsTeams(t *testing.T) {
 func TestUpdate_ChangesName(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`UPDATE teams SET`).
-		WithArgs("New Name", "team-1").
+		WithArgs("New Name", "team-1", "ws-1").
 		WillReturnRows(teamRow("team-1", "ENG"))
 
-	if _, err := store.Update(context.Background(), "team-1", map[string]any{"name": "New Name"}); err != nil {
+	if _, err := store.Update(context.Background(), "team-1", "ws-1", map[string]any{"name": "New Name"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 }
@@ -85,10 +85,10 @@ func TestUpdate_ChangesName(t *testing.T) {
 func TestDelete_RemovesTeam(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`DELETE FROM teams`).
-		WithArgs("team-1").
+		WithArgs("team-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
 
-	if err := store.Delete(context.Background(), "team-1"); err != nil {
+	if err := store.Delete(context.Background(), "team-1", "ws-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 }

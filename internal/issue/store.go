@@ -690,12 +690,24 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 // Delete is a soft delete: the row stays but the status becomes
 // "cancelled" so historical reports can still see the identifier.
 // updated_at is bumped so audit trails record the transition.
-func (s *Store) Delete(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE issues SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
-		id,
+// ErrNotFound is the SEC-5 sentinel: a by-id op resolved to no row in the caller's authorized
+// workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
+var ErrNotFound = errors.New("issue: not found in workspace")
+
+// Delete soft-cancels an issue only within workspaceID (the caller's authorized workspace) —
+// SEC-5: a foreign id yields ErrNotFound, never a cross-tenant cancel.
+func (s *Store) Delete(ctx context.Context, id, workspaceID string) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE issues SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND workspace_id = $2`,
+		id, workspaceID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // RecordSpendEvent is the WEBHOOK's authoritative, idempotent cost accumulator. It

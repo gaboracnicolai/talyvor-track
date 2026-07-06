@@ -319,21 +319,30 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// Look up the issue first so we know which team room to broadcast
-	// to — once the soft-delete runs, the status is "cancelled" but
-	// the team_id is still intact.
-	existing, _ := h.store.GetByID(r.Context(), id)
-	if err := h.store.Delete(r.Context(), id); err != nil {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	// SEC-5: soft-cancel scoped to the caller's authorized workspace. A foreign id → 404,
+	// never a cross-tenant cancel — the scope check runs BEFORE we read the issue for the
+	// notifier (so a foreign issue is never even fetched for broadcast).
+	if err := h.store.Delete(r.Context(), id, wsID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}
-	if h.notifier != nil && existing != nil {
-		actorID, ok := authz.MemberID(r.Context())
-		if !ok {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
-			return
+	// Broadcast: the issue is in-workspace (Delete succeeded); status is "cancelled" but
+	// team_id is intact, so we can resolve the team room.
+	if h.notifier != nil {
+		if existing, _ := h.store.GetByID(r.Context(), id); existing != nil {
+			if actorID, okA := authz.MemberID(r.Context()); okA {
+				h.notifier.IssueDeleted(r.Context(), existing.WorkspaceID, existing.TeamID, id, actorID)
+			}
 		}
-		h.notifier.IssueDeleted(r.Context(), existing.WorkspaceID, existing.TeamID, id, actorID)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
