@@ -228,10 +228,10 @@ func TestSearch_ReturnsMatchingIssues(t *testing.T) {
 func TestDelete_SetsStatusToCancelled(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`UPDATE issues SET status = 'cancelled'`).
-		WithArgs("issue-x").
+		WithArgs("issue-x", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	if err := store.Delete(context.Background(), "issue-x"); err != nil {
+	if err := store.Delete(context.Background(), "issue-x", "ws-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 }

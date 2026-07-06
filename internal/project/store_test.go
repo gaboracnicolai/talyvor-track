@@ -77,10 +77,10 @@ func TestListByWorkspace_ReturnsProjects(t *testing.T) {
 func TestUpdate_ChangesStatus(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`UPDATE projects SET`).
-		WithArgs("completed", "p-1").
+		WithArgs("completed", "p-1", "ws-1").
 		WillReturnRows(projRow("p-1", "PRJ-1", "completed"))
 
-	out, err := store.Update(context.Background(), "p-1", map[string]any{"status": "completed"})
+	out, err := store.Update(context.Background(), "p-1", "ws-1", map[string]any{"status": "completed"})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -92,10 +92,10 @@ func TestUpdate_ChangesStatus(t *testing.T) {
 func TestDelete_RemovesProject(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectExec(`DELETE FROM projects`).
-		WithArgs("p-1").
+		WithArgs("p-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
 
-	if err := store.Delete(context.Background(), "p-1"); err != nil {
+	if err := store.Delete(context.Background(), "p-1", "ws-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 }

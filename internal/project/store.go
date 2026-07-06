@@ -98,10 +98,15 @@ var projectUpdatable = map[string]struct{}{
 	"priority": {}, "start_date": {}, "target_date": {},
 }
 
-func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (*model.Project, error) {
-	if len(updates) == 0 {
-		return s.GetByID(ctx, id)
-	}
+// ErrNotFound is the SEC-5 sentinel: a by-id operation resolved to no row IN THE CALLER'S
+// AUTHORIZED WORKSPACE. Handlers map it to 404 so a foreign id and a nonexistent id are
+// indistinguishable (no existence oracle).
+var ErrNotFound = errors.New("project: not found in workspace")
+
+// Update mutates a project only within workspaceID (the caller's authorized workspace) —
+// SEC-5: a foreign id yields ErrNotFound, never a cross-tenant write. workspaceID comes from
+// the authz context, never the URL/body.
+func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Project, error) {
 	var (
 		setClauses []string
 		args       []any
@@ -116,20 +121,44 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 		args = append(args, v)
 	}
 	if len(setClauses) == 0 {
-		return s.GetByID(ctx, id)
+		return s.getInWorkspace(ctx, id, workspaceID) // scoped no-op fetch (never unscoped GetByID)
 	}
 	argN++
+	idN := argN
 	args = append(args, id)
+	argN++
+	wsN := argN
+	args = append(args, workspaceID)
 	sql := fmt.Sprintf(
-		`UPDATE projects SET %s, updated_at = NOW() WHERE id = $%d RETURNING %s`,
-		joinComma(setClauses), argN, projectColumns,
+		`UPDATE projects SET %s, updated_at = NOW() WHERE id = $%d AND workspace_id = $%d RETURNING %s`,
+		joinComma(setClauses), idN, wsN, projectColumns,
 	)
-	return scanProject(s.pool.QueryRow(ctx, sql, args...))
+	p, err := scanProject(s.pool.QueryRow(ctx, sql, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return p, err
 }
 
-func (s *Store) Delete(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM projects WHERE id = $1`, id)
-	return err
+// getInWorkspace is the scoped read the by-id ops fall back to (never the unscoped GetByID).
+func (s *Store) getInWorkspace(ctx context.Context, id, workspaceID string) (*model.Project, error) {
+	p, err := scanProject(s.pool.QueryRow(ctx,
+		`SELECT `+projectColumns+` FROM projects WHERE id = $1 AND workspace_id = $2`, id, workspaceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return p, err
+}
+
+func (s *Store) Delete(ctx context.Context, id, workspaceID string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM projects WHERE id = $1 AND workspace_id = $2`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func joinComma(parts []string) string {
