@@ -32,9 +32,11 @@ type jiraClient struct {
 	retry   retryer
 }
 
-func newJiraClient(emailAPIToken, projectKey, baseURL string) *jiraClient {
+// newJiraClient builds the Jira client. Production passes no httpc → the SSRF-guarded client; tests may
+// inject a loopback-capable client (httptest binds 127.0.0.1, which the guard blocks by design).
+func newJiraClient(emailAPIToken, projectKey, baseURL string, httpc ...*http.Client) *jiraClient {
 	return &jiraClient{
-		http:    &http.Client{Timeout: defaultRequestTimeout},
+		http:    clientOrSafe(httpc),
 		url:     strings.TrimRight(baseURL, "/") + jiraSearchPath,
 		auth:    base64.StdEncoding.EncodeToString([]byte(emailAPIToken)),
 		project: projectKey,
@@ -197,8 +199,8 @@ type jiraSource struct {
 	rowNum    int
 }
 
-func newJiraSource(emailAPIToken, projectKey, baseURL string) *jiraSource {
-	return &jiraSource{client: newJiraClient(emailAPIToken, projectKey, baseURL)}
+func newJiraSource(emailAPIToken, projectKey, baseURL string, httpc ...*http.Client) *jiraSource {
+	return &jiraSource{client: newJiraClient(emailAPIToken, projectKey, baseURL, httpc...)}
 }
 
 func (s *jiraSource) Next() (SourceRow, bool) {

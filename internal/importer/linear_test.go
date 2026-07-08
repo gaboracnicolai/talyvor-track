@@ -73,7 +73,7 @@ func TestLinearSource_Paginates(t *testing.T) {
 	}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL)
+	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	ids := drainIDs(t, src)
 	if len(ids) != 3 || ids[0] != "ENG-1" || ids[2] != "ENG-3" {
@@ -95,7 +95,7 @@ func TestLinearSource_RateLimit_RetriesThenSucceeds(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newLinearSource("k", "TEAM", srv.URL)
+	src := newLinearSource("k", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	row, ok := src.Next()
 	if !ok || row.Err != nil {
@@ -112,7 +112,7 @@ func TestLinearClient_RateLimitGiveUp_IsDistinct(t *testing.T) {
 		writeRaw(w, `{"errors":[{"extensions":{"code":"RATELIMITED"}}]}`)
 	}))
 	defer srv.Close()
-	c := newLinearClient("k", "TEAM", srv.URL)
+	c := newLinearClient("k", "TEAM", srv.URL, srv.Client())
 	c.retry.sleep = noopSleep
 	_, err := c.fetchPage(context.Background(), "")
 	if !errors.Is(err, errRateLimited) {
@@ -125,7 +125,7 @@ func TestLinearSource_200WithErrors_NotSilent(t *testing.T) {
 		writeRaw(w, `{"errors":[{"message":"boom"}]}`) // HTTP 200 + errors[]
 	}))
 	defer srv.Close()
-	src := newLinearSource("k", "TEAM", srv.URL)
+	src := newLinearSource("k", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	row, ok := src.Next()
 	if !ok || row.Err == nil {
@@ -148,7 +148,7 @@ func TestRun_FetchFailureMidPagination_Observable(t *testing.T) {
 	defer srv.Close()
 
 	imp := New(&fakeUpsertStore{})
-	src := newLinearSource("k", "TEAM", srv.URL)
+	src := newLinearSource("k", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	out, err := imp.run(context.Background(), "wsA", "teamA", src)
 	if err != nil {

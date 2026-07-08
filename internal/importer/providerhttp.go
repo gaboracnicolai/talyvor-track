@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/talyvor/track/internal/safehttp"
 )
 
 // providerhttp.go — T8 Build C.3: the small POST-JSON helper the Linear/Jira clients share. The
@@ -24,6 +26,16 @@ const (
 	maxRateLimitBackoff   = 30 * time.Second
 	defaultRequestTimeout = 20 * time.Second
 )
+
+// clientOrSafe returns the first non-nil injected client, or the SSRF-guarded client by default.
+// SEC-6: every provider fetch of a user-supplied instance URL goes through the guarded client so it
+// cannot be pointed at an internal address; tests inject a plain client to reach a loopback httptest.
+func clientOrSafe(override []*http.Client) *http.Client {
+	if len(override) > 0 && override[0] != nil {
+		return override[0]
+	}
+	return safehttp.Client(defaultRequestTimeout)
+}
 
 // retryer carries the retry knobs. sleep is injectable so tests run without real waits.
 type retryer struct {

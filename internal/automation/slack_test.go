@@ -24,6 +24,7 @@ func TestSlack_SendPostsToCorrectWebhookURL(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	notif := NewSlackNotifier()
+	notif.httpClient = srv.Client() // reach the loopback test server; the SSRF-guarded client blocks 127.0.0.1 by design
 	if err := notif.Send(srv.URL+"/incoming/hook", "hello", nil); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -56,6 +57,7 @@ func TestSlack_IssueUpdatedFormatsMessage(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	notif := NewSlackNotifier()
+	notif.httpClient = srv.Client() // reach the loopback test server; the SSRF-guarded client blocks 127.0.0.1 by design
 	err := notif.IssueUpdated(srv.URL, model.Issue{
 		Identifier: "ENG-42", Title: "Authentication bug",
 	}, map[string]any{"status": "done"})

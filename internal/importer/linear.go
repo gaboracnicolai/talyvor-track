@@ -37,13 +37,15 @@ type linearClient struct {
 	retry retryer
 }
 
-func newLinearClient(token, teamKey, baseURL string) *linearClient {
+// newLinearClient builds the Linear client. Production passes no httpc → the SSRF-guarded client; tests
+// may inject a loopback-capable client (httptest binds 127.0.0.1, which the guard blocks by design).
+func newLinearClient(token, teamKey, baseURL string, httpc ...*http.Client) *linearClient {
 	url := baseURL
 	if url == "" {
 		url = defaultLinearURL
 	}
 	return &linearClient{
-		http:  &http.Client{Timeout: defaultRequestTimeout},
+		http:  clientOrSafe(httpc),
 		url:   url,
 		token: token,
 		team:  teamKey,
@@ -215,8 +217,8 @@ type linearSource struct {
 	rowNum  int
 }
 
-func newLinearSource(token, teamKey, baseURL string) *linearSource {
-	return &linearSource{client: newLinearClient(token, teamKey, baseURL)}
+func newLinearSource(token, teamKey, baseURL string, httpc ...*http.Client) *linearSource {
+	return &linearSource{client: newLinearClient(token, teamKey, baseURL, httpc...)}
 }
 
 func (s *linearSource) Next() (SourceRow, bool) {
