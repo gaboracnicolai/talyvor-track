@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/talyvor/track/internal/model"
+	"github.com/talyvor/track/internal/safehttp"
 )
 
 // SlackNotifier posts to a Slack incoming-webhook URL using the Block
@@ -20,7 +21,7 @@ type SlackNotifier struct {
 }
 
 func NewSlackNotifier() *SlackNotifier {
-	return &SlackNotifier{httpClient: &http.Client{Timeout: 5 * time.Second}}
+	return &SlackNotifier{httpClient: safehttp.Client(5 * time.Second)}
 }
 
 // Send posts a message to a Slack incoming webhook. The blocks

@@ -56,7 +56,9 @@ func TestRunner_LinearAPI_EndToEnd(t *testing.T) {
 	}
 	jobID := insertAPIJob(t, d, ws.ID, team.ID, "linear_api")
 
-	runner := NewRunner(NewJobStore(d.Pool), New(issue.NewStore(d.Pool))).WithProviderConfig(istore)
+	// Inject the test server's client: the integration baseURL is a loopback httptest, which the
+	// production SSRF-guarded client blocks by design (SEC-6).
+	runner := NewRunner(NewJobStore(d.Pool), New(issue.NewStore(d.Pool))).WithProviderConfig(istore).WithHTTPClient(srv.Client())
 	did, err := runner.RunOnce(ctx)
 	if err != nil || !did {
 		t.Fatalf("RunOnce did=%v err=%v", did, err)

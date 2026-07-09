@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 )
 
@@ -24,6 +25,9 @@ type Runner struct {
 	jobs    *JobStore
 	imp     *Importer
 	configs providerConfig // nil ⇒ *_api jobs fail cleanly (integrations disabled)
+	// httpClient overrides the provider fetch client. nil ⇒ the SSRF-guarded safehttp client (production).
+	// Tests that drive the runner against a loopback mock server inject a plain client here.
+	httpClient *http.Client
 }
 
 func NewRunner(jobs *JobStore, imp *Importer) *Runner { return &Runner{jobs: jobs, imp: imp} }
@@ -31,6 +35,18 @@ func NewRunner(jobs *JobStore, imp *Importer) *Runner { return &Runner{jobs: job
 // WithProviderConfig wires the credential store so linear_api/jira_api jobs can load their token. Absent ⇒
 // those jobs fail with a clear error (never a panic).
 func (r *Runner) WithProviderConfig(pc providerConfig) *Runner { r.configs = pc; return r }
+
+// WithHTTPClient overrides the provider fetch client (default: the SSRF-guarded safehttp client). Used by
+// end-to-end tests that point a provider integration at a loopback mock, which the guard blocks by design.
+func (r *Runner) WithHTTPClient(c *http.Client) *Runner { r.httpClient = c; return r }
+
+// sourceClients returns the injected client as a variadic arg (empty ⇒ provider constructors use safehttp).
+func (r *Runner) sourceClients() []*http.Client {
+	if r.httpClient != nil {
+		return []*http.Client{r.httpClient}
+	}
+	return nil
+}
 
 const defaultRunnerInterval = 2 * time.Second
 
@@ -141,9 +157,9 @@ func (r *Runner) apiSourceFor(ctx context.Context, job *Job, provider string) (I
 	}
 	switch provider {
 	case "linear":
-		return newLinearSource(token, projectKey, baseURL), nil
+		return newLinearSource(token, projectKey, baseURL, r.sourceClients()...), nil
 	case "jira":
-		return newJiraSource(token, projectKey, baseURL), nil
+		return newJiraSource(token, projectKey, baseURL, r.sourceClients()...), nil
 	default:
 		return nil, fmt.Errorf("importer: unknown provider %q", provider)
 	}
