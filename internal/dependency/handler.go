@@ -98,6 +98,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	sourceID := chi.URLParam(r, "id")
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var in struct {
 		TargetID string       `json:"target_id"`
 		Type     RelationType `json:"type"`
@@ -105,7 +110,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	if err := h.store.Delete(r.Context(), sourceID, in.TargetID, in.Type); err != nil {
+	if err := h.store.Delete(r.Context(), wsID, sourceID, in.TargetID, in.Type); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}
