@@ -116,6 +116,12 @@ func (h *Handler) GetIssueAICosts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue not found"})
 		return
 	}
+	// B-Track: the issue is fetched by bare id — verify it belongs to the caller's authorized workspace,
+	// or a member of another workspace could read its AI cost/tokens by guessing the id. 404 (no oracle).
+	if wsID, ok := authz.WorkspaceID(r.Context()); !ok || issue.WorkspaceID != wsID {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue not found"})
+		return
+	}
 	out := map[string]any{
 		"issue_id":     issue.ID,
 		"identifier":   issue.Identifier,

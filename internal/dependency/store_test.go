@@ -152,28 +152,28 @@ func TestCreate_RejectsInvalidType(t *testing.T) {
 
 func TestDelete_RemovesBothDirections(t *testing.T) {
 	store, pool := newMockStore(t)
-	// Forward delete.
-	pool.ExpectExec(`DELETE FROM issue_relations`).
-		WithArgs("a", "b", "blocks").
+	// Forward delete — B-Track: must be workspace-scoped (workspace_id = $4).
+	pool.ExpectExec(`DELETE FROM issue_relations WHERE source_id = \$1 AND target_id = \$2 AND type = \$3 AND workspace_id = \$4`).
+		WithArgs("a", "b", "blocks", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
-	// Inverse delete.
-	pool.ExpectExec(`DELETE FROM issue_relations`).
-		WithArgs("b", "a", "blocked_by").
+	// Inverse delete — also workspace-scoped.
+	pool.ExpectExec(`DELETE FROM issue_relations WHERE source_id = \$1 AND target_id = \$2 AND type = \$3 AND workspace_id = \$4`).
+		WithArgs("b", "a", "blocked_by", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
 
-	if err := store.Delete(context.Background(), "a", "b", RelationBlocks); err != nil {
+	if err := store.Delete(context.Background(), "ws-1", "a", "b", RelationBlocks); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 }
 
 func TestDelete_NonSymmetricOnlyRemovesForward(t *testing.T) {
 	store, pool := newMockStore(t)
-	// Only the forward delete fires for clones (no auto-inverse).
-	pool.ExpectExec(`DELETE FROM issue_relations`).
-		WithArgs("a", "b", "clones").
+	// Only the forward delete fires for clones (no auto-inverse) — workspace-scoped.
+	pool.ExpectExec(`DELETE FROM issue_relations WHERE source_id = \$1 AND target_id = \$2 AND type = \$3 AND workspace_id = \$4`).
+		WithArgs("a", "b", "clones", "ws-1").
 		WillReturnResult(pgxmock.NewResult("DELETE", 1))
 
-	if err := store.Delete(context.Background(), "a", "b", RelationClones); err != nil {
+	if err := store.Delete(context.Background(), "ws-1", "a", "b", RelationClones); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if err := pool.ExpectationsWereMet(); err != nil {

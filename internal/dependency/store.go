@@ -294,20 +294,22 @@ func scanRelation(s interface {
 // Delete removes the relation and, for symmetric types, its inverse.
 // Both deletes are best-effort idempotent — deleting a relation that
 // was already gone returns nil instead of an error.
-func (s *Store) Delete(ctx context.Context, sourceID, targetID string, t RelationType) error {
+func (s *Store) Delete(ctx context.Context, workspaceID, sourceID, targetID string, t RelationType) error {
 	if s.pool == nil {
 		return errors.New("dependency: store has no pool")
 	}
+	// B-Track: scope the delete to the caller's workspace — the relation is keyed only by issue ids, so
+	// without this predicate any member of any workspace could delete another tenant's relation edge.
 	if _, err := s.pool.Exec(ctx,
-		`DELETE FROM issue_relations WHERE source_id = $1 AND target_id = $2 AND type = $3`,
-		sourceID, targetID, string(t),
+		`DELETE FROM issue_relations WHERE source_id = $1 AND target_id = $2 AND type = $3 AND workspace_id = $4`,
+		sourceID, targetID, string(t), workspaceID,
 	); err != nil {
 		return fmt.Errorf("dependency: delete: %w", err)
 	}
 	if hasAutoInverse(t) {
 		if _, err := s.pool.Exec(ctx,
-			`DELETE FROM issue_relations WHERE source_id = $1 AND target_id = $2 AND type = $3`,
-			targetID, sourceID, string(inverseType(t)),
+			`DELETE FROM issue_relations WHERE source_id = $1 AND target_id = $2 AND type = $3 AND workspace_id = $4`,
+			targetID, sourceID, string(inverseType(t)), workspaceID,
 		); err != nil {
 			return fmt.Errorf("dependency: delete inverse: %w", err)
 		}
