@@ -59,6 +59,7 @@ import (
 	"github.com/talyvor/track/internal/team"
 	"github.com/talyvor/track/internal/template"
 	"github.com/talyvor/track/internal/timetracking"
+	"github.com/talyvor/track/internal/webhookdedup"
 	"github.com/talyvor/track/internal/workflow"
 	"github.com/talyvor/track/internal/workspace"
 	"github.com/talyvor/track/migrations"
@@ -252,7 +253,8 @@ func main() {
 	slackNotifier := automation.NewSlackNotifier()
 	automationEngine := automation.New(pool, issueStore, slackNotifier)
 	automationHandler := automation.NewHandler(automationEngine)
-	githubHandler := automation.NewGitHubHandler(automationEngine, issueStore, os.Getenv("TRACK_GITHUB_WEBHOOK_SECRET"))
+	githubHandler := automation.NewGitHubHandler(automationEngine, issueStore, os.Getenv("TRACK_GITHUB_WEBHOOK_SECRET")).
+		WithDeduper(webhookdedup.New(pool)) // SEC-7: durable X-GitHub-Delivery cross-delivery replay guard
 
 	// Adapter bridges the issue handler's string-typed automation
 	// interface to the engine's typed RuleTrigger.
