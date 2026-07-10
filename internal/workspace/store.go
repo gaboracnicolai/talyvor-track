@@ -219,6 +219,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 	}
 	argN++
 	args = append(args, id)
+	//nosemgrep: operate-by-id-write-requires-workspace-scope-sprintf -- self-scoping: id IS the authorized workspace (tenant root, from authz.WorkspaceID); there is no separate workspace_id column to add (mirrors this store's Delete nosemgrep).
 	sql := fmt.Sprintf(
 		`UPDATE workspaces SET %s, updated_at = NOW() WHERE id = $%d RETURNING %s`,
 		joinComma(setClauses), argN, workspaceColumns,

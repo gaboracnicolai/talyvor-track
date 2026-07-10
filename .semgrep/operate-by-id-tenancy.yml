@@ -30,9 +30,12 @@ rules:
                 metavariable: $SQL
                 regex: (?s).*workspace_id
     paths:
-      # SEC-5 CLOSED. The exclude list is EMPTY: this rule now ENFORCES on the ENTIRE by-id
-      # write surface (internal/) with no file carve-outs. Groups 1-4 scoped every user-facing
-      # by-id DELETE/UPDATE (AND workspace_id, or a workspace_id-bearing subquery join).
+      # SEC-5. Empty exclude for THIS rule — but note its scope: it matches only INLINE STRING LITERAL
+      # SQL (the $SQL metavariable binds a literal). It was BLIND to `sql := fmt.Sprintf(...); Exec(ctx,
+      # sql, ...)` — exactly how issue BulkUpdate's unscoped by-id write slipped past the "machine-proof"
+      # claim. The companion rule operate-by-id-write-requires-workspace-scope-sprintf (below) now covers
+      # the Sprintf-constructed case. So the "machine-proof over the whole by-id surface" claim holds only
+      # WITH both rules. Groups 1-4 scoped every user-facing by-id DELETE/UPDATE (AND workspace_id / join).
       #
       # The only remaining suppressions are three INLINE `nosemgrep` lines, each with a written
       # justification at the code, for by-id writes that are genuinely NOT workspace-membership
@@ -40,4 +43,31 @@ rules:
       #   - workspace/store.go Delete   — self-scoping: id IS the authorized workspace (tenant root)
       #   - guest/store.go invite-accept — token-scoped: id resolved from a secret bearer token
       #   - featureboard/store.go vote×2 — public board: assertPostOnPublicBoard-guarded, email-identified
+      exclude: []
+
+  - id: operate-by-id-write-requires-workspace-scope-sprintf
+    languages: [go]
+    severity: ERROR
+    message: >-
+      SEC-5 (Sprintf variant): a by-id DELETE/UPDATE whose SQL is built with fmt.Sprintf has NO
+      workspace_id in its FORMAT literal — the same operate-by-id cross-tenant IDOR class, but constructed
+      dynamically so the inline-literal rule above is BLIND to it (the $SQL metavariable binds the variable
+      name, not the format string). This is exactly how issue BulkUpdate slipped past the "empty exclude =
+      machine-proof" claim. Add "AND workspace_id = $n" to the format string and thread authz.WorkspaceID.
+    patterns:
+      - pattern: fmt.Sprintf($FMT, ...)
+      - metavariable-regex:
+          metavariable: $FMT
+          regex: (?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$
+      - pattern-not:
+          patterns:
+            - pattern: fmt.Sprintf($FMT, ...)
+            - metavariable-regex:
+                metavariable: $FMT
+                regex: (?s).*workspace_id
+    paths:
+      # Suppressed INLINE (nosemgrep + written reason) at the by-other-means-safe Sprintf sites — NOT a
+      # path glob — so a reviewer sees the justification in context:
+      #   - workspace/store.go Update — self-scoping: id IS the authorized workspace (tenant root); no
+      #     separate workspace_id column applies (mirrors the existing Delete nosemgrep in this file).
       exclude: []
