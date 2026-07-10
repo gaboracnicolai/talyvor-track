@@ -906,7 +906,10 @@ type BulkUpdateItem struct {
 // Mid-batch failures abort the whole transaction — the kanban UI
 // rolls back its optimistic state and refetches. Returns the total
 // rows affected.
-func (s *Store) BulkUpdate(ctx context.Context, updates []BulkUpdateItem) (int, error) {
+// BulkUpdate applies each patch scoped to workspaceID: the per-item WHERE carries `AND workspace_id`, so
+// an id belonging to another workspace matches 0 rows and is silently skipped (excluded from the count) —
+// NOT an error. Without this predicate a member of workspace A could flip any workspace's issues by id.
+func (s *Store) BulkUpdate(ctx context.Context, workspaceID string, updates []BulkUpdateItem) (int, error) {
 	if s.pool == nil {
 		return 0, errors.New("issue: store has no pool")
 	}
@@ -969,8 +972,12 @@ func (s *Store) BulkUpdate(ctx context.Context, updates []BulkUpdateItem) (int, 
 		args = append(args, now)
 		argN++
 		args = append(args, u.ID)
+		idArgN := argN
+		argN++
+		args = append(args, workspaceID)
 
-		sql := fmt.Sprintf(`UPDATE issues SET %s WHERE id = $%d`, strings.Join(set, ", "), argN)
+		// ITEM A: scope every by-id write to the caller's workspace — a foreign id matches 0 rows.
+		sql := fmt.Sprintf(`UPDATE issues SET %s WHERE id = $%d AND workspace_id = $%d`, strings.Join(set, ", "), idArgN, argN)
 		tag, err := tx.Exec(ctx, sql, args...)
 		if err != nil {
 			return 0, fmt.Errorf("issue: bulk update %s: %w", u.ID, err)

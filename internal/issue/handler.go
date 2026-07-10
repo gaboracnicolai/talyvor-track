@@ -523,7 +523,14 @@ func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 			"updates array exceeds max size")
 		return
 	}
-	count, err := h.store.BulkUpdate(r.Context(), in.Updates)
+	// ITEM A: scope the batch to the caller's verified workspace (mirrors the single Update handler),
+	// so a member of workspace A cannot flip another workspace's issues by id.
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	count, err := h.store.BulkUpdate(r.Context(), wsID, in.Updates)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "BULK_UPDATE_FAILED", err.Error())
 		return
