@@ -35,14 +35,30 @@ type issueLookup interface {
 	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
 }
 
+// deliveryDeduper claims a webhook delivery id exactly once. Claim returns true the FIRST time a given
+// (source, deliveryID) is seen and false on any repeat — the cross-delivery replay guard. Injected so the
+// handler stays free of a DB import; a nil deduper preserves the pre-SEC-7 behaviour (no cross-delivery
+// dedup). SEC-7: GitHub re-delivers (and an attacker can re-POST) an identically-signed body; without this,
+// each replay re-ran handlePullRequest (re-closing issues / re-firing automation).
+type deliveryDeduper interface {
+	Claim(ctx context.Context, source, deliveryID string) (claimed bool, err error)
+}
+
 type GitHubWebhookHandler struct {
-	engine *Engine
-	issues issueLookup
-	secret string
+	engine  *Engine
+	issues  issueLookup
+	secret  string
+	deduper deliveryDeduper
 }
 
 func NewGitHubHandler(engine *Engine, issues issueLookup, secret string) *GitHubWebhookHandler {
 	return &GitHubWebhookHandler{engine: engine, issues: issues, secret: secret}
+}
+
+// WithDeduper wires the durable X-GitHub-Delivery replay guard. Optional (nil = no cross-delivery dedup).
+func (h *GitHubWebhookHandler) WithDeduper(d deliveryDeduper) *GitHubWebhookHandler {
+	h.deduper = d
+	return h
 }
 
 func (h *GitHubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +76,26 @@ func (h *GitHubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if !verifyGitHubSignature(body, r.Header.Get("X-Hub-Signature-256"), h.secret) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
+	}
+
+	// SEC-7: cross-delivery replay guard (AFTER signature verify — only authentic deliveries are claimed).
+	// Claim X-GitHub-Delivery exactly once; a repeat (GitHub retry or an attacker re-POSTing the same
+	// signed body) is a 200 no-op so handlePullRequest's side effects run once. The handler's other `seen`
+	// map is intra-payload only. Fail OPEN on a store error — replay protection is hygiene, not a gate.
+	if h.deduper != nil {
+		if deliveryID := r.Header.Get("X-GitHub-Delivery"); deliveryID != "" {
+			claimed, derr := h.deduper.Claim(r.Context(), "github", deliveryID)
+			switch {
+			case derr != nil:
+				slog.Warn("automation: github delivery dedup claim failed; processing anyway",
+					slog.String("delivery", deliveryID), slog.String("err", derr.Error()))
+			case !claimed:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"ok":true,"deduped":true}`))
+				return
+			}
+		}
 	}
 
 	event := r.Header.Get("X-GitHub-Event")
