@@ -27,7 +27,9 @@ export class RealtimeClient {
   connect(): void {
     if (!this.workspaceId || !this.memberId) return;
     if (this.closed) return;
-    const url = `${BASE_WS}/v1/ws?workspace_id=${this.workspaceId}&member_id=${this.memberId}`;
+    // member_id is no longer sent: since #44 the server authorizes /v1/ws and derives the member from the
+    // gateway-verified context (query member_id was ignored/untrusted). workspace_id stays — it's the room.
+    const url = `${BASE_WS}/v1/ws?workspace_id=${this.workspaceId}`;
     this.ws = new WebSocket(url);
 
     this.ws.addEventListener("open", () => {
