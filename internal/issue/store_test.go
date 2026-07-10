@@ -260,14 +260,14 @@ func TestBulkUpdate_AppliesUpdatesAtomically(t *testing.T) {
 	// failure rolls everything back.
 	pool.ExpectBegin()
 	pool.ExpectExec(`UPDATE issues SET status`).
-		WithArgs("in_progress", float64(1.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1").
+		WithArgs("in_progress", float64(1.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE issues SET status`).
-		WithArgs("in_progress", float64(2.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-2").
+		WithArgs("in_progress", float64(2.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-2", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectCommit()
 
-	count, err := store.BulkUpdate(context.Background(), []BulkUpdateItem{
+	count, err := store.BulkUpdate(context.Background(), "ws-1", []BulkUpdateItem{
 		{ID: "i-1", Status: "in_progress", SortOrder: 1.5},
 		{ID: "i-2", Status: "in_progress", SortOrder: 2.5},
 	})
@@ -286,14 +286,14 @@ func TestBulkUpdate_RollsBackOnFailure(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectBegin()
 	pool.ExpectExec(`UPDATE issues SET status`).
-		WithArgs("done", float64(1.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1").
+		WithArgs("done", float64(1.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE issues SET status`).
-		WithArgs("done", float64(2.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-bad").
+		WithArgs("done", float64(2.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-bad", "ws-1").
 		WillReturnError(errors.New("constraint violation"))
 	pool.ExpectRollback()
 
-	_, err := store.BulkUpdate(context.Background(), []BulkUpdateItem{
+	_, err := store.BulkUpdate(context.Background(), "ws-1", []BulkUpdateItem{
 		{ID: "i-1", Status: "done", SortOrder: 1.0},
 		{ID: "i-bad", Status: "done", SortOrder: 2.0},
 	})
@@ -307,7 +307,7 @@ func TestBulkUpdate_RollsBackOnFailure(t *testing.T) {
 
 func TestBulkUpdate_EmptyInputReturnsZero(t *testing.T) {
 	store, _ := newMockStore(t)
-	count, err := store.BulkUpdate(context.Background(), nil)
+	count, err := store.BulkUpdate(context.Background(), "ws-1", nil)
 	if err != nil {
 		t.Fatalf("BulkUpdate(nil): %v", err)
 	}
@@ -323,11 +323,11 @@ func TestBulkUpdate_SortOrderOnly(t *testing.T) {
 	// The implementation should build a SET clause that skips the
 	// status column entirely.
 	pool.ExpectExec(`UPDATE issues SET sort_order`).
-		WithArgs(float64(3.5), pgxmock.AnyArg(), "i-1").
+		WithArgs(float64(3.5), pgxmock.AnyArg(), "i-1", "ws-1").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectCommit()
 
-	count, err := store.BulkUpdate(context.Background(), []BulkUpdateItem{
+	count, err := store.BulkUpdate(context.Background(), "ws-1", []BulkUpdateItem{
 		{ID: "i-1", SortOrder: 3.5},
 	})
 	if err != nil {
