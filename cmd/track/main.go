@@ -376,8 +376,9 @@ func main() {
 			strings.HasPrefix(p, "/v1/service/") || // service-authed endpoints (own bearer secret); e.g. member-sync
 			strings.HasPrefix(p, "/v1/public/") ||
 			strings.HasPrefix(p, "/v1/invite/") ||
-			strings.HasPrefix(p, "/v1/guest/") ||
-			p == "/v1/ws"
+			strings.HasPrefix(p, "/v1/guest/")
+		// NOTE: /v1/ws is intentionally NOT exempt — it must pass gwAuth+wsAuthz so ServeWS can authorize
+		// the requested workspace from the verified context (was an unauthenticated cross-tenant leak).
 	}
 	gwAuth := gatewayauth.Middleware(cfg.GatewayAuthSecret, gwExempt)
 	wsAuthz := authz.Middleware(authz.NewPGResolver(pool), gwExempt)

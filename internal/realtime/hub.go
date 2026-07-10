@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/talyvor/track/internal/authz"
 )
 
 // EventType enumerates the wire-level event names. Clients filter on
@@ -86,9 +87,9 @@ func newClient(id, workspaceID, memberID string, conn *websocket.Conn) *Client {
 // only goroutine touching the maps. That removes lock contention from
 // the hot broadcast path.
 type Hub struct {
-	mu         sync.RWMutex
-	clients    map[string]*Client            // clientID → client
-	rooms      map[string]map[string]*Client // roomID → clientID → client
+	mu      sync.RWMutex
+	clients map[string]*Client            // clientID → client
+	rooms   map[string]map[string]*Client // roomID → clientID → client
 
 	register   chan *Client
 	unregister chan *Client
@@ -326,11 +327,22 @@ var upgrader = websocket.Upgrader{
 // read+write pumps for that client. Returns immediately; lifecycle is
 // owned by the spawned goroutines + the hub's event loop.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	workspaceID := q.Get("workspace_id")
-	memberID := q.Get("member_id")
-	if workspaceID == "" || memberID == "" {
-		http.Error(w, "workspace_id and member_id query parameters required", http.StatusBadRequest)
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		http.Error(w, "workspace_id query parameter required", http.StatusBadRequest)
+		return
+	}
+	// B-Track: authorize the caller for the requested workspace and take member_id from the VERIFIED
+	// context (stamped by wsAuthz from the gateway proof), never from the query. Previously /v1/ws was
+	// gwExempt and trusted query workspace_id/member_id — GET /v1/ws?workspace_id=<victim> subscribed the
+	// socket to another tenant's live event stream. Fail-closed: no verified membership → 403, no upgrade.
+	if _, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID); !ok {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	memberID, ok := authz.MemberID(r.Context())
+	if !ok || memberID == "" {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
