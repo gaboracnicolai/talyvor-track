@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/talyvor/track/internal/model"
 	"github.com/talyvor/track/internal/notification"
@@ -21,6 +22,15 @@ import (
 // needs. Local interface keeps the package boundary clean.
 type notifier interface {
 	IssueUpdated(ctx context.Context, wsID, teamID, issueID, actorID string, changes map[string]any)
+}
+
+// deliveryDeduper claims a delivery id exactly once (SEC-7). Claim returns true
+// the FIRST time a (source, deliveryID) is seen and false on any repeat. Mirrors
+// the GitHub handler's guard; injected as an interface so this package stays free
+// of a DB import. A nil deduper preserves pre-SEC-7 behaviour (event_id dedup
+// skipped — the body-hash fallback still guards). *webhookdedup.Store satisfies it.
+type deliveryDeduper interface {
+	Claim(ctx context.Context, source, deliveryID string) (claimed bool, err error)
 }
 
 // issueLookup is the read side of internal/issue.Store the webhook
@@ -45,6 +55,11 @@ type WebhookHandler struct {
 	issues        issueLookup
 	notifications notificationCreator
 	notifier      notifier
+
+	// SEC-7 durable replay guard. Both optional so the handler is unchanged when
+	// unset (the body-hash dedup below still protects the path today).
+	deduper   deliveryDeduper // event_id dedup (reuse #49's webhookdedup.Store); nil = skip
+	freshness time.Duration   // reject alerts whose emitted_at is older than this; 0 = disabled
 }
 
 func NewWebhookHandler(secret string, issues issueLookup, notifications notificationCreator, notif notifier) *WebhookHandler {
@@ -56,6 +71,22 @@ func NewWebhookHandler(secret string, issues issueLookup, notifications notifica
 	}
 }
 
+// WithDeduper wires the durable event_id replay guard (SEC-7). Optional —
+// nil leaves the body-hash dedup as the sole guard (pre-emitter Lens). Mirrors
+// the GitHub handler's WithDeduper.
+func (h *WebhookHandler) WithDeduper(d deliveryDeduper) *WebhookHandler {
+	h.deduper = d
+	return h
+}
+
+// WithFreshness sets the max age for a spend alert's emitted_at (SEC-7). An alert
+// older than this is rejected. 0 (default) disables the check. Config-driven
+// (TRACK_LENS_WEBHOOK_FRESHNESS, default 5m).
+func (h *WebhookHandler) WithFreshness(d time.Duration) *WebhookHandler {
+	h.freshness = d
+	return h
+}
+
 // SpendAlertPayload is the documented body shape for Lens spend
 // alerts. New fields can be added without breaking older Track
 // receivers — JSON decode ignores unknowns by default.
@@ -65,6 +96,18 @@ type SpendAlertPayload struct {
 	Feature     string  `json:"feature"`
 	CostUSD     float64 `json:"cost_usd"`
 	Threshold   float64 `json:"threshold"`
+
+	// SEC-7 durable replay guard. OPTIONAL until the Lens emitter sends them; a
+	// missing value is accepted (the handler falls back to the body-hash dedup and
+	// logs), so the rollout is safe in either order.
+	//   EventID   — server-generated UUID, unique per emitted alert. Deduped via
+	//               webhookdedup.Store (source="lens"): catches byte-varied replays
+	//               the body-hash misses.
+	//   EmittedAt — RFC3339 UTC server clock. Rejected if older than the freshness
+	//               window (stops an ancient captured alert replayed after the
+	//               dedup key was pruned; the timestamp is signed, so unforgeable).
+	EventID   string `json:"event_id,omitempty"`
+	EmittedAt string `json:"emitted_at,omitempty"`
 }
 
 // ServeHTTP is the chi handler. Mount at POST /v1/lens/webhook.
@@ -107,8 +150,52 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 			return
 		}
-		// Idempotency key = hash of the exact signed body. A re-delivered event
-		// (identical bytes) maps to the same key and is recorded exactly once.
+		// SEC-7 FRESHNESS: reject an alert whose signed emitted_at is older than the
+		// window. A replayed capture carries its ORIGINAL emitted_at (any change
+		// breaks the HMAC), so this stops an ancient alert re-POSTed after its dedup
+		// key was pruned. Missing/unparseable emitted_at (an old Lens) → ACCEPT + log,
+		// so the rollout stays order-independent. `break` here exits the type switch,
+		// falling through to the 200 with NO side effects.
+		if h.freshness > 0 && payload.EmittedAt != "" {
+			if ts, perr := time.Parse(time.RFC3339, payload.EmittedAt); perr != nil {
+				slog.Warn("lensintegration: spend alert emitted_at unparseable — accepting (freshness skipped)",
+					slog.String("emitted_at", payload.EmittedAt), slog.String("feature", payload.Feature))
+			} else if age := time.Since(ts); age > h.freshness {
+				slog.Warn("lensintegration: spend alert REJECTED — stale emitted_at",
+					slog.Duration("age", age), slog.Duration("window", h.freshness),
+					slog.String("workspace_id", payload.WorkspaceID), slog.String("feature", payload.Feature))
+				break
+			}
+		} else if payload.EmittedAt == "" {
+			slog.Info("lensintegration: spend alert has no emitted_at — freshness skipped (pre-emitter Lens)",
+				slog.String("feature", payload.Feature))
+		}
+
+		// SEC-7 DURABLE DEDUP: claim the server-generated event_id exactly once,
+		// reusing #49's webhookdedup.Store (source="lens"). Catches byte-varied
+		// replays the body-hash misses. Missing event_id or nil deduper → fall back
+		// to the body-hash dedup below (log). A claim ERROR → proceed (the body-hash
+		// still guards) rather than drop a real alert. `break` on a repeat exits the
+		// type switch → 200, no side effects. NOTE: if/else-if (not switch) so break
+		// targets the outer type switch.
+		if payload.EventID != "" && h.deduper != nil {
+			claimed, cerr := h.deduper.Claim(r.Context(), "lens", payload.EventID)
+			if cerr != nil {
+				slog.Warn("lensintegration: event_id claim failed — proceeding (body-hash still guards)",
+					slog.String("event_id", payload.EventID), slog.String("err", cerr.Error()))
+			} else if !claimed {
+				slog.Info("lensintegration: spend alert DEDUPED on event_id (durable replay guard)",
+					slog.String("event_id", payload.EventID), slog.String("feature", payload.Feature))
+				break
+			}
+		} else if payload.EventID == "" {
+			slog.Info("lensintegration: spend alert has no event_id — body-hash fallback only (pre-emitter Lens)",
+				slog.String("feature", payload.Feature))
+		}
+
+		// Body-hash dedup (the KEPT fallback): idempotency key = hash of the exact
+		// signed body. An identical re-delivery maps to the same key and is recorded
+		// exactly once — this is what protects the path while no Lens sends event_id.
 		sum := sha256.Sum256(body)
 		eventKey := "lens-spend:" + hex.EncodeToString(sum[:])
 		if err := h.handleSpendAlert(r.Context(), payload, eventKey); err != nil {
@@ -144,9 +231,10 @@ func (h *WebhookHandler) handleSpendAlert(ctx context.Context, p SpendAlertPaylo
 
 	// Idempotent cost accumulation: RecordSpendEvent writes one ai_spend_events row per
 	// credited issue and accumulates atomically, keyed by eventKey — a re-delivered
-	// event adds nothing. Limitation: two genuinely-distinct events with byte-identical
-	// bodies collapse to one — errs toward UNDER-count, the safe direction for a cost
-	// number; the durable fix is a Lens-sent event_id.
+	// event adds nothing. This body-hash key is now the FALLBACK: SEC-7's durable
+	// event_id dedup (ServeHTTP, above) sits in front and catches byte-varied replays
+	// this can't. The residual byte-identical-distinct-events collapse errs toward
+	// UNDER-count (safe for a cost number) and only applies to alerts with no event_id.
 	if _, err := h.issues.RecordSpendEvent(ctx, eventKey, p.Feature, p.CostUSD, 0, p.WorkspaceID, "webhook"); err != nil {
 		slog.Warn("spend_alert: RecordSpendEvent failed",
 			slog.String("feature", p.Feature),
