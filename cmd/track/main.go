@@ -236,7 +236,9 @@ func main() {
 	// data is just absent.
 	lensClient := lensintegration.New(cfg.LensURL, cfg.LensAPIKey)
 	lensHandler := lensintegration.NewHandler(lensClient, issueStore)
-	lensWebhook := lensintegration.NewWebhookHandler(cfg.LensWebhookSecret, issueStore, notificationStore, notifier)
+	lensWebhook := lensintegration.NewWebhookHandler(cfg.LensWebhookSecret, issueStore, notificationStore, notifier).
+		WithDeduper(webhookdedup.New(pool)).    // SEC-7: durable Lens event_id cross-delivery replay guard
+		WithFreshness(cfg.LensWebhookFreshness) // SEC-7: reject spend alerts older than the window
 	if lensClient.IsConfigured() {
 		lensSyncer := lensintegration.NewSyncer(lensClient, issueStore, workspaceStore)
 		go lensSyncer.StartSync(ctx, 15*time.Minute)

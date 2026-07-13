@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -22,6 +23,12 @@ type Config struct {
 	LensURL           string
 	LensAPIKey        string
 	LensWebhookSecret string
+
+	// LensWebhookFreshness (SEC-7) is the max age of a Lens spend alert's signed
+	// emitted_at; an older alert is rejected by the webhook (a replay guard for
+	// captures re-POSTed after the dedup key was pruned). TRACK_LENS_WEBHOOK_FRESHNESS
+	// as a Go duration; default 5m. <=0 disables the check.
+	LensWebhookFreshness time.Duration
 
 	// GatewayAuthSecret is Track's copy of the edge gateway's transit-proof secret
 	// (edge-infra GATEWAY_AUTH_SECRET). The auth middleware constant-time-compares the
@@ -80,15 +87,16 @@ const MinGatewayAuthSecretLen = 16
 
 func Load() (*Config, error) {
 	c := &Config{
-		ListenAddr:        getEnv("TRACK_LISTEN_ADDR", "0.0.0.0:3000"),
-		DatabaseURL:       os.Getenv("TRACK_DATABASE_URL"),
-		LogLevel:          getEnv("TRACK_LOG_LEVEL", "info"),
-		LensURL:           os.Getenv("TRACK_LENS_URL"),
-		LensAPIKey:        os.Getenv("TRACK_LENS_API_KEY"),
-		LensWebhookSecret: os.Getenv("TRACK_LENS_WEBHOOK_SECRET"),
-		GatewayAuthSecret: os.Getenv("GATEWAY_AUTH_SECRET"),
-		HAEnabled:         parseBool(os.Getenv("TRACK_HA_ENABLED")),
-		RedisURL:          os.Getenv("TRACK_REDIS_URL"),
+		ListenAddr:           getEnv("TRACK_LISTEN_ADDR", "0.0.0.0:3000"),
+		DatabaseURL:          os.Getenv("TRACK_DATABASE_URL"),
+		LogLevel:             getEnv("TRACK_LOG_LEVEL", "info"),
+		LensURL:              os.Getenv("TRACK_LENS_URL"),
+		LensAPIKey:           os.Getenv("TRACK_LENS_API_KEY"),
+		LensWebhookSecret:    os.Getenv("TRACK_LENS_WEBHOOK_SECRET"),
+		GatewayAuthSecret:    os.Getenv("GATEWAY_AUTH_SECRET"),
+		HAEnabled:            parseBool(os.Getenv("TRACK_HA_ENABLED")),
+		RedisURL:             os.Getenv("TRACK_REDIS_URL"),
+		LensWebhookFreshness: getEnvDuration("TRACK_LENS_WEBHOOK_FRESHNESS", 5*time.Minute),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("%w: TRACK_DATABASE_URL", ErrMissingEnv)
@@ -125,6 +133,17 @@ var ErrMissingEnv = errors.New("missing required environment variable")
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// getEnvDuration parses a Go duration env var, falling back on unset OR invalid
+// (a bad value must not silently disable a security window — it takes the default).
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return fallback
 }
