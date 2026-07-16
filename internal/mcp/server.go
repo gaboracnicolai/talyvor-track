@@ -585,6 +585,27 @@ func (s *Server) workspaceForIssue(ctx context.Context, issueID, identifier stri
 	return iss.WorkspaceID, nil
 }
 
+// errIssueNotFound is the single, no-oracle reply for a read the caller may
+// not have: a missing issue and a foreign-workspace issue return the SAME
+// error, so a caller can't probe existence across tenants (403 ≡ 404).
+var errIssueNotFound = errors.New("issue not found")
+
+// scopeIssueToCaller enforces, at the handler, that a fetched issue belongs
+// to the caller's SERVER-AUTHORIZED workspace (authz.WorkspaceID — set by
+// the tools/call chokepoint, never a client field). Defense-in-depth: the
+// chokepoint already resolves the workspace from the issue for issue-keyed
+// tools, but a handler must not trust a single upstream guard — a future
+// refactor that changed the chokepoint would otherwise silently reopen a
+// cross-tenant read. A fetch error, a missing issue, or a workspace
+// mismatch all collapse to errIssueNotFound (no existence oracle).
+func (s *Server) scopeIssueToCaller(ctx context.Context, iss *model.Issue, fetchErr error) (*model.Issue, error) {
+	wsID, ok := authz.WorkspaceID(ctx)
+	if !ok || fetchErr != nil || iss == nil || iss.WorkspaceID != wsID {
+		return nil, errIssueNotFound
+	}
+	return iss, nil
+}
+
 // ─── tool 1: create_issue ───────────────────────────────────
 
 func (s *Server) toolCreateIssue(ctx context.Context, args json.RawMessage) (any, error) {
@@ -724,8 +745,11 @@ func (s *Server) toolGetIssue(ctx context.Context, args json.RawMessage) (any, e
 	} else {
 		out, err = s.issueStore.GetByIdentifier(ctx, in.Identifier)
 	}
+	// D11: scope the read to the caller's authorized workspace. A foreign
+	// or missing issue is indistinguishable (errIssueNotFound).
+	out, err = s.scopeIssueToCaller(ctx, out, err)
 	if err != nil {
-		return nil, fmt.Errorf("get_issue: %w", err)
+		return nil, err
 	}
 	return fullIssue(out), nil
 }
@@ -904,8 +928,12 @@ func (s *Server) toolTriageIssue(ctx context.Context, args json.RawMessage) (any
 		}, nil
 	}
 	iss, err := s.issueStore.GetByID(ctx, in.IssueID)
+	// D11: scope the read to the caller's authorized workspace BEFORE any
+	// LLM work — a foreign issue is rejected (errIssueNotFound), never
+	// triaged. A missing and a foreign issue are indistinguishable.
+	iss, err = s.scopeIssueToCaller(ctx, iss, err)
 	if err != nil {
-		return nil, fmt.Errorf("triage_issue: %w", err)
+		return nil, err
 	}
 	tri, err := s.aiEngine.TriageIssue(ctx, *iss)
 	if err != nil {

@@ -136,6 +136,27 @@ func TestMCPAuthz_IssueKeyed_DenyCrossWorkspace(t *testing.T) {
 	}
 }
 
+// TestMCPAuthz_TriageIssue_DenyCrossWorkspace — triage_issue is the tool D11 named. Like
+// get_issue it is issue-keyed, so the chokepoint resolves the issue_id to workspace B and
+// denies a member of A BEFORE dispatch (the handler never runs, the LLM is never invoked,
+// B's issue never leaks). The get_issue sibling above proves the class; this locks the tool
+// D11 called out specifically, so a refactor that moved triage out of the issue-keyed group
+// would fail here. (server.go's per-handler scopeIssueToCaller is the defense-in-depth
+// backstop, unit-tested in tenancy_scoping_test.go.)
+func TestMCPAuthz_TriageIssue_DenyCrossWorkspace(t *testing.T) {
+	d := testutil.New(t)
+	wsA, wsB := d.Workspace(t), d.Workspace(t)
+	teamB := d.Team(t, wsB.ID)
+	issueB := d.Issue(t, wsB.ID, teamB.ID)
+	seedMember(t, d, wsA.ID, "x@corp.com")
+
+	h := mcpChain(d)
+	_, resp := callTool(t, h, secret, "x@corp.com", "triage_issue", map[string]any{"issue_id": issueB.ID})
+	if resp.Error == nil {
+		t.Fatalf("member-of-A triage_issue on B's issue = ok, want DENY; result=%s", resp.Result)
+	}
+}
+
 // TestMCPAuthz_SprintStatus_DenyCrossWorkspaceTeam — get_sprint_status's GetActive has no
 // workspace filter; the chokepoint resolves the team to its workspace, so a member of A
 // passing B's team_id is denied (B's sprint never leaks).
