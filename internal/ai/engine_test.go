@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/model"
@@ -30,8 +31,20 @@ func (s *stubSearcher) Search(_ context.Context, _ string, _ string, _ int) ([]m
 // lensMock builds an httptest server that maps a request handler
 // per path. Each handler can inspect the request body to verify the
 // outbound shape (model, messages, headers).
+//
+// It ALWAYS serves the admin-gated mint endpoint (POST /v1/auth/token)
+// unless a test overrides it: every data-path call now mints a
+// per-workspace JWT first, so a mock that 404'd the mint endpoint would
+// make every proxy call fail closed. The default mint returns a token
+// encoding the request's workspace so tests may inspect the claim.
 func lensMock(t *testing.T, handlers map[string]http.HandlerFunc) *httptest.Server {
 	t.Helper()
+	if _, ok := handlers["/v1/auth/token"]; !ok {
+		if handlers == nil {
+			handlers = map[string]http.HandlerFunc{}
+		}
+		handlers["/v1/auth/token"] = defaultMintHandler
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h, ok := handlers[r.URL.Path]; ok {
 			h(w, r)
@@ -41,6 +54,23 @@ func lensMock(t *testing.T, handlers map[string]http.HandlerFunc) *httptest.Serv
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// defaultMintHandler issues a per-workspace JWT ("jwt.<ws>.<n>") with a
+// far-future expiry so the engine's provider treats it as fresh.
+func defaultMintHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WorkspaceID string `json:"workspace_id"`
+		TTLHours    int    `json:"ttl_hours"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	exp := time.Now().Add(time.Duration(body.TTLHours) * time.Hour)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"token":      "jwt." + body.WorkspaceID + ".1",
+		"expires_at": exp.Format(time.RFC3339Nano),
+	})
 }
 
 // anthropicResp wraps a text response in the Anthropic wire format
@@ -221,7 +251,7 @@ func TestSuggestSprintIssues_ReturnsRecommended(t *testing.T) {
 		{ID: "i-2", Title: "Feature 2", Priority: model.PriorityMedium},
 		{ID: "i-3", Title: "Bug 3", Priority: model.PriorityHigh},
 	}
-	got, err := engine.SuggestSprintIssues(context.Background(), "team-1", backlog, 14, 5)
+	got, err := engine.SuggestSprintIssues(context.Background(), "ws-1", "team-1", backlog, 14, 5)
 	if err != nil {
 		t.Fatalf("SuggestSprintIssues: %v", err)
 	}

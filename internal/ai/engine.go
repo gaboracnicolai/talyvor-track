@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/talyvor/track/internal/lenscreds"
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/model"
 )
@@ -36,10 +37,22 @@ import (
 // needs. Declared as an interface so tests can construct a tiny
 // stand-in instead of a real Client + httptest server (though the
 // real tests do spin up httptest for end-to-end coverage).
+//
+// It deliberately does NOT expose the raw API key: after per-workspace
+// metering, no data-path call may carry the shared key, so the engine
+// has no way to read it. The key is spent only inside the credential
+// provider, on the admin-gated mint endpoint.
 type lensAccess interface {
 	IsConfigured() bool
 	BaseURL() string
-	APIKey() string
+}
+
+// tokenProvider mints/caches a per-workspace Lens JWT. Every data-path
+// call authorizes with the token for its request's workspace, so Lens
+// meters, rate-limits, and attributes the call against that workspace
+// instead of collapsing all tenants onto the shared key.
+type tokenProvider interface {
+	TokenFor(ctx context.Context, workspaceID string) (string, error)
 }
 
 type pgxDB interface {
@@ -56,6 +69,7 @@ type fullTextSearcher interface {
 
 type Engine struct {
 	lens        lensAccess
+	creds       tokenProvider
 	issueSearch fullTextSearcher
 	pool        pgxDB
 	httpClient  *http.Client
@@ -82,12 +96,18 @@ func New(lensClient *lensintegration.Client, issueSearch fullTextSearcher, pool 
 	if pool != nil {
 		db = pool
 	}
-	return newEngine(lensClient, issueSearch, db)
+	// The provider mints per-workspace JWTs against the same Lens, using
+	// the shared key ONLY on the admin-gated mint endpoint. Standalone
+	// mode (empty URL/key) is fine — IsAvailable gates every call before
+	// the provider is ever reached.
+	creds := lenscreds.New(lensClient.BaseURL(), lensClient.APIKey())
+	return newEngine(lensClient, creds, issueSearch, db)
 }
 
-func newEngine(lens lensAccess, issueSearch fullTextSearcher, db pgxDB) *Engine {
+func newEngine(lens lensAccess, creds tokenProvider, issueSearch fullTextSearcher, db pgxDB) *Engine {
 	return &Engine{
 		lens:         lens,
+		creds:        creds,
 		issueSearch:  issueSearch,
 		pool:         db,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
@@ -109,10 +129,18 @@ func (e *Engine) IsAvailable() bool {
 // proxy and returns the raw assistant content. featureID is the
 // issue identifier or other Track feature label — Lens uses it as
 // the X-Talyvor-Feature value so the cost attributes back to the
-// right Track entity.
-func (e *Engine) callAnthropicViaLens(ctx context.Context, featureID, model, systemPrompt, userPrompt string, maxTokens int) (string, error) {
+// right Track entity. workspaceID selects the per-workspace JWT so
+// Lens meters/rate-limits/attributes the call against that tenant.
+func (e *Engine) callAnthropicViaLens(ctx context.Context, workspaceID, featureID, model, systemPrompt, userPrompt string, maxTokens int) (string, error) {
 	if !e.IsAvailable() {
 		return "", ErrAIUnavailable
+	}
+	// Fail closed: a mint failure errors the feature. We NEVER fall back
+	// to the shared key on a data path — that would re-collapse every
+	// tenant into Lens's empty-workspace bucket + "default" attribution.
+	token, err := e.creds.TokenFor(ctx, workspaceID)
+	if err != nil {
+		return "", fmt.Errorf("ai: mint workspace token: %w", err)
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model":      model,
@@ -129,7 +157,7 @@ func (e *Engine) callAnthropicViaLens(ctx context.Context, featureID, model, sys
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.lens.APIKey())
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Talyvor-Feature", featureID)
 
 	resp, err := e.httpClient.Do(req)
@@ -157,10 +185,16 @@ func (e *Engine) callAnthropicViaLens(ctx context.Context, featureID, model, sys
 }
 
 // callEmbeddingsViaLens POSTs to Lens's OpenAI proxy and returns the
-// embedding vector. featureID labels the cost for attribution.
-func (e *Engine) callEmbeddingsViaLens(ctx context.Context, featureID, text string) ([]float32, error) {
+// embedding vector. featureID labels the cost for attribution;
+// workspaceID selects the per-workspace JWT (never the shared key).
+func (e *Engine) callEmbeddingsViaLens(ctx context.Context, workspaceID, featureID, text string) ([]float32, error) {
 	if !e.IsAvailable() {
 		return nil, ErrAIUnavailable
+	}
+	// Fail closed on a mint failure — see callAnthropicViaLens.
+	token, err := e.creds.TokenFor(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("ai: mint workspace token: %w", err)
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model": "text-embedding-3-small",
@@ -173,7 +207,7 @@ func (e *Engine) callEmbeddingsViaLens(ctx context.Context, featureID, text stri
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.lens.APIKey())
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Talyvor-Feature", featureID)
 
 	resp, err := e.httpClient.Do(req)
@@ -231,7 +265,7 @@ func (e *Engine) TriageIssue(ctx context.Context, issue model.Issue) (*TriageRes
 		return nil, ErrAIUnavailable
 	}
 	user := issue.Title + "\n\n" + issue.Description
-	raw, err := e.callAnthropicViaLens(ctx, issue.Identifier, "claude-haiku-4-6", triageSystemPrompt, user, 512)
+	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, "claude-haiku-4-6", triageSystemPrompt, user, 512)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +318,7 @@ Return [] if no candidate describes the same problem.`
 	user := fmt.Sprintf("New issue:\n%s\n\n%s\n\nExisting issues:\n%s",
 		issue.Title, issue.Description, candidateList.String())
 
-	raw, err := e.callAnthropicViaLens(ctx, issue.Identifier, "claude-haiku-4-6", system, user, 1024)
+	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, "claude-haiku-4-6", system, user, 1024)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +400,7 @@ func (e *Engine) SummarizeThread(ctx context.Context, issue model.Issue, comment
 }`
 	user := "Issue: " + issue.Title + "\n\nThread:\n" + thread.String()
 
-	raw, err := e.callAnthropicViaLens(ctx, issue.Identifier, "claude-haiku-4-6", system, user, 1024)
+	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, "claude-haiku-4-6", system, user, 1024)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +446,7 @@ type SprintSuggestion struct {
 // SuggestSprintIssues picks a subset of the backlog suitable for the
 // next cycle. Uses Sonnet (not Haiku) — picking with attention to
 // priorities, dependencies, and team capacity needs real reasoning.
-func (e *Engine) SuggestSprintIssues(ctx context.Context, teamID string, backlog []model.Issue, cycleDays, teamSize int) (*SprintSuggestion, error) {
+func (e *Engine) SuggestSprintIssues(ctx context.Context, workspaceID, teamID string, backlog []model.Issue, cycleDays, teamSize int) (*SprintSuggestion, error) {
 	if !e.IsAvailable() {
 		return nil, ErrAIUnavailable
 	}
@@ -436,7 +470,7 @@ Return ONLY JSON:
 	user := fmt.Sprintf("Team size: %d\nCycle length: %d days\n\nBacklog:\n%s",
 		teamSize, cycleDays, backlogList.String())
 
-	raw, err := e.callAnthropicViaLens(ctx, "track-sprint-planning", "claude-sonnet-4-6", system, user, 2048)
+	raw, err := e.callAnthropicViaLens(ctx, workspaceID, "track-sprint-planning", "claude-sonnet-4-6", system, user, 2048)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +502,7 @@ func (e *Engine) SemanticSearch(ctx context.Context, workspaceID, query string, 
 		return e.fullTextFallback(ctx, workspaceID, query, limit)
 	}
 
-	vec, err := e.callEmbeddingsViaLens(ctx, "track-search", query)
+	vec, err := e.callEmbeddingsViaLens(ctx, workspaceID, "track-search", query)
 	if err != nil {
 		return e.fullTextFallback(ctx, workspaceID, query, limit)
 	}
@@ -549,7 +583,7 @@ func (e *Engine) IndexIssue(ctx context.Context, issue model.Issue) error {
 		return ErrAIUnavailable
 	}
 	text := issue.Title + " " + issue.Description
-	vec, err := e.callEmbeddingsViaLens(ctx, issue.Identifier, text)
+	vec, err := e.callEmbeddingsViaLens(ctx, issue.WorkspaceID, issue.Identifier, text)
 	if err != nil {
 		return err
 	}

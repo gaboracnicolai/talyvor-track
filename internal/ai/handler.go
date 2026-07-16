@@ -187,7 +187,7 @@ func (h *Handler) SuggestSprint(w http.ResponseWriter, r *http.Request) {
 		OrderBy:     "priority",
 		OrderDir:    "asc",
 	})
-	out, err := h.engine.SuggestSprintIssues(r.Context(), chi.URLParam(r, "teamID"), backlog, in.CycleDays, in.TeamSize)
+	out, err := h.engine.SuggestSprintIssues(r.Context(), wsID, chi.URLParam(r, "teamID"), backlog, in.CycleDays, in.TeamSize)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "AI_ERROR", err.Error())
 		return
