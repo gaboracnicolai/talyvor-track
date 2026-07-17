@@ -141,22 +141,24 @@ const relationColumns = `id, source_id, target_id, type, workspace_id, created_b
 // row. The inverse uses ON CONFLICT DO NOTHING so an existing inverse
 // (from an earlier create that crashed mid-way) is a no-op instead
 // of a hard failure.
-// assertIssuesShareWorkspace refuses unless both issues exist and share a workspace.
-// Object-graph integrity: a relation must never link issues across a workspace
-// boundary. EXISTS returns a plain bool (false if either issue is missing or they
-// differ), so there is no nullable-scan ambiguity.
-func (s *Store) assertIssuesShareWorkspace(ctx context.Context, aID, bID string) error {
+//
+// assertIssuesShareWorkspace refuses unless both issues exist AND are in workspaceID (the
+// caller's SERVER-authorized workspace). The JOIN already forces a.workspace_id =
+// b.workspace_id, so binding a.workspace_id = $3 pins BOTH into workspaceID — a member of one
+// workspace can no longer link two issues that merely co-reside in a DIFFERENT (foreign)
+// workspace. A missing issue or a foreign pair both yield ok=false (no existence oracle).
+func (s *Store) assertIssuesShareWorkspace(ctx context.Context, aID, bID, workspaceID string) error {
 	var ok bool
 	if err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(
             SELECT 1 FROM issues a JOIN issues b ON a.workspace_id = b.workspace_id
-            WHERE a.id = $1 AND b.id = $2)`,
-		aID, bID,
+            WHERE a.id = $1 AND b.id = $2 AND a.workspace_id = $3)`,
+		aID, bID, workspaceID,
 	).Scan(&ok); err != nil {
 		return fmt.Errorf("dependency: workspace check: %w", err)
 	}
 	if !ok {
-		return errors.New("dependency: source and target issues are in different workspaces (or missing)")
+		return errors.New("dependency: source or target issue is not in this workspace (or missing)")
 	}
 	return nil
 }
@@ -236,7 +238,7 @@ func (s *Store) Create(ctx context.Context, r Relation) (*Relation, error) {
 		return nil, fmt.Errorf("dependency: relation already exists")
 	}
 
-	if err := s.assertIssuesShareWorkspace(ctx, r.SourceID, r.TargetID); err != nil {
+	if err := s.assertIssuesShareWorkspace(ctx, r.SourceID, r.TargetID, r.WorkspaceID); err != nil {
 		return nil, err
 	}
 
@@ -775,22 +777,31 @@ func (s *Store) BulkCreateRelations(ctx context.Context, rel Relation, targets [
 		}
 	}
 
-	// Object-graph integrity: every target must share the source issue's workspace.
-	// A missing source (NULL subquery) or any cross-workspace/absent target counts
-	// as "bad" and refuses the whole batch.
+	// SEC-5 (tenancy): the source AND every target must be in the caller's SERVER-authorized
+	// workspace (rel.WorkspaceID). Binding targets to the *source's own* workspace (and never
+	// checking the source against the caller's workspace) let a member of one workspace forge
+	// relations among a DIFFERENT workspace's issues — the cross-tenant write this closes.
+	var srcInWS bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
+		rel.SourceID, rel.WorkspaceID,
+	).Scan(&srcInWS); err != nil {
+		return 0, fmt.Errorf("dependency: bulk source check: %w", err)
+	}
+	if !srcInWS {
+		return 0, errors.New("dependency: source issue is not in this workspace (or missing)")
+	}
 	var badTargets int64
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM UNNEST($1::text[]) AS t
         WHERE NOT EXISTS (
-            SELECT 1 FROM issues i
-            WHERE i.id = t
-              AND i.workspace_id = (SELECT workspace_id FROM issues WHERE id = $2))`,
-		targets, rel.SourceID,
+            SELECT 1 FROM issues i WHERE i.id = t AND i.workspace_id = $2)`,
+		targets, rel.WorkspaceID,
 	).Scan(&badTargets); err != nil {
 		return 0, fmt.Errorf("dependency: bulk workspace check: %w", err)
 	}
 	if badTargets > 0 {
-		return 0, errors.New("dependency: one or more targets are in a different workspace or do not exist")
+		return 0, errors.New("dependency: one or more targets are not in this workspace or do not exist")
 	}
 
 	// Cycle detection per target: a blocks-family bulk insert must not close a

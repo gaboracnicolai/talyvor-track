@@ -56,8 +56,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	in.TeamID = chi.URLParam(r, "teamID")
-	out, err := h.engine.CreateStatus(r.Context(), in)
+	// SEC-5 (tenancy): scope the write to the caller's authorized workspace — a status on a
+	// team in another workspace is refused (ErrNotFound → 404, no-oracle), never written.
+	out, err := h.engine.CreateStatus(r.Context(), in, wsID)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return
