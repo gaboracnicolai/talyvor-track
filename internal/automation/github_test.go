@@ -34,7 +34,7 @@ func (f *fakeIssueLookup) Update(_ context.Context, _, _ string, updates map[str
 	f.updates = append(f.updates, updates)
 	return &model.Issue{ID: "i-1"}, nil
 }
-func (f *fakeIssueLookup) CreateComment(_ context.Context, c model.Comment) (*model.Comment, error) {
+func (f *fakeIssueLookup) CreateComment(_ context.Context, c model.Comment, _ string) (*model.Comment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.comments = append(f.comments, c)

@@ -54,7 +54,7 @@ func (f *fakeIssueStore) Update(ctx context.Context, id, workspaceID string, upd
 func (f *fakeIssueStore) Search(ctx context.Context, ws, q string, limit int) ([]model.Issue, error) {
 	return f.searchFn(ctx, ws, q, limit)
 }
-func (f *fakeIssueStore) CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error) {
+func (f *fakeIssueStore) CreateComment(ctx context.Context, c model.Comment, _ string) (*model.Comment, error) {
 	return f.createCommentFn(ctx, c)
 }
 

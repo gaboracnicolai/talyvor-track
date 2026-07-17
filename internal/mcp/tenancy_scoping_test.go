@@ -57,7 +57,7 @@ func (f *scopingIssueStore) Update(context.Context, string, string, map[string]a
 func (f *scopingIssueStore) Search(context.Context, string, string, int) ([]model.Issue, error) {
 	return nil, nil
 }
-func (f *scopingIssueStore) CreateComment(context.Context, model.Comment) (*model.Comment, error) {
+func (f *scopingIssueStore) CreateComment(context.Context, model.Comment, string) (*model.Comment, error) {
 	return nil, errors.New("unused")
 }
 

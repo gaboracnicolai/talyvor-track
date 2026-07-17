@@ -32,7 +32,7 @@ var identifierRE = regexp.MustCompile(`(#?\d+|[A-Z]+-\d+)`)
 type issueLookup interface {
 	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
 	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
-	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
+	CreateComment(ctx context.Context, c model.Comment, workspaceID string) (*model.Comment, error)
 }
 
 // deliveryDeduper claims a webhook delivery id exactly once. Claim returns true the FIRST time a given
@@ -164,7 +164,7 @@ func (h *GitHubWebhookHandler) handleMerged(ctx context.Context, refs []string, 
 			IssueID:  iss.ID,
 			AuthorID: "github-automation",
 			Body:     fmt.Sprintf("Closed by PR #%d: %s", pl.PullRequest.Number, pl.PullRequest.Title),
-		})
+		}, iss.WorkspaceID)
 		if h.engine != nil {
 			_ = h.engine.Fire(ctx, TriggerPRMerged, iss.WorkspaceID, *iss, nil)
 		}
@@ -181,7 +181,7 @@ func (h *GitHubWebhookHandler) handleOpened(ctx context.Context, refs []string, 
 			IssueID:  iss.ID,
 			AuthorID: "github-automation",
 			Body:     fmt.Sprintf("PR #%d opened: %s", pl.PullRequest.Number, pl.PullRequest.Title),
-		})
+		}, iss.WorkspaceID)
 		if h.engine != nil {
 			_ = h.engine.Fire(ctx, TriggerPROpened, iss.WorkspaceID, *iss, nil)
 		}

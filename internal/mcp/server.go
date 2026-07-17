@@ -65,7 +65,7 @@ type issueStoreIface interface {
 	List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error)
 	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	Search(ctx context.Context, workspaceID, query string, limit int) ([]model.Issue, error)
-	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
+	CreateComment(ctx context.Context, c model.Comment, workspaceID string) (*model.Comment, error)
 }
 
 type projectStoreIface interface {
@@ -844,11 +844,15 @@ func (s *Server) toolAddComment(ctx context.Context, args json.RawMessage) (any,
 	// The comment author is the resolved, gateway-verified member — never a caller-supplied
 	// author_id (that would let an agent spoof authorship). The author_id argument is ignored.
 	in.AuthorID, _ = authz.MemberID(ctx)
+	// D11 class (defense-in-depth): scope the write to the caller's server-authorized workspace
+	// (set by the tools/call chokepoint). The store refuses a comment on a foreign issue —
+	// the handler no longer relies solely on the chokepoint's ws-from-issue resolution.
+	wsID, _ := authz.WorkspaceID(ctx)
 	out, err := s.issueStore.CreateComment(ctx, model.Comment{
 		IssueID:  in.IssueID,
 		Body:     in.Body,
 		AuthorID: in.AuthorID,
-	})
+	}, wsID)
 	if err != nil {
 		return nil, fmt.Errorf("add_comment: %w", err)
 	}
