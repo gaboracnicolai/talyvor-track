@@ -114,7 +114,12 @@ func (e *Engine) GetStatuses(ctx context.Context, teamID string) ([]WorkflowStat
 	return out, nil
 }
 
-func (e *Engine) CreateStatus(ctx context.Context, status WorkflowStatus) (*WorkflowStatus, error) {
+// CreateStatus adds a status to a team. SEC-5 (tenancy): the write lands ONLY if the team
+// is in the caller's SERVER-authorized workspace. workflow_statuses has no workspace_id
+// column (scope via the teams parent), so the INSERT is gated by an EXISTS on
+// teams(id, workspace_id) — a foreign or missing team inserts 0 rows → ErrNotFound
+// (403 ≡ 404, no existence oracle), mirroring UpdateStatus/DeleteStatus.
+func (e *Engine) CreateStatus(ctx context.Context, status WorkflowStatus, workspaceID string) (*WorkflowStatus, error) {
 	if status.TeamID == "" || status.Name == "" {
 		return nil, errors.New("workflow: TeamID and Name required")
 	}
@@ -126,9 +131,14 @@ func (e *Engine) CreateStatus(ctx context.Context, status WorkflowStatus) (*Work
 	}
 	created, err := scanStatus(e.pool.QueryRow(ctx,
 		`INSERT INTO workflow_statuses (team_id, name, color, category, position, is_default)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+statusColumns,
-		status.TeamID, status.Name, status.Color, string(status.Category), status.Position, status.IsDefault,
+        SELECT $1, $2, $3, $4, $5, $6
+        WHERE EXISTS (SELECT 1 FROM teams WHERE id = $1 AND workspace_id = $7)
+        RETURNING `+statusColumns,
+		status.TeamID, status.Name, status.Color, string(status.Category), status.Position, status.IsDefault, workspaceID,
 	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}

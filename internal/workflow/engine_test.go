@@ -84,7 +84,7 @@ func TestSeedDefaults_CreatesSixStatuses(t *testing.T) {
 func TestCreateStatus_AddsToTeam(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	pool.ExpectQuery(`INSERT INTO workflow_statuses`).
-		WithArgs("team-1", "Blocked", "#ef4444", "unstarted", 99, false).
+		WithArgs("team-1", "Blocked", "#ef4444", "unstarted", 99, false, "ws-1").
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "team_id", "name", "color", "category", "position", "is_default",
 		}).AddRow("s-new", "team-1", "Blocked", "#ef4444", "unstarted", 99, false))
@@ -92,7 +92,7 @@ func TestCreateStatus_AddsToTeam(t *testing.T) {
 	out, err := engine.CreateStatus(context.Background(), WorkflowStatus{
 		TeamID: "team-1", Name: "Blocked", Color: "#ef4444",
 		Category: CategoryUnstarted, Position: 99,
-	})
+	}, "ws-1")
 	if err != nil {
 		t.Fatalf("CreateStatus: %v", err)
 	}
