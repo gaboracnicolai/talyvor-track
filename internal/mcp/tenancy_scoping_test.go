@@ -29,7 +29,13 @@ import (
 type scopingIssueStore struct {
 	byID         map[string]*model.Issue
 	byIdentifier map[string]*model.Issue
+	commentCalls []commentCall // records (issueID, workspaceID) passed to CreateComment
 }
+
+// commentCall records one CreateComment invocation so a test can prove the
+// handler passed the SERVER-authorized workspace (not the issue's, not a
+// client field).
+type commentCall struct{ issueID, workspaceID string }
 
 func (f *scopingIssueStore) GetByID(_ context.Context, id string) (*model.Issue, error) {
 	if iss, ok := f.byID[id]; ok {
@@ -57,8 +63,15 @@ func (f *scopingIssueStore) Update(context.Context, string, string, map[string]a
 func (f *scopingIssueStore) Search(context.Context, string, string, int) ([]model.Issue, error) {
 	return nil, nil
 }
-func (f *scopingIssueStore) CreateComment(context.Context, model.Comment, string) (*model.Comment, error) {
-	return nil, errors.New("unused")
+// CreateComment models the real store's tenancy scoping: the comment lands
+// only if its issue is in the passed workspaceID, else issue.ErrNotFound.
+func (f *scopingIssueStore) CreateComment(_ context.Context, c model.Comment, workspaceID string) (*model.Comment, error) {
+	f.commentCalls = append(f.commentCalls, commentCall{c.IssueID, workspaceID})
+	iss, ok := f.byID[c.IssueID]
+	if !ok || iss.WorkspaceID != workspaceID {
+		return nil, issue.ErrNotFound
+	}
+	return &model.Comment{ID: "c-1", IssueID: c.IssueID, AuthorID: c.AuthorID, Body: c.Body}, nil
 }
 
 // scopingAI is an available AI engine that RECORDS whether it was asked to
@@ -143,6 +156,36 @@ func TestToolTriageIssue_RejectsForeignWorkspace(t *testing.T) {
 	}
 	if out != nil {
 		t.Errorf("rejected triage_issue must return nil result; got %+v", out)
+	}
+}
+
+// ── add_comment (D11 class, defense-in-depth) ────────────────────────────
+
+func TestToolAddComment_RejectsForeignWorkspace(t *testing.T) {
+	issB := &model.Issue{ID: "iss-B", WorkspaceID: "ws-B", Title: "B"}
+	is := &scopingIssueStore{byID: map[string]*model.Issue{"iss-B": issB}}
+	s := newScopingServer(is, &scopingAI{})
+
+	out, err := s.toolAddComment(authorizedFor("ws-A"),
+		mustJSON(t, map[string]any{"issue_id": "iss-B", "body": "cross-tenant"}))
+	if err == nil {
+		t.Fatalf("add_comment on a FOREIGN issue must be refused; got %+v", out)
+	}
+	// The handler must scope to the SERVER-authorized workspace (ws-A) — never
+	// the issue's ws, never a client field. The store then refuses the write.
+	if len(is.commentCalls) != 1 || is.commentCalls[0].workspaceID != "ws-A" {
+		t.Errorf("toolAddComment must pass the authorized workspace ws-A to CreateComment; got %+v", is.commentCalls)
+	}
+}
+
+func TestToolAddComment_AllowsSameWorkspace(t *testing.T) {
+	issA := &model.Issue{ID: "iss-A", WorkspaceID: "ws-A", Title: "A"}
+	is := &scopingIssueStore{byID: map[string]*model.Issue{"iss-A": issA}}
+	s := newScopingServer(is, &scopingAI{})
+
+	if _, err := s.toolAddComment(authorizedFor("ws-A"),
+		mustJSON(t, map[string]any{"issue_id": "iss-A", "body": "ok"})); err != nil {
+		t.Fatalf("same-workspace add_comment must succeed; got %v", err)
 	}
 }
 
