@@ -30,7 +30,7 @@ func TestCreate_BlocksCreatesInverseBlockedBy(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	// Same-workspace guard: both issues resolve to the same workspace.
 	pool.ExpectQuery(`SELECT EXISTS`).
-		WithArgs("a", "b").
+		WithArgs("a", "b", "ws").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	// Cycle check: blocked (b) does not already reach blocker (a).
 	pool.ExpectQuery(`WITH RECURSIVE reachable`).
@@ -67,7 +67,7 @@ func TestCreate_DuplicatesCreatesInverseDuplicates(t *testing.T) {
 		WithArgs("a", "b", "duplicates").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	pool.ExpectQuery(`SELECT EXISTS`).
-		WithArgs("a", "b").
+		WithArgs("a", "b", "ws").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_relations`).
 		WithArgs("a", "b", "duplicates", "ws", "").
@@ -93,7 +93,7 @@ func TestCreate_RelatesToHasNoInverse(t *testing.T) {
 		WithArgs("a", "b", "relates_to").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	pool.ExpectQuery(`SELECT EXISTS`).
-		WithArgs("a", "b").
+		WithArgs("a", "b", "ws").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`INSERT INTO issue_relations`).
 		WithArgs("a", "b", "relates_to", "ws", "").
@@ -443,8 +443,13 @@ func TestBulkCreateRelations_SkipsDuplicates(t *testing.T) {
 	// Three target IDs. INSERT with ON CONFLICT DO NOTHING returns
 	// 2 inserted (one was a duplicate); the store reads the row
 	// count via tag.RowsAffected().
+	// SEC-5: source must be in the caller's authorized workspace (new source check), then
+	// every target must be in that same workspace (badTargets now binds to rel.WorkspaceID).
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("src", "ws").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM UNNEST`).
-		WithArgs([]string{"t-1", "t-2", "t-3"}, "src").
+		WithArgs([]string{"t-1", "t-2", "t-3"}, "ws").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	pool.ExpectExec(`INSERT INTO issue_relations`).
 		WithArgs("src", []string{"t-1", "t-2", "t-3"}, "ws", "relates_to", "agent").
