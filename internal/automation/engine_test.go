@@ -33,7 +33,7 @@ func (f *fakeIssueUpdater) Create(_ context.Context, issue model.Issue) (*model.
 	issue.ID = "child-1"
 	return &issue, nil
 }
-func (f *fakeIssueUpdater) CreateComment(_ context.Context, c model.Comment) (*model.Comment, error) {
+func (f *fakeIssueUpdater) CreateComment(_ context.Context, c model.Comment, _ string) (*model.Comment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.comments = append(f.comments, c)

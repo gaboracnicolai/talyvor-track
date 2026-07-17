@@ -24,15 +24,28 @@ func scanComment(s interface{ Scan(...any) error }) (*model.Comment, error) {
 // CreateComment appends a comment to an issue. AuthorID is the
 // member's ID; comments are NEVER soft-deleted (unlike issues) —
 // users can delete their own comments outright.
-func (s *Store) CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error) {
+//
+// SEC (tenancy): the comment lands ONLY if its parent issue is in the
+// caller's SERVER-authorized workspace. comments carry no workspace_id
+// column (by design — scope via the parent issue), so the INSERT is
+// gated by an EXISTS on issues(id, workspace_id): a foreign or
+// nonexistent issue inserts 0 rows → ErrNotFound (403 ≡ 404, no
+// existence oracle), mirroring ListComments/UpdateComment/DeleteComment.
+func (s *Store) CreateComment(ctx context.Context, c model.Comment, workspaceID string) (*model.Comment, error) {
 	if c.IssueID == "" || c.AuthorID == "" || c.Body == "" {
 		return nil, errors.New("comment: IssueID, AuthorID, and Body required")
 	}
-	return scanComment(s.pool.QueryRow(ctx,
+	out, err := scanComment(s.pool.QueryRow(ctx,
 		`INSERT INTO comments (issue_id, author_id, body)
-        VALUES ($1, $2, $3) RETURNING `+commentColumns,
-		c.IssueID, c.AuthorID, c.Body,
+        SELECT $1, $2, $3
+        WHERE EXISTS (SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $4)
+        RETURNING `+commentColumns,
+		c.IssueID, c.AuthorID, c.Body, workspaceID,
 	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return out, err
 }
 
 // ListComments returns every comment for an issue, oldest first.

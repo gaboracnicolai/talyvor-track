@@ -92,7 +92,7 @@ type pgxDB interface {
 type issueUpdater interface {
 	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	Create(ctx context.Context, issue model.Issue) (*model.Issue, error)
-	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
+	CreateComment(ctx context.Context, c model.Comment, workspaceID string) (*model.Comment, error)
 }
 
 type slackSender interface {

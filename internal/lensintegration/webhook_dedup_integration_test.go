@@ -53,6 +53,38 @@ func TestWebhook_EventIDDedup_ByteVariedReplay_Integration(t *testing.T) {
 	}
 }
 
+// (a2) COMPLETENESS: two DISTINCT fresh event_ids must BOTH land. The durable
+// dedup is keyed per event_id (webhookdedup source="lens"), NOT a global
+// "seen one, reject the rest" — an over-rejecting dedup would pass (a) (which
+// replays a single id) but silently drop every subsequent distinct alert. This
+// is the "a fresh new alert is accepted" half of the SEC-7 proof.
+func TestWebhook_DistinctEventIDs_BothLand_Integration(t *testing.T) {
+	d := testutil.New(t)
+	ctx := context.Background()
+	issues := &recordingIssueLookup{}
+	wh := NewWebhookHandler(dedupSecret, issues, &recordingNotifications{}, &recordingNotifier{}).
+		WithDeduper(webhookdedup.New(d.Pool)).
+		WithFreshness(5 * time.Minute)
+
+	bodyA := []byte(`{"type":"spend_alert","workspace_id":"ws-1","feature":"ENG-1","cost_usd":1.0,"threshold":0.5,"event_id":"evt-fresh-a","emitted_at":"` + freshTS() + `"}`)
+	bodyB := []byte(`{"type":"spend_alert","workspace_id":"ws-1","feature":"ENG-2","cost_usd":1.0,"threshold":0.5,"event_id":"evt-fresh-b","emitted_at":"` + freshTS() + `"}`)
+
+	wh.ServeHTTP(httptest.NewRecorder(), signedRequest(t, dedupSecret, bodyA))
+	wh.ServeHTTP(httptest.NewRecorder(), signedRequest(t, dedupSecret, bodyB))
+
+	if issues.costCalls != 2 {
+		t.Fatalf("RecordSpendEvent calls = %d, want 2 — two DISTINCT fresh event_ids must BOTH land (dedup keyed per event_id, not over-rejecting)", issues.costCalls)
+	}
+	var n int
+	if err := d.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM webhook_deliveries WHERE source='lens' AND delivery_id IN ('evt-fresh-a','evt-fresh-b')`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("webhook_deliveries rows = %d, want 2 — each distinct event_id claimed exactly once", n)
+	}
+}
+
 // (b) RED: an alert whose emitted_at is older than the freshness window. Today:
 // processed. After: rejected (no side effects), still 200 so Lens doesn't retry.
 func TestWebhook_FreshnessWindow_RejectsStale_Integration(t *testing.T) {

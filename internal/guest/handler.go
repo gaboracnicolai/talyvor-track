@@ -22,7 +22,7 @@ import (
 type issueReader interface {
 	List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error)
 	GetByID(ctx context.Context, id string) (*model.Issue, error)
-	CreateComment(ctx context.Context, c model.Comment) (*model.Comment, error)
+	CreateComment(ctx context.Context, c model.Comment, workspaceID string) (*model.Comment, error)
 }
 
 type Handler struct {
@@ -125,7 +125,7 @@ func (h *Handler) GuestCreateComment(w http.ResponseWriter, r *http.Request) {
 		IssueID:  id,
 		AuthorID: claims.GuestID,
 		Body:     in.Body,
-	})
+	}, wsID)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return

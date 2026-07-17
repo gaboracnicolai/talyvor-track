@@ -385,7 +385,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// SEC-5 (identity): the author is ALWAYS the verified session member — a supplied author_id
 	// is ignored, so no caller can attribute a comment to another member (SEC-4 forged-actor class).
 	in.AuthorID = actorID
-	out, err := h.store.CreateComment(r.Context(), in)
+	// SEC-5 (tenancy): scope the write to the caller's authorized workspace — a comment on a
+	// foreign issue is refused (ErrNotFound → 404, no-oracle), never written cross-tenant.
+	out, err := h.store.CreateComment(r.Context(), in, wsID)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
 		return

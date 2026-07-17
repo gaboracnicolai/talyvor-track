@@ -184,14 +184,20 @@ func (d *DB) Issue(t *testing.T, workspaceID, teamID string) *model.Issue {
 	return iss
 }
 
-// Comment seeds a comment on issueID and returns it.
+// Comment seeds a comment on issueID and returns it. The parent issue's
+// workspace is resolved here so the scoped CreateComment accepts the write.
 func (d *DB) Comment(t *testing.T, issueID, body string) *model.Comment {
 	t.Helper()
+	var wsID string
+	if err := d.Pool.QueryRow(context.Background(),
+		`SELECT workspace_id FROM issues WHERE id=$1`, issueID).Scan(&wsID); err != nil {
+		t.Fatalf("testutil: resolve issue workspace: %v", err)
+	}
 	c, err := issue.NewStore(d.Pool).CreateComment(context.Background(), model.Comment{
 		IssueID:  issueID,
 		AuthorID: "author-" + d.token(),
 		Body:     body,
-	})
+	}, wsID)
 	if err != nil {
 		t.Fatalf("testutil: seed comment: %v", err)
 	}
