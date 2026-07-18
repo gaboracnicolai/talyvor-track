@@ -30,6 +30,7 @@ type scopingIssueStore struct {
 	byID         map[string]*model.Issue
 	byIdentifier map[string]*model.Issue
 	commentCalls []commentCall // records (issueID, workspaceID) passed to CreateComment
+	updateCalls  int           // counts Update calls — proves a foreign write is rejected BEFORE the store
 }
 
 // commentCall records one CreateComment invocation so a test can prove the
@@ -57,8 +58,12 @@ func (f *scopingIssueStore) Create(context.Context, model.Issue) (*model.Issue, 
 func (f *scopingIssueStore) List(context.Context, issue.IssueFilter) ([]model.Issue, error) {
 	return nil, nil
 }
-func (f *scopingIssueStore) Update(context.Context, string, string, map[string]any) (*model.Issue, error) {
-	return nil, errors.New("unused")
+func (f *scopingIssueStore) Update(_ context.Context, id, workspaceID string, _ map[string]any) (*model.Issue, error) {
+	f.updateCalls++
+	if iss, ok := f.byID[id]; ok {
+		return iss, nil
+	}
+	return &model.Issue{ID: id, WorkspaceID: workspaceID}, nil
 }
 func (f *scopingIssueStore) Search(context.Context, string, string, int) ([]model.Issue, error) {
 	return nil, nil
@@ -204,5 +209,67 @@ func TestToolTriageIssue_AllowsSameWorkspace(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("same-workspace triage returned nil")
+	}
+}
+
+// ── update_issue / move_to_cycle (D11 class, Phase B defense-in-depth) ──────
+// These handlers were already store-scoped via Update(id, wsID); the added
+// scopeIssueToCaller pre-check rejects a foreign issue at the HANDLER, before the
+// write is ever attempted. The fake records Update calls, so the test proves the
+// rejection happens BEFORE the store (teeth: remove scopeIssueToCaller → Update runs).
+
+func TestToolUpdateIssue_RejectsForeignWorkspace(t *testing.T) {
+	issB := &model.Issue{ID: "iss-B", WorkspaceID: "ws-B", Title: "B"}
+	is := &scopingIssueStore{byID: map[string]*model.Issue{"iss-B": issB}}
+	s := newScopingServer(is, &scopingAI{})
+
+	if _, err := s.toolUpdateIssue(authorizedFor("ws-A"),
+		mustJSON(t, map[string]any{"issue_id": "iss-B", "title": "hijack"})); err == nil {
+		t.Fatal("update_issue on a FOREIGN-workspace issue must be refused")
+	}
+	if is.updateCalls != 0 {
+		t.Errorf("Update must NOT be reached for a foreign issue; updateCalls=%d", is.updateCalls)
+	}
+}
+
+func TestToolUpdateIssue_AllowsSameWorkspace(t *testing.T) {
+	issA := &model.Issue{ID: "iss-A", WorkspaceID: "ws-A", Title: "A"}
+	is := &scopingIssueStore{byID: map[string]*model.Issue{"iss-A": issA}}
+	s := newScopingServer(is, &scopingAI{})
+
+	if _, err := s.toolUpdateIssue(authorizedFor("ws-A"),
+		mustJSON(t, map[string]any{"issue_id": "iss-A", "title": "ok"})); err != nil {
+		t.Fatalf("same-workspace update_issue must succeed; got %v", err)
+	}
+	if is.updateCalls != 1 {
+		t.Errorf("same-workspace update must reach Update once; got %d", is.updateCalls)
+	}
+}
+
+func TestToolMoveToCycle_RejectsForeignWorkspace(t *testing.T) {
+	issB := &model.Issue{ID: "iss-B", WorkspaceID: "ws-B"}
+	is := &scopingIssueStore{byID: map[string]*model.Issue{"iss-B": issB}}
+	s := newScopingServer(is, &scopingAI{})
+
+	if _, err := s.toolMoveToCycle(authorizedFor("ws-A"),
+		mustJSON(t, map[string]any{"issue_id": "iss-B", "cycle_id": "cyc-1"})); err == nil {
+		t.Fatal("move_to_cycle on a FOREIGN-workspace issue must be refused")
+	}
+	if is.updateCalls != 0 {
+		t.Errorf("Update must NOT be reached for a foreign issue; updateCalls=%d", is.updateCalls)
+	}
+}
+
+func TestToolMoveToCycle_AllowsSameWorkspace(t *testing.T) {
+	issA := &model.Issue{ID: "iss-A", WorkspaceID: "ws-A"}
+	is := &scopingIssueStore{byID: map[string]*model.Issue{"iss-A": issA}}
+	s := newScopingServer(is, &scopingAI{})
+
+	if _, err := s.toolMoveToCycle(authorizedFor("ws-A"),
+		mustJSON(t, map[string]any{"issue_id": "iss-A", "cycle_id": "cyc-1"})); err != nil {
+		t.Fatalf("same-workspace move_to_cycle must succeed; got %v", err)
+	}
+	if is.updateCalls != 1 {
+		t.Errorf("same-workspace move must reach Update once; got %d", is.updateCalls)
 	}
 }

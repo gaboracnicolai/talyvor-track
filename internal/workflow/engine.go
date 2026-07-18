@@ -224,6 +224,11 @@ func (e *Engine) SeedDefaults(ctx context.Context, teamID string) error {
 	}
 	for _, s := range defaults {
 		s.TeamID = teamID
+		// SERVER-ONLY: SeedDefaults is called once at team creation (team/handler.go) with the
+		// freshly-created team's server-generated id, already in the authorized workspace.
+		// INVALIDATED IF SeedDefaults is ever called with a client-supplied teamID (then it must
+		// gate on the team's workspace like CreateStatus's EXISTS teams WHERE id=$ AND workspace_id=$).
+		// nosemgrep: child-insert-requires-parent-workspace-guard
 		if _, err := e.pool.Exec(ctx,
 			`INSERT INTO workflow_statuses (team_id, name, color, category, position, is_default)
             VALUES ($1, $2, $3, $4, $5, $6)
