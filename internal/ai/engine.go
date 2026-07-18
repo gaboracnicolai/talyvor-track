@@ -596,6 +596,11 @@ func (e *Engine) IndexIssue(ctx context.Context, issue model.Issue) error {
 		vecLit.WriteString(strconv.FormatFloat(float64(f), 'f', -1, 32))
 	}
 	vecLit.WriteByte(']')
+	// DORMANT: IndexIssue has no production caller (only ai/*_test.go); it takes a server-loaded
+	// model.Issue, not a client id. INVALIDATED IF a caller wires this to a client-chosen issue id
+	// NOT first resolved via issues.GetInWorkspace(id, authorizedWs) — then this INSERT must gate
+	// on the issue's workspace (EXISTS issues WHERE id=$1 AND workspace_id=$n), like CreateComment.
+	// nosemgrep: child-insert-requires-parent-workspace-guard
 	_, err = e.pool.Exec(ctx,
 		`INSERT INTO issue_embeddings (issue_id, embedding, updated_at)
         VALUES ($1, $2::vector, NOW())

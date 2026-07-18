@@ -429,6 +429,11 @@ func (e *Engine) logRun(ctx context.Context, ruleID, issueID string, trigger Rul
 	if issueID != "" {
 		issuePtr = issueID
 	}
+	// SERVER-DRIVEN: logRun is called only from Engine.Fire() with rule_id from the per-workspace
+	// rule cache and issue_id from the triggering issue — never a client-supplied id. INVALIDATED
+	// IF logRun gains a caller that passes a client-controlled rule_id/issue_id (then it must gate
+	// on the rule's workspace before writing the log row).
+	// nosemgrep: child-insert-requires-parent-workspace-guard
 	if _, err := e.pool.Exec(ctx,
 		`INSERT INTO automation_logs (rule_id, issue_id, trigger, actions_taken, success, error)
         VALUES ($1, $2, $3, $4, $5, $6)`,

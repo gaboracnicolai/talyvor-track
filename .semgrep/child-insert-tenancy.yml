@@ -1,0 +1,75 @@
+rules:
+  - id: child-insert-requires-parent-workspace-guard
+    languages: [go]
+    severity: ERROR
+    message: >-
+      This store INSERTs into a workspace-scoped CHILD table via a cross-object *_id
+      reference with NO workspace_id in the statement and NO parent-workspace gate. A
+      child table that has no workspace_id column of its own MUST be scoped through its
+      parent: INSERT ... SELECT ... WHERE EXISTS (SELECT 1 FROM <parent> WHERE
+      id = $ref AND workspace_id = $n), taking the workspace from the authz-authorized
+      context (authz.WorkspaceID — never a client field) and returning a not-found
+      sentinel on 0 rows so a foreign ref 404s (403 = 404, no existence oracle). This is
+      the blind spot that hid CreateComment and workflow.CreateStatus: the cross-object
+      rule keys on workspace_id in the INSERT column list, which these child tables do
+      not have. See internal/issue/comments.go CreateComment for the fix shape.
+    patterns:
+      - pattern-either:
+          - pattern: $Q.QueryRow($CTX, $SQL, ...)
+          - pattern: $Q.Exec($CTX, $SQL, ...)
+      # INSERT INTO <table> whose column list carries a cross-object PARENT ref.
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)
+      # SAFE when the statement itself binds workspace_id (the fix shape: EXISTS/JOIN on
+      # the parent, or a workspace_id column) — anything whose SQL mentions workspace_id.
+      - pattern-not:
+          patterns:
+            - pattern-either:
+                - pattern: $Q.QueryRow($CTX, $SQL, ...)
+                - pattern: $Q.Exec($CTX, $SQL, ...)
+            - metavariable-regex:
+                metavariable: $SQL
+                regex: (?s).*workspace_id
+      # SAFE when the enclosing function routes the ref through a recognized workspace
+      # guard (shared primitive / per-store asserts / public-board gate).
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            tenancy.AssertRefInWorkspace(...)
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertRefInWorkspace(...)
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertIssueInWorkspace(...)
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertInWorkspace(...)
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertPostOnPublicBoard(...)
+            ...
+          }
+      # SAFE when the function performs the inline parent-workspace comparison against the
+      # authz-supplied workspaceID param (customfield.SetValue: SELECT workspace_id FROM the
+      # parent, then reject on mismatch). A future writer that forgets the check has no such
+      # comparison and is still flagged.
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            if $X != workspaceID { ... }
+            ...
+          }
