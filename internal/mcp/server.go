@@ -716,6 +716,14 @@ func (s *Server) toolUpdateIssue(ctx context.Context, args json.RawMessage) (any
 	}
 
 	wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (set by the tools/call chokepoint)
+	// D11 defense-in-depth: reject a foreign issue at the handler (fetch + scopeIssueToCaller),
+	// mirroring get_issue/triage_issue, BEFORE the write. The store's Update is ALSO
+	// workspace-scoped (WHERE id AND workspace_id) — this is the second layer, so the handler
+	// no longer relies solely on the chokepoint or the store's WHERE clause.
+	iss, ferr := s.issueStore.GetByID(ctx, id)
+	if _, err := s.scopeIssueToCaller(ctx, iss, ferr); err != nil {
+		return nil, err
+	}
 	out, err := s.issueStore.Update(ctx, id, wsID, updates)
 	if err != nil {
 		return nil, fmt.Errorf("update_issue: %w", err)
@@ -1037,6 +1045,12 @@ func (s *Server) toolMoveToCycle(ctx context.Context, args json.RawMessage) (any
 		return nil, badParam("cycle_id required")
 	}
 	wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (chokepoint)
+	// D11 defense-in-depth: reject a foreign issue before the write (see toolUpdateIssue). The
+	// cycle_id ref is separately workspace-checked by the store's Update (validateRefWorkspaces).
+	iss, ferr := s.issueStore.GetByID(ctx, in.IssueID)
+	if _, err := s.scopeIssueToCaller(ctx, iss, ferr); err != nil {
+		return nil, err
+	}
 	if _, err := s.issueStore.Update(ctx, in.IssueID, wsID, map[string]any{
 		"cycle_id": in.CycleID,
 	}); err != nil {
