@@ -322,7 +322,7 @@ func (s *Store) AcceptInvite(ctx context.Context, token, name string) (*AcceptRe
 		return nil, fmt.Errorf("guest: insert: %w", err)
 	}
 
-	// nosemgrep: operate-by-id-write-requires-workspace-scope -- token-scoped: invite.ID is resolved from a secret bearer invite token (GetGuestByToken), not from workspace membership. The accepter is pre-membership, so there is no authorized workspace to scope to.
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- token-scoped: invite.ID is resolved from a secret bearer invite token (GetGuestByToken), not from workspace membership. The accepter is pre-membership, so there is no authorized workspace to scope to. INVALIDATED IF AcceptInvite ever takes a client-supplied invite id instead of resolving invite from the token (then invite.ID would be caller-chosen and this UPDATE would need workspace/ownership scoping).
 	if _, err := s.pool.Exec(ctx,
 		`UPDATE guest_invites SET accepted_at = NOW() WHERE id = $1`,
 		invite.ID,

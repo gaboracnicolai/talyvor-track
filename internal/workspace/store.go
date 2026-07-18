@@ -219,7 +219,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]any) (
 	}
 	argN++
 	args = append(args, id)
-	//nosemgrep: operate-by-id-write-requires-workspace-scope-sprintf -- self-scoping: id IS the authorized workspace (tenant root, from authz.WorkspaceID); there is no separate workspace_id column to add (mirrors this store's Delete nosemgrep).
+	//nosemgrep: operate-by-id-write-requires-workspace-scope-sprintf -- self-scoping: id IS the authorized workspace (tenant root, from authz.WorkspaceID); there is no separate workspace_id column to add (mirrors this store's Delete nosemgrep). INVALIDATED IF the handler ever passes a non-authz id here (anything other than authz.WorkspaceID), OR the workspaces table gains a separate scoping column (then this UPDATE must add AND <that_column> = $n).
 	sql := fmt.Sprintf(
 		`UPDATE workspaces SET %s, updated_at = NOW() WHERE id = $%d RETURNING %s`,
 		joinComma(setClauses), argN, workspaceColumns,
@@ -239,7 +239,7 @@ func joinComma(parts []string) string {
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
-	// nosemgrep: operate-by-id-write-requires-workspace-scope -- self-scoping: id IS the caller's authorized workspace (handler passes authz.WorkspaceID). The workspace is the tenant root; there is no parent workspace to scope to.
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- self-scoping: id IS the caller's authorized workspace (handler passes authz.WorkspaceID). The workspace is the tenant root; there is no parent workspace to scope to. INVALIDATED IF the handler ever passes a non-authz id here (anything other than authz.WorkspaceID), OR the workspaces table gains a separate scoping column (then this DELETE must add AND <that_column> = $n).
 	_, err := s.pool.Exec(ctx, `DELETE FROM workspaces WHERE id = $1`, id)
 	return err
 }

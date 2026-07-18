@@ -47,6 +47,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	// check in authorized() above — a valid token may read any workspace's roster (the accepted service-
 	// credential posture). Per-user membership authz does not exist for this caller, so the rule's fix cannot
 	// apply; the query read is still workspace-SCOPED (WHERE workspace_id=$1) and required (400 if empty).
+	// INVALIDATED IF: this route stops being gwExempt / becomes user-facing; OR authorized() stops running
+	// FIRST in List (the token gate must precede the query read); OR h.secret gains a non-empty default
+	// (authorized() would no longer fail-closed on an unset secret); OR the workspace_id query param becomes
+	// optional or the read stops being scoped by WHERE workspace_id=$1 — any of these turns a valid token into
+	// a mass cross-workspace roster read.
 	workspaceID := r.URL.Query().Get("workspace_id") // nosemgrep: caller-workspace-id-query-needs-authorization
 	if workspaceID == "" {
 		// A scoped read REQUIRES an explicit workspace — never a full-table dump.
