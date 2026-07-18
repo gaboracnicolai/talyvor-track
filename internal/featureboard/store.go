@@ -444,7 +444,7 @@ func (s *Store) Vote(ctx context.Context, wsSlug, boardSlug, postID, email strin
 	}
 
 	var count int64
-	// nosemgrep: operate-by-id-write-requires-workspace-scope -- public feedback board: assertPostOnPublicBoard(wsSlug, boardSlug, postID) above proves the post is on the named public board before this recount. Votes are email-identified, not workspace-membership — there is no authorized workspace to scope to.
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- public feedback board: assertPostOnPublicBoard(wsSlug, boardSlug, postID) above proves the post is on the named public board before this recount. Votes are email-identified, not workspace-membership — there is no authorized workspace to scope to. INVALIDATED IF the assertPostOnPublicBoard(wsSlug, boardSlug, postID) guard is removed or moved BELOW this recount (the post must be proven on the named public board before the by-id write).
 	if err := tx.QueryRow(ctx,
 		`UPDATE feature_posts
         SET vote_count = (SELECT COUNT(*) FROM feature_votes WHERE post_id = $1),
@@ -486,7 +486,7 @@ func (s *Store) Unvote(ctx context.Context, wsSlug, boardSlug, postID, email str
 		return 0, fmt.Errorf("featureboard: unvote delete: %w", err)
 	}
 	var count int64
-	// nosemgrep: operate-by-id-write-requires-workspace-scope -- public feedback board: assertPostOnPublicBoard(wsSlug, boardSlug, postID) above proves the post is on the named public board before this recount. Votes are email-identified, not workspace-membership — there is no authorized workspace to scope to.
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- public feedback board: assertPostOnPublicBoard(wsSlug, boardSlug, postID) above proves the post is on the named public board before this recount. Votes are email-identified, not workspace-membership — there is no authorized workspace to scope to. INVALIDATED IF the assertPostOnPublicBoard(wsSlug, boardSlug, postID) guard is removed or moved BELOW this recount (the post must be proven on the named public board before the by-id write).
 	if err := tx.QueryRow(ctx,
 		`UPDATE feature_posts
         SET vote_count = (SELECT COUNT(*) FROM feature_votes WHERE post_id = $1),
