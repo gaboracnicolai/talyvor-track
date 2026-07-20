@@ -120,3 +120,70 @@ rules:
             }
             ...
           }
+
+  # Member-management WRITES are owner-gated via the h.requireOwner(w, r) helper; the READ
+  # (List) is intentionally member-readable and has NO rule here. INVALIDATED IF a write
+  # stops calling requireOwner. (There is deliberately no member-list-requires-owner rule —
+  # any member may read the roster.)
+  - id: member-add-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      POST /v1/workspaces/{wsID}/members (add) writes the roster and must be owner-gated:
+      member.MgmtHandler.Add must call h.requireOwner(w, r).
+    paths:
+      include:
+        - "**/internal/member/mgmt_handler.go"
+    patterns:
+      - pattern: |
+          func (h *MgmtHandler) Add(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *MgmtHandler) Add(w http.ResponseWriter, r *http.Request) {
+            ...
+            $WS, $OK := h.requireOwner(w, r)
+            ...
+          }
+
+  - id: member-changerole-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      PATCH /v1/workspaces/{wsID}/members/{id} (change role) must be owner-gated:
+      member.MgmtHandler.ChangeRole must call h.requireOwner(w, r).
+    paths:
+      include:
+        - "**/internal/member/mgmt_handler.go"
+    patterns:
+      - pattern: |
+          func (h *MgmtHandler) ChangeRole(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *MgmtHandler) ChangeRole(w http.ResponseWriter, r *http.Request) {
+            ...
+            $WS, $OK := h.requireOwner(w, r)
+            ...
+          }
+
+  - id: member-remove-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      DELETE /v1/workspaces/{wsID}/members/{id} (remove) must be owner-gated:
+      member.MgmtHandler.Remove must call h.requireOwner(w, r).
+    paths:
+      include:
+        - "**/internal/member/mgmt_handler.go"
+    patterns:
+      - pattern: |
+          func (h *MgmtHandler) Remove(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *MgmtHandler) Remove(w http.ResponseWriter, r *http.Request) {
+            ...
+            $WS, $OK := h.requireOwner(w, r)
+            ...
+          }

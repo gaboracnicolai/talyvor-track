@@ -114,10 +114,11 @@ func TestMemberMgmt_Lifecycle_AddListPromote(t *testing.T) {
 		t.Fatalf("list after add = %v, want alice+bob", list)
 	}
 
-	// Authenticate proof: bob is now a member (reaches the owner gate, not the membership wall).
+	// Authenticate proof: bob is now a member and can READ the roster (list is member-readable).
+	// A non-member gets WORKSPACE_FORBIDDEN (asserted pre-add), so a 200 here proves he authenticated.
 	asBob := do(h, mreq(http.MethodGet, base, "", "bob@x.com"))
-	if asBob.Code != http.StatusForbidden || codeOf(asBob.Body.String()) != "OWNER_REQUIRED" {
-		t.Fatalf("post-add bob = %d/%s, want 403/OWNER_REQUIRED (member, not owner)", asBob.Code, codeOf(asBob.Body.String()))
+	if asBob.Code != http.StatusOK {
+		t.Fatalf("post-add bob list = %d, want 200 (member can read the roster)", asBob.Code)
 	}
 
 	// Promote bob to owner; now bob authenticates AND passes the owner gate.
@@ -132,7 +133,7 @@ func TestMemberMgmt_Lifecycle_AddListPromote(t *testing.T) {
 	}
 }
 
-// Every member-management op is owner-gated: a plain member is refused on list/add/change/remove.
+// The three WRITES are owner-gated; the READ (list) is member-readable.
 func TestMemberMgmt_OwnerGated(t *testing.T) {
 	d := testutil.New(t)
 	ws := d.Workspace(t)
@@ -143,12 +144,11 @@ func TestMemberMgmt_OwnerGated(t *testing.T) {
 
 	aliceID := memberID(t, listMembers(t, h, ws.ID, "alice@x.com"), "alice@x.com")
 
-	// bob (member) is refused on all four, always OWNER_REQUIRED (he passed membership).
+	// bob (member) is refused on the three WRITES, always OWNER_REQUIRED (he passed membership).
 	for _, tc := range []struct {
 		name string
 		r    *http.Request
 	}{
-		{"list", mreq(http.MethodGet, base, "", "bob@x.com")},
 		{"add", mreq(http.MethodPost, base, `{"email":"carol@x.com","role":"member"}`, "bob@x.com")},
 		{"change", mreq(http.MethodPatch, base+"/"+aliceID, `{"role":"member"}`, "bob@x.com")},
 		{"remove", mreq(http.MethodDelete, base+"/"+aliceID, "", "bob@x.com")},
@@ -157,6 +157,11 @@ func TestMemberMgmt_OwnerGated(t *testing.T) {
 		if rr.Code != http.StatusForbidden || codeOf(rr.Body.String()) != "OWNER_REQUIRED" {
 			t.Errorf("%s as member = %d/%s, want 403/OWNER_REQUIRED", tc.name, rr.Code, codeOf(rr.Body.String()))
 		}
+	}
+
+	// The READ is allowed for any member (assignee/@mention/reviewer picker source).
+	if lr := do(h, mreq(http.MethodGet, base, "", "bob@x.com")); lr.Code != http.StatusOK {
+		t.Errorf("member list = %d, want 200 (roster readable by any member)", lr.Code)
 	}
 
 	// Owner is allowed (add carol succeeds).
@@ -247,6 +252,55 @@ func TestMemberMgmt_AddValidation(t *testing.T) {
 	for _, m := range list {
 		if m["email"] == "carol@x.com" && m["role"] != authz.RoleMember {
 			t.Fatalf("carol role = %v, want member (explicit default)", m["role"])
+		}
+	}
+}
+
+// GET members is readable by ANY workspace member (assignee/@mention/reviewer picker source)
+// and projects to EXACTLY the picker fields — id, name, email, role, avatar_url — leaking no
+// more. A non-member of the workspace still gets the workspace-scope refusal, not the roster.
+func TestMemberMgmt_List_MemberReadable_AndProjection(t *testing.T) {
+	d := testutil.New(t)
+	ws := d.Workspace(t)
+	seedMember(t, d, ws.ID, "owner@x.com", authz.RoleOwner)
+	seedMember(t, d, ws.ID, "member@x.com", authz.RoleMember)
+	h := mgmtChain(d)
+	base := "/v1/workspaces/" + ws.ID + "/members"
+
+	// A non-member of this workspace: workspace-scope refusal, never the member list.
+	other := do(h, mreq(http.MethodGet, base, "", "stranger@x.com"))
+	if other.Code != http.StatusForbidden || codeOf(other.Body.String()) != "WORKSPACE_FORBIDDEN" {
+		t.Fatalf("non-member list = %d/%s, want 403/WORKSPACE_FORBIDDEN", other.Code, codeOf(other.Body.String()))
+	}
+
+	// A plain member reads the roster (200).
+	rr := do(h, mreq(http.MethodGet, base, "", "member@x.com"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("member list = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode list: %v; body=%s", err, rr.Body.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 members, got %d: %v", len(got), got)
+	}
+	// Projection: EXACTLY id/name/email/role/avatar_url (5) — never workspace_id/created_at.
+	allowed := map[string]bool{"id": true, "name": true, "email": true, "role": true, "avatar_url": true}
+	for _, m := range got {
+		if len(m) != 5 {
+			t.Errorf("member row has %d fields, want exactly 5 (id/name/email/role/avatar_url): %v", len(m), m)
+		}
+		for k := range m {
+			if !allowed[k] {
+				t.Errorf("member list leaks field %q — want only id/name/email/role/avatar_url", k)
+			}
+		}
+		if _, ok := m["avatar_url"]; !ok {
+			t.Errorf("member row missing avatar_url (a picker shows avatars): %v", m)
+		}
+		if m["email"] == "" || m["role"] == "" || m["id"] == "" {
+			t.Errorf("member row missing a picker field: %v", m)
 		}
 	}
 }

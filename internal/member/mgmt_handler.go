@@ -43,9 +43,28 @@ func (h *MgmtHandler) requireOwner(w http.ResponseWriter, r *http.Request) (stri
 	return wsID, true
 }
 
+// memberView is the picker projection List returns — exactly what an assignee/@mention/
+// reviewer dropdown needs (id, name, email, role, avatar_url) and nothing more. It omits
+// model.Member's workspace_id (the caller already has it from the path) and created_at, so
+// the roster read never leaks beyond what the frontend needs. avatar_url IS included: a
+// picker shows avatars, Track already stores the field, and it is not sensitive (members can
+// already see each other's names and emails).
+type memberView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+// List returns the workspace roster. Readable by ANY member of the workspace: wsAuthz has
+// already proved membership of {wsID} (a non-member is 403'd WORKSPACE_FORBIDDEN before this
+// handler), so this needs membership but NOT owner — you may see who is in your workspace.
+// Only the three WRITES (Add/ChangeRole/Remove) are owner-gated.
 func (h *MgmtHandler) List(w http.ResponseWriter, r *http.Request) {
-	wsID, ok := h.requireOwner(w, r)
+	wsID, ok := authz.WorkspaceID(r.Context())
 	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
 		return
 	}
 	members, err := h.store.ListMembers(r.Context(), wsID)
@@ -53,7 +72,11 @@ func (h *MgmtHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, members)
+	out := make([]memberView, 0, len(members))
+	for _, m := range members {
+		out = append(out, memberView{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, AvatarURL: m.AvatarURL})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type addMemberBody struct {
