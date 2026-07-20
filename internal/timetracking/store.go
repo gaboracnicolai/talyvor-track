@@ -268,13 +268,13 @@ func (s *Store) LogTime(ctx context.Context, e TimeEntry) (*TimeEntry, error) {
 
 // ─── ListByIssue ───────────────────────────────────────────
 
-func (s *Store) ListByIssue(ctx context.Context, issueID string) ([]TimeEntry, error) {
+func (s *Store) ListByIssue(ctx context.Context, issueID, workspaceID string) ([]TimeEntry, error) {
 	if s.pool == nil {
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+entryColumns+` FROM time_entries WHERE issue_id = $1 ORDER BY started_at DESC`,
-		issueID,
+		`SELECT `+entryColumns+` FROM time_entries WHERE issue_id = $1 AND workspace_id = $2 ORDER BY started_at DESC`,
+		issueID, workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("timetracking: list issue: %w", err)
@@ -323,7 +323,7 @@ func (s *Store) ListByMember(ctx context.Context, memberID, workspaceID string, 
 // GetIssueSummary aggregates time across all entries on an issue.
 // COUNT(DISTINCT member_id) drives the team-size display in the
 // IssueDetail header.
-func (s *Store) GetIssueSummary(ctx context.Context, issueID string) (*TimeSummary, error) {
+func (s *Store) GetIssueSummary(ctx context.Context, issueID, workspaceID string) (*TimeSummary, error) {
 	if s.pool == nil {
 		return &TimeSummary{IssueID: issueID}, nil
 	}
@@ -334,8 +334,8 @@ func (s *Store) GetIssueSummary(ctx context.Context, issueID string) (*TimeSumma
                 COALESCE(SUM(duration_sec) FILTER (WHERE billable), 0)          AS billable_sec,
                 COUNT(DISTINCT member_id)                                       AS member_count,
                 COUNT(*)                                                        AS entry_count
-            FROM time_entries WHERE issue_id = $1`,
-		issueID,
+            FROM time_entries WHERE issue_id = $1 AND workspace_id = $2`,
+		issueID, workspaceID,
 	).Scan(&total, &billable, &members, &entries)
 	if err != nil {
 		return nil, fmt.Errorf("timetracking: issue summary: %w", err)

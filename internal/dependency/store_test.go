@@ -190,7 +190,7 @@ func TestGetRelations_ReturnsFromIssuePerspective(t *testing.T) {
 	// (target=issueID, but not for types whose inverse is already a
 	// distinct row e.g. blocks/blocked_by/duplicates).
 	pool.ExpectQuery(`FROM issue_relations r JOIN issues`).
-		WithArgs("issue-A").
+		WithArgs("issue-A", "ws").
 		WillReturnRows(pgxmock.NewRows([]string{
 			"rel_id", "source_id", "target_id", "type", "workspace_id", "created_by", "created_at",
 			"is_source",
@@ -214,7 +214,7 @@ func TestGetRelations_ReturnsFromIssuePerspective(t *testing.T) {
 				(*time.Time)(nil), (*time.Time)(nil),
 				"", float64(0), 0, []string{}, float64(0), now, now))
 
-	out, err := store.GetRelations(context.Background(), "issue-A")
+	out, err := store.GetRelations(context.Background(), "issue-A", "ws")
 	if err != nil {
 		t.Fatalf("GetRelations: %v", err)
 	}

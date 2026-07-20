@@ -30,11 +30,14 @@ func statusRows() *pgxmock.Rows {
 
 func TestGetStatuses_ReturnsDefaultsForTeam(t *testing.T) {
 	engine, pool := newMockEngine(t)
+	pool.ExpectQuery(`FROM teams WHERE id`).
+		WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectQuery(`FROM workflow_statuses WHERE team_id`).
 		WithArgs("team-1").
 		WillReturnRows(statusRows())
 
-	out, err := engine.GetStatuses(context.Background(), "team-1")
+	out, err := engine.GetStatuses(context.Background(), "team-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetStatuses: %v", err)
 	}
@@ -48,15 +51,20 @@ func TestGetStatuses_ReturnsDefaultsForTeam(t *testing.T) {
 
 func TestGetStatuses_CachesAfterFirstFetch(t *testing.T) {
 	engine, pool := newMockEngine(t)
-	pool.ExpectQuery(`FROM workflow_statuses`).
-		WithArgs("team-1").
+	// The team-scope EXISTS check runs on EVERY call (before the cache); the expensive
+	// statuses query runs only ONCE — the cache serves the second call.
+	pool.ExpectQuery(`FROM teams WHERE id`).WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	pool.ExpectQuery(`FROM workflow_statuses`).WithArgs("team-1").
 		WillReturnRows(statusRows())
+	pool.ExpectQuery(`FROM teams WHERE id`).WithArgs("team-1", "ws-1").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 
-	if _, err := engine.GetStatuses(context.Background(), "team-1"); err != nil {
+	if _, err := engine.GetStatuses(context.Background(), "team-1", "ws-1"); err != nil {
 		t.Fatalf("first GetStatuses: %v", err)
 	}
-	// Second call must NOT hit the DB — only one Expect set up.
-	if _, err := engine.GetStatuses(context.Background(), "team-1"); err != nil {
+	// Second call must NOT re-run the statuses query (cache hit) — only EXISTS re-runs.
+	if _, err := engine.GetStatuses(context.Background(), "team-1", "ws-1"); err != nil {
 		t.Fatalf("cached GetStatuses: %v", err)
 	}
 	if err := pool.ExpectationsWereMet(); err != nil {

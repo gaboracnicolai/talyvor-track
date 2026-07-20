@@ -76,7 +76,7 @@ type CycleVelocity struct {
 // with completion rate + AI cost. One query joins the cycles table
 // with two correlated subqueries against issues — fewer round-trips
 // than fetching cycle metadata then aggregating per cycle.
-func (e *Engine) GetVelocity(ctx context.Context, teamID string, cycles int) ([]CycleVelocity, error) {
+func (e *Engine) GetVelocity(ctx context.Context, teamID, workspaceID string, cycles int) ([]CycleVelocity, error) {
 	if cycles <= 0 {
 		cycles = 5
 	}
@@ -90,9 +90,9 @@ func (e *Engine) GetVelocity(ctx context.Context, teamID string, cycles int) ([]
                 AND status IN ('done','cancelled')), 0) AS completed,
             COALESCE((SELECT SUM(ai_cost_usd) FROM issues WHERE cycle_id = c.id), 0) AS ai_cost
         FROM cycles c
-        WHERE c.team_id = $1
+        WHERE c.team_id = $1 AND c.workspace_id = $2
         ORDER BY c.number DESC
-        LIMIT $2`, teamID, cycles)
+        LIMIT $3`, teamID, workspaceID, cycles)
 	if err != nil {
 		return nil, fmt.Errorf("analytics: velocity: %w", err)
 	}
@@ -136,7 +136,7 @@ type BurndownReport struct {
 // day, and computes the on-track / projected-end metadata. Same
 // approach as cycle.Store.GetBurndown but with the analytics-layer
 // enrichments.
-func (e *Engine) GetBurndown(ctx context.Context, cycleID string) (*BurndownReport, error) {
+func (e *Engine) GetBurndown(ctx context.Context, cycleID, workspaceID string) (*BurndownReport, error) {
 	var (
 		name             string
 		start, end       time.Time
@@ -145,8 +145,8 @@ func (e *Engine) GetBurndown(ctx context.Context, cycleID string) (*BurndownRepo
 	if err := e.pool.QueryRow(ctx,
 		`SELECT c.name, c.start_date, c.end_date,
             (SELECT COUNT(*) FROM issues WHERE cycle_id = c.id)
-        FROM cycles c WHERE c.id = $1`,
-		cycleID,
+        FROM cycles c WHERE c.id = $1 AND c.workspace_id = $2`,
+		cycleID, workspaceID,
 	).Scan(&name, &start, &end, &total); err != nil {
 		return nil, fmt.Errorf("analytics: burndown cycle: %w", err)
 	}
@@ -589,8 +589,8 @@ func (e *Engine) GetWorkload(ctx context.Context, workspaceID, teamID string) ([
 
 // ExportVelocityCSV streams the velocity report as CSV. Money is
 // formatted to 2dp per the constraint.
-func (e *Engine) ExportVelocityCSV(ctx context.Context, teamID string, cycles int, w io.Writer) error {
-	rows, err := e.GetVelocity(ctx, teamID, cycles)
+func (e *Engine) ExportVelocityCSV(ctx context.Context, teamID, workspaceID string, cycles int, w io.Writer) error {
+	rows, err := e.GetVelocity(ctx, teamID, workspaceID, cycles)
 	if err != nil {
 		return err
 	}

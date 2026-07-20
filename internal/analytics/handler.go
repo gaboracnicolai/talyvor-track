@@ -54,12 +54,17 @@ func intParam(r *http.Request, name string, fallback int) int {
 }
 
 func (h *Handler) Velocity(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	teamID := r.URL.Query().Get("team_id")
 	if teamID == "" {
 		writeErr(w, http.StatusBadRequest, "MISSING_TEAM", "team_id query parameter required")
 		return
 	}
-	out, err := h.engine.GetVelocity(r.Context(), teamID, intParam(r, "cycles", 5))
+	out, err := h.engine.GetVelocity(r.Context(), teamID, wsID, intParam(r, "cycles", 5))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "VELOCITY_FAILED", err.Error())
 		return
@@ -71,12 +76,17 @@ func (h *Handler) Velocity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	cycleID := r.URL.Query().Get("cycle_id")
 	if cycleID == "" {
 		writeErr(w, http.StatusBadRequest, "MISSING_CYCLE", "cycle_id query parameter required")
 		return
 	}
-	rep, err := h.engine.GetBurndown(r.Context(), cycleID)
+	rep, err := h.engine.GetBurndown(r.Context(), cycleID, wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "BURNDOWN_FAILED", err.Error())
 		return
@@ -183,7 +193,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	switch report {
 	case "velocity":
 		teamID := r.URL.Query().Get("team_id")
-		_ = h.engine.ExportVelocityCSV(r.Context(), teamID, intParam(r, "cycles", 5), w)
+		_ = h.engine.ExportVelocityCSV(r.Context(), teamID, wsID, intParam(r, "cycles", 5), w)
 	case "ai-costs":
 		_ = h.engine.ExportAICostTrendsCSV(r.Context(), wsID, intParam(r, "days", 30), w)
 	case "distribution":

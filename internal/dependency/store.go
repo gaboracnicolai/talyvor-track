@@ -352,7 +352,7 @@ var relationIssueCols = func() string {
 // For symmetric types (blocks/blocked_by/duplicates) the inverse row
 // already exists as an outgoing row, so we filter incoming duplicates
 // out — otherwise the same logical relation would appear twice.
-func (s *Store) GetRelations(ctx context.Context, issueID string) ([]RelationWithIssue, error) {
+func (s *Store) GetRelations(ctx context.Context, issueID, workspaceID string) ([]RelationWithIssue, error) {
 	if s.pool == nil {
 		return nil, nil
 	}
@@ -372,9 +372,11 @@ func (s *Store) GetRelations(ctx context.Context, issueID string) ([]RelationWit
         -- caller issue's workspace, so a cross-workspace relation can't leak the
         -- foreign issue's content.
         AND i.workspace_id = (SELECT workspace_id FROM issues WHERE id = $1)
-        WHERE r.source_id = $1 OR r.target_id = $1
+        -- Tenancy: the relation itself must be in the caller's authorized workspace, so a
+        -- wsA caller naming a wsB issue id matches 0 rows (mirrors Create/Delete's wsID scope).
+        WHERE (r.source_id = $1 OR r.target_id = $1) AND r.workspace_id = $2
         ORDER BY r.created_at ASC`,
-		issueID,
+		issueID, workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dependency: get relations: %w", err)
