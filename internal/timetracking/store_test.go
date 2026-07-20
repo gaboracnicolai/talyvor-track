@@ -223,12 +223,12 @@ func TestListByIssue_ReturnsEntries(t *testing.T) {
 	store, pool := newMockStore(t)
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT .* FROM time_entries WHERE issue_id`).
-		WithArgs("i-1").
+		WithArgs("i-1", "ws-1").
 		WillReturnRows(entryRows().
 			AddRow("t-1", "i-1", "ws", "m-1", "a", now.Add(-time.Hour), &now, 3600, true, now).
 			AddRow("t-2", "i-1", "ws", "m-2", "b", now.Add(-time.Hour), &now, 1200, false, now))
 
-	out, err := store.ListByIssue(context.Background(), "i-1")
+	out, err := store.ListByIssue(context.Background(), "i-1", "ws-1")
 	if err != nil {
 		t.Fatalf("ListByIssue: %v", err)
 	}
@@ -242,12 +242,12 @@ func TestListByIssue_ReturnsEntries(t *testing.T) {
 func TestGetIssueSummary_SumsBillableAndTotal(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectQuery(`SELECT .* FROM time_entries WHERE issue_id = \$1`).
-		WithArgs("i-1").
+		WithArgs("i-1", "ws-1").
 		WillReturnRows(pgxmock.NewRows([]string{
 			"total_sec", "billable_sec", "member_count", "entry_count",
 		}).AddRow(int64(7200), int64(5400), int64(2), int64(3)))
 
-	out, err := store.GetIssueSummary(context.Background(), "i-1")
+	out, err := store.GetIssueSummary(context.Background(), "i-1", "ws-1")
 	if err != nil {
 		t.Fatalf("GetIssueSummary: %v", err)
 	}

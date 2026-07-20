@@ -171,8 +171,13 @@ func (h *Handler) LogTime(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListIssueEntries(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
-	entries, err := h.store.ListByIssue(r.Context(), id)
+	entries, err := h.store.ListByIssue(r.Context(), id, wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
 		return
@@ -180,7 +185,7 @@ func (h *Handler) ListIssueEntries(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []TimeEntry{}
 	}
-	summary, err := h.store.GetIssueSummary(r.Context(), id)
+	summary, err := h.store.GetIssueSummary(r.Context(), id, wsID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "SUMMARY_FAILED", err.Error())
 		return

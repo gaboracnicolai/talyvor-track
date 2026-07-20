@@ -24,7 +24,7 @@ func TestGetVelocity_ReturnsCompletionRates(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	now := time.Now().UTC()
 	pool.ExpectQuery(`FROM cycles c\s+WHERE c.team_id`).
-		WithArgs("team-1", 3).
+		WithArgs("team-1", "ws-1", 3).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "name", "start_date", "end_date", "total", "completed", "ai_cost",
 		}).
@@ -32,7 +32,7 @@ func TestGetVelocity_ReturnsCompletionRates(t *testing.T) {
 			AddRow("c-2", "Sprint 2", now, now.Add(7*24*time.Hour), 8, 8, 2.10).
 			AddRow("c-1", "Sprint 1", now, now.Add(7*24*time.Hour), 12, 5, 0.0))
 
-	out, err := engine.GetVelocity(context.Background(), "team-1", 3)
+	out, err := engine.GetVelocity(context.Background(), "team-1", "ws-1", 3)
 	if err != nil {
 		t.Fatalf("GetVelocity: %v", err)
 	}
@@ -53,12 +53,12 @@ func TestGetVelocity_IncludesAICostPerCycle(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	now := time.Now().UTC()
 	pool.ExpectQuery(`FROM cycles c\s+WHERE c.team_id`).
-		WithArgs("team-1", 5).
+		WithArgs("team-1", "ws-1", 5).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "name", "start_date", "end_date", "total", "completed", "ai_cost",
 		}).AddRow("c-1", "Sprint 1", now, now, 10, 8, 12.34))
 
-	out, err := engine.GetVelocity(context.Background(), "team-1", 5)
+	out, err := engine.GetVelocity(context.Background(), "team-1", "ws-1", 5)
 	if err != nil {
 		t.Fatalf("GetVelocity: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestExportVelocityCSV_ProducesValidCSV(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	now := time.Now().UTC()
 	pool.ExpectQuery(`FROM cycles c\s+WHERE c.team_id`).
-		WithArgs("team-1", 2).
+		WithArgs("team-1", "ws-1", 2).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "name", "start_date", "end_date", "total", "completed", "ai_cost",
 		}).
@@ -240,7 +240,7 @@ func TestExportVelocityCSV_ProducesValidCSV(t *testing.T) {
 			AddRow("c-1", "Sprint 1", now, now, 8, 8, 0.5))
 
 	var buf bytes.Buffer
-	if err := engine.ExportVelocityCSV(context.Background(), "team-1", 2, &buf); err != nil {
+	if err := engine.ExportVelocityCSV(context.Background(), "team-1", "ws-1", 2, &buf); err != nil {
 		t.Fatalf("ExportVelocityCSV: %v", err)
 	}
 	body := buf.String()

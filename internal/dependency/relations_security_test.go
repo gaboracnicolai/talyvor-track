@@ -43,7 +43,7 @@ func TestGetRelations_ObjectGraph_NoCrossWorkspaceContentLeak(t *testing.T) {
 		t.Fatalf("seed raw cross-workspace relation: %v", err)
 	}
 
-	rels, err := dep.GetRelations(ctx, issueA.ID)
+	rels, err := dep.GetRelations(ctx, issueA.ID, wsA.ID)
 	if err != nil {
 		t.Fatalf("get relations: %v", err)
 	}

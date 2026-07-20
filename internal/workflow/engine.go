@@ -76,7 +76,23 @@ func scanStatus(s interface{ Scan(...any) error }) (*WorkflowStatus, error) {
 
 // GetStatuses returns the team's statuses ordered by position. Reads
 // hit the in-memory cache; misses populate it under the write lock.
-func (e *Engine) GetStatuses(ctx context.Context, teamID string) ([]WorkflowStatus, error) {
+func (e *Engine) GetStatuses(ctx context.Context, teamID, workspaceID string) ([]WorkflowStatus, error) {
+	// Tenancy: only surface statuses for a team in the caller's authorized workspace.
+	// workflow_statuses has no workspace_id column (scope via the teams parent), so gate on
+	// EXISTS(teams id, workspace_id) — the SAME mechanism CreateStatus/UpdateStatus/DeleteStatus
+	// use. A foreign/absent team → empty (no rows, no existence oracle). Runs BEFORE the cache
+	// read so a teamID-keyed cache entry can't leak across workspaces.
+	if e.pool != nil {
+		var inWS bool
+		if err := e.pool.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM teams WHERE id = $1 AND workspace_id = $2)`,
+			teamID, workspaceID).Scan(&inWS); err != nil {
+			return nil, fmt.Errorf("workflow: team scope: %w", err)
+		}
+		if !inWS {
+			return []WorkflowStatus{}, nil
+		}
+	}
 	e.mu.RLock()
 	cached, ok := e.cache[teamID]
 	e.mu.RUnlock()
