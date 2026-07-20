@@ -110,6 +110,73 @@ func WithMemberships(ctx context.Context, ms []Membership) context.Context {
 	return context.WithValue(ctx, ctxKey{}, &authCtx{memberships: ms})
 }
 
+// Member-tier roles. Two tiers only: an owner can perform the elevated operations
+// (delete/administer the workspace, write integration secrets); everyone else is a
+// member. Stored free-text in members.role (no DB CHECK); the closed set is enforced
+// here and on the member-management write paths.
+const (
+	RoleOwner  = "owner"
+	RoleMember = "member"
+)
+
+// Role returns the caller's role in the server-AUTHORIZED workspace. ok=false when no
+// {wsID} workspace was authorized (a no-{wsID}/flat route, or a request that never
+// passed the boundary) OR the resolved role is empty — the middleware only sets a role
+// on a {wsID} route the caller is a member of (see Middleware). Flat routes that hold a
+// Membership (e.g. integrations via AuthorizeWorkspace) use IsOwnerRole on that instead.
+func Role(ctx context.Context) (string, bool) {
+	ac, ok := ctx.Value(ctxKey{}).(*authCtx)
+	if !ok || !ac.hasWorkspace || ac.role == "" {
+		return "", false
+	}
+	return ac.role, true
+}
+
+// IsOwner reports whether the caller is an owner of the authorized workspace. FAIL-CLOSED:
+// no authorized workspace, an empty role, or any unrecognised role → false. This is the
+// gate the elevated {wsID} operations call.
+func IsOwner(ctx context.Context) bool {
+	r, ok := Role(ctx)
+	return ok && IsOwnerRole(r)
+}
+
+// IsOwnerRole is the exact-match owner test for a role STRING — used by flat routes that
+// resolved a Membership via AuthorizeWorkspace (which never sets the ctx role). Exact and
+// case-sensitive: only "owner" is owner; "", "member", "admin", "OWNER" are not.
+func IsOwnerRole(role string) bool { return role == RoleOwner }
+
+// WithAuthorizedRole is WithAuthorized plus the resolved role — the middleware installs
+// this for {wsID} routes so IsOwner has a value to read, and handler tests use it to
+// exercise the owner gate without standing up the full chain. Kept SEPARATE from
+// WithAuthorized (rather than adding a param) so existing callers stay byte-stable.
+func WithAuthorizedRole(ctx context.Context, workspaceID, memberID, role string) context.Context {
+	return context.WithValue(ctx, ctxKey{}, &authCtx{
+		workspaceID:  workspaceID,
+		memberID:     memberID,
+		role:         role,
+		hasWorkspace: workspaceID != "",
+	})
+}
+
+// RequireOwner is the middleware form of the owner gate (the member analogue of guest
+// RequireGuest): it 403s any request whose authorized-workspace role is not owner. Reads
+// the role the {wsID} middleware already resolved; fail-closed via IsOwner.
+func RequireOwner(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !IsOwner(r.Context()) {
+			forbiddenOwner(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func forbiddenOwner(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"error":"owner role required","code":"OWNER_REQUIRED"}`))
+}
+
 // Middleware resolves the T9-verified identity to memberships and, for a request carrying
 // a path {wsID}, AUTHORIZES it (the {wsID} must be a workspace the caller is a member of,
 // else 403), placing the authorized workspace_id + the caller's member.id there into

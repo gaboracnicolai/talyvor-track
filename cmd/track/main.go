@@ -422,6 +422,7 @@ func main() {
 		importerHandler.Mount(r)
 		importJobHandler.Mount(r)                                               // T8 Build B: async POST /import/jobs + GET /import/jobs/{id}
 		member.NewHandler(member.NewStore(pool), cfg.MemberSyncSecret).Mount(r) // A0b: GET /v1/service/members (gwExempt, bearer)
+		member.NewMgmtHandler(member.NewStore(pool)).Mount(r)                   // multi-member: owner-gated /v1/workspaces/{wsID}/members (list/add/change-role/remove)
 		if integrationHandler != nil {
 			integrationHandler.Mount(r) // T8 Build C.1: POST /integrations + GET /integrations/{provider}
 		}
