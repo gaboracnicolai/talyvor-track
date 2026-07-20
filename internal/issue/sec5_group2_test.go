@@ -91,7 +91,9 @@ func TestSEC5_Group2_CrossTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed cycle: %v", err)
 	}
-	cmtB := d.Comment(t, issueB.ID, "secret")
+	// Authored BY Bob so "Bob deletes his own comment" is literally true under the new
+	// author-or-owner rule; Alice's cross-tenant attempt is still blocked by workspace scope.
+	cmtB := &model.Comment{ID: seedCommentBy(t, d, issueB.ID, bobID, "secret")}
 
 	chain := sec5Group2Chain(d)
 	do := func(r *http.Request) int { rr := httptest.NewRecorder(); chain.ServeHTTP(rr, r); return rr.Code }

@@ -47,6 +47,12 @@ func (h *Handler) set(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
 		return
 	}
+	// Owner-gated: this writes a live provider credential. Flat route (no ctx role), so gate
+	// on the role of the membership AuthorizeWorkspace just resolved.
+	if !authz.IsOwnerRole(m.Role) {
+		writeErr(w, http.StatusForbidden, "OWNER_REQUIRED", "owner role required")
+		return
+	}
 	var in setRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxIntegrationBody)).Decode(&in); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error())

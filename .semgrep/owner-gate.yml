@@ -1,0 +1,122 @@
+rules:
+  # Regression lock (multi-member tier model): the four privileged operations that are
+  # owner-gated MUST call the authz owner gate and 403 a non-owner. Each rule is scoped by
+  # paths.include to the single handler file that owns the op, matches the specific handler
+  # method, and flags it when the `if !authz.IsOwner(...)`/`IsOwnerRole(...)` guard is absent.
+  # INVALIDATED IF the guard is removed, renamed, or the op stops reading r.Context()/m.Role
+  # — any of which drops the tier check and lets a plain member perform the elevated action.
+  - id: workspace-delete-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      DELETE /v1/workspaces/{wsID} deletes the entire tenant and must be owner-gated:
+      workspace.Handler.Delete must guard with `if !authz.IsOwner(r.Context())`.
+    paths:
+      include:
+        - "**/internal/workspace/handler.go"
+    patterns:
+      - pattern: |
+          func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+            ...
+            if !authz.IsOwner(r.Context()) {
+              ...
+            }
+            ...
+          }
+
+  - id: workspace-update-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      PATCH /v1/workspaces/{wsID} changes workspace settings and must be owner-gated:
+      workspace.Handler.Update must guard with `if !authz.IsOwner(r.Context())`.
+    paths:
+      include:
+        - "**/internal/workspace/handler.go"
+    patterns:
+      - pattern: |
+          func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+            ...
+            if !authz.IsOwner(r.Context()) {
+              ...
+            }
+            ...
+          }
+
+  - id: team-delete-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      DELETE /v1/workspaces/{wsID}/teams/{id} must be owner-gated:
+      team.Handler.Delete must guard with `if !authz.IsOwner(r.Context())`.
+    paths:
+      include:
+        - "**/internal/team/handler.go"
+    patterns:
+      - pattern: |
+          func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+            ...
+            if !authz.IsOwner(r.Context()) {
+              ...
+            }
+            ...
+          }
+
+  - id: project-delete-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      DELETE /v1/workspaces/{wsID}/projects/{id} must be owner-gated:
+      project.Handler.Delete must guard with `if !authz.IsOwner(r.Context())`.
+    paths:
+      include:
+        - "**/internal/project/handler.go"
+    patterns:
+      - pattern: |
+          func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+            ...
+            if !authz.IsOwner(r.Context()) {
+              ...
+            }
+            ...
+          }
+
+  - id: integrations-set-requires-owner
+    languages: [go]
+    severity: ERROR
+    message: >
+      POST /v1/integrations writes a live provider credential and must be owner-gated. It is
+      a flat route (no ctx role), so integrations.Handler.set must guard on the resolved
+      membership: `if !authz.IsOwnerRole(m.Role)`.
+    paths:
+      include:
+        - "**/internal/integrations/handler.go"
+    patterns:
+      - pattern: |
+          func (h *Handler) set(w http.ResponseWriter, r *http.Request) {
+            ...
+          }
+      - pattern-not: |
+          func (h *Handler) set(w http.ResponseWriter, r *http.Request) {
+            ...
+            if !authz.IsOwnerRole(m.Role) {
+              ...
+            }
+            ...
+          }

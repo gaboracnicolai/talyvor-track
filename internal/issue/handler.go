@@ -425,13 +425,19 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
 		return
 	}
+	callerID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	var in struct {
 		Body string `json:"body"`
 	}
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	out, err := h.store.UpdateComment(r.Context(), chi.URLParam(r, "commentID"), wsID, in.Body)
+	// author-or-owner: only the author or a workspace owner may edit.
+	out, err := h.store.UpdateComment(r.Context(), chi.URLParam(r, "commentID"), wsID, callerID, in.Body, authz.IsOwner(r.Context()))
 	if errors.Is(err, ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
@@ -457,8 +463,14 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
 		return
 	}
+	callerID, ok := authz.MemberID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
 	commentID := chi.URLParam(r, "commentID")
-	if err := h.store.DeleteComment(r.Context(), commentID, wsID); err != nil {
+	// author-or-owner: only the author or a workspace owner may delete.
+	if err := h.store.DeleteComment(r.Context(), commentID, wsID, callerID, authz.IsOwner(r.Context())); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
 			return

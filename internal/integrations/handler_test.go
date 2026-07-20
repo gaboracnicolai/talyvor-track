@@ -57,7 +57,7 @@ func setReq(wsID, email, body string) *http.Request {
 func TestHandler_Set_DoesNotEchoToken(t *testing.T) {
 	d := testutil.New(t)
 	ws := d.Workspace(t)
-	seedMember(t, d, ws.ID, "a@corp.com")
+	seedOwner(t, d, ws.ID, "a@corp.com") // set is owner-gated; the no-echo behavior is unchanged
 	h := intChain(t, d)
 	const token = "super-secret-echo-marker"
 

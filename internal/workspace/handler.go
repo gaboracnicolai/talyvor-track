@@ -104,6 +104,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
 		return
 	}
+	if !authz.IsOwner(r.Context()) { // owner-gated: changing workspace settings
+		writeErr(w, http.StatusForbidden, "OWNER_REQUIRED", "owner role required")
+		return
+	}
 	var updates map[string]any
 	if !httpx.DecodeJSON(w, r, &updates) {
 		return
@@ -120,6 +124,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	wsID, ok := authz.WorkspaceID(r.Context())
 	if !ok {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if !authz.IsOwner(r.Context()) { // owner-gated: deleting the entire workspace
+		writeErr(w, http.StatusForbidden, "OWNER_REQUIRED", "owner role required")
 		return
 	}
 	if err := h.store.Delete(r.Context(), wsID); err != nil {
