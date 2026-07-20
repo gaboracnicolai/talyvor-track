@@ -81,15 +81,20 @@ func (s *Store) ListComments(ctx context.Context, issueID, workspaceID string) (
 // UpdateComment / DeleteComment are SEC-5 scoped via the comment's issue: comments carry no
 // workspace_id, so the id is gated by `issue_id IN (SELECT id FROM issues WHERE workspace_id=$n)`.
 // A comment on another workspace's issue → ErrNotFound (reuses the issue-package sentinel).
-func (s *Store) UpdateComment(ctx context.Context, id, workspaceID, body string) (*model.Comment, error) {
+// UpdateComment / DeleteComment additionally enforce author-or-owner: only the comment's
+// author, or a workspace OWNER (isOwner), may edit/delete it — `AND (author_id = $caller OR
+// $isOwner)`. A non-author non-owner matches 0 rows → ErrNotFound (no-oracle: same as a
+// foreign/absent comment). callerID is the server-resolved member id, never a client field.
+func (s *Store) UpdateComment(ctx context.Context, id, workspaceID, callerID, body string, isOwner bool) (*model.Comment, error) {
 	if body == "" {
 		return nil, errors.New("comment: body required")
 	}
 	c, err := scanComment(s.pool.QueryRow(ctx,
 		`UPDATE comments SET body = $2, edited_at = $3, updated_at = NOW()
         WHERE id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $4)
+          AND (author_id = $5 OR $6)
         RETURNING `+commentColumns,
-		id, body, time.Now().UTC(), workspaceID,
+		id, body, time.Now().UTC(), workspaceID, callerID, isOwner,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -97,10 +102,11 @@ func (s *Store) UpdateComment(ctx context.Context, id, workspaceID, body string)
 	return c, err
 }
 
-func (s *Store) DeleteComment(ctx context.Context, id, workspaceID string) error {
+func (s *Store) DeleteComment(ctx context.Context, id, workspaceID, callerID string, isOwner bool) error {
 	ct, err := s.pool.Exec(ctx,
-		`DELETE FROM comments WHERE id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $2)`,
-		id, workspaceID,
+		`DELETE FROM comments WHERE id = $1 AND issue_id IN (SELECT id FROM issues WHERE workspace_id = $2)
+          AND (author_id = $3 OR $4)`,
+		id, workspaceID, callerID, isOwner,
 	)
 	if err != nil {
 		return err

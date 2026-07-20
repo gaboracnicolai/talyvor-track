@@ -50,6 +50,18 @@ func sec5Member(t *testing.T, d *testutil.DB, wsID, email string) {
 	}
 }
 
+// sec5Owner seeds an OWNER. Team/project delete (and workspace admin) is owner-gated, so
+// tests exercising those ops through the chain need an owner caller to reach the store's
+// workspace-scoping logic (a member is short-circuited by the owner gate with 403).
+func sec5Owner(t *testing.T, d *testutil.DB, wsID, email string) {
+	t.Helper()
+	if _, err := d.Pool.Exec(context.Background(),
+		`INSERT INTO members (workspace_id, name, email, role) VALUES ($1,$2,$3,'owner')`,
+		wsID, email, email); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+}
+
 func delAs(wsID, subpath, email string) *http.Request {
 	req := httptest.NewRequest(http.MethodDelete, "/v1/workspaces/"+wsID+subpath, nil)
 	req.Header.Set(gatewayauth.HeaderGatewayAuth, sec5Secret)
@@ -89,8 +101,10 @@ func TestSEC5_Group1_CrossTenantDelete(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
-	sec5Member(t, d, wsA.ID, "alice@corp.com") // Alice → A only
-	sec5Member(t, d, wsB.ID, "bob@corp.com")   // Bob → B only
+	// Owners of their own workspace ONLY — team/project delete is owner-gated, so an owner
+	// caller is needed to reach the store's cross-tenant scoping (still 404 across tenants).
+	sec5Owner(t, d, wsA.ID, "alice@corp.com") // Alice → A only
+	sec5Owner(t, d, wsB.ID, "bob@corp.com")   // Bob → B only
 
 	// teamB is a PARENT for the project/issue objects (never itself deleted — a team with
 	// children can't be hard-deleted regardless of auth, so team-delete uses bare teams below).
