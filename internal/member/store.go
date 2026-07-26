@@ -56,3 +56,27 @@ func (s *Store) ListWorkspaceMembers(ctx context.Context, workspaceID string, li
 	}
 	return out, rows.Err()
 }
+
+// ListWorkspaceIDs returns every workspace id on this deployment.
+//
+// Track is the tenancy source of truth — it mints a workspace per identity at login
+// (internal/workspace/bootstrap.go) — so it is the only service that can answer this. It exists to
+// break the Docs cold-start deadlock: Docs used to enumerate workspaces from its OWN content, so a
+// workspace with no content was never synced a roster, so every write into it 403d, so it never got
+// content. See workspaces.go for the compensating controls on the endpoint that exposes this.
+func (s *Store) ListWorkspaceIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM workspaces ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("member: enumerate workspaces: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("member: scan workspace id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}

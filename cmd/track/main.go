@@ -437,7 +437,13 @@ func main() {
 		importerHandler.Mount(r)
 		importJobHandler.Mount(r)                                               // T8 Build B: async POST /import/jobs + GET /import/jobs/{id}
 		member.NewHandler(member.NewStore(pool), cfg.MemberSyncSecret).Mount(r) // A0b: GET /v1/service/members (gwExempt, bearer)
-		member.NewMgmtHandler(member.NewStore(pool)).Mount(r)                   // multi-member: owner-gated /v1/workspaces/{wsID}/members (list/add/change-role/remove)
+		// GET /v1/service/workspaces — same gwExempt path, same secret, same store. Breaks the Docs
+		// cold-start deadlock: Docs asks the tenancy source of truth which workspaces exist, instead
+		// of asking its own content tables whether a workspace has already been used. See
+		// internal/member/workspaces.go for why a full-deployment dump is acceptable HERE and not on
+		// the sibling roster read.
+		member.NewWorkspacesHandler(member.NewStore(pool), cfg.MemberSyncSecret).Mount(r)
+		member.NewMgmtHandler(member.NewStore(pool)).Mount(r) // multi-member: owner-gated /v1/workspaces/{wsID}/members (list/add/change-role/remove)
 		if integrationHandler != nil {
 			integrationHandler.Mount(r) // T8 Build C.1: POST /integrations + GET /integrations/{provider}
 		}
