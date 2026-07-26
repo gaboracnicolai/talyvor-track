@@ -22,9 +22,17 @@ import (
 // parameters, and a compile-time constant (never user input) keeps the SQL safe.
 func freshDB(t *testing.T) *pgx.Conn {
 	t.Helper()
+	// FAILS rather than skips when unset (audit: a guard that does not run is
+	// indistinguishable from one that passes). Same rule as testutil.RequireDatabaseURL,
+	// inlined because internal/testutil imports THIS package — importing it back would
+	// be an import cycle. `-short` is the one deliberate, command-line-only escape.
 	admin := os.Getenv("TRACK_TEST_DATABASE_URL")
 	if admin == "" {
-		t.Skip("TRACK_TEST_DATABASE_URL not set — skipping real-PG migrate test")
+		if testing.Short() {
+			t.Skip("TRACK_TEST_DATABASE_URL not set and -short given — skipping real-PG migrate test")
+		}
+		t.Fatal("TRACK_TEST_DATABASE_URL is not set — this real-Postgres migrate test fails rather than " +
+			"skips so a missing database cannot pass for a passing gate (use `go test -short` to skip deliberately)")
 	}
 	ctx := context.Background()
 	ac, err := pgx.Connect(ctx, admin)

@@ -17,7 +17,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"os"
 	"regexp"
 	"strconv"
 	"sync/atomic"
@@ -57,15 +56,12 @@ type DB struct {
 	seq   atomic.Int64
 }
 
-// New provisions a fresh isolated database, applies all migrations via the
-// production runner, and returns a ready DB. Skips the test when
-// TRACK_TEST_DATABASE_URL is unset.
+// New provisions a fresh isolated database, applies all migrations via the production
+// runner, and returns a ready DB. FAILS (does not skip) when TRACK_TEST_DATABASE_URL is
+// unset — see RequireDatabaseURL for why.
 func New(t *testing.T) *DB {
 	t.Helper()
-	admin := os.Getenv("TRACK_TEST_DATABASE_URL")
-	if admin == "" {
-		t.Skip("TRACK_TEST_DATABASE_URL not set — skipping real-Postgres integration test")
-	}
+	admin := RequireDatabaseURL(t)
 	ctx := context.Background()
 	name := "track_test_" + randToken(t) // unique per New() → parallel-safe
 

@@ -8,11 +8,19 @@ import (
 	"time"
 )
 
-func dsnOrSkip(t *testing.T) string {
+// dsnOrFail returns the admin DSN or FAILS the test. It does not skip: see
+// testutil.RequireDatabaseURL. (Inlined rather than imported — internal/testutil depends
+// on this package's siblings and pulling it in here would widen the test-only import
+// graph for one helper.) `-short` is the deliberate, command-line-only escape.
+func dsnOrFail(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("TRACK_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("TRACK_TEST_DATABASE_URL not set — skipping real-Postgres db test")
+		if testing.Short() {
+			t.Skip("TRACK_TEST_DATABASE_URL not set and -short given — skipping real-Postgres db test")
+		}
+		t.Fatal("TRACK_TEST_DATABASE_URL is not set — this real-Postgres test fails rather than skips " +
+			"so a missing database cannot pass for a passing gate (use `go test -short` to skip deliberately)")
 	}
 	return dsn
 }
@@ -27,7 +35,7 @@ func withParam(dsn, kv string) string {
 // TestNew_AppliesStatementTimeout proves New sets a non-zero statement_timeout
 // on its connections by default, so no query can run unbounded.
 func TestNew_AppliesStatementTimeout(t *testing.T) {
-	dsn := dsnOrSkip(t)
+	dsn := dsnOrFail(t)
 	ctx := context.Background()
 	pool, err := New(ctx, dsn)
 	if err != nil {
@@ -48,7 +56,7 @@ func TestNew_AppliesStatementTimeout(t *testing.T) {
 // request" guarantee: with a short statement_timeout, a deliberately slow query
 // is aborted by Postgres promptly rather than running to completion.
 func TestNew_StatementTimeoutAbortsLongQuery(t *testing.T) {
-	dsn := withParam(dsnOrSkip(t), "statement_timeout=300") // 300ms, overrides the default
+	dsn := withParam(dsnOrFail(t), "statement_timeout=300") // 300ms, overrides the default
 	ctx := context.Background()
 	pool, err := New(ctx, dsn)
 	if err != nil {
