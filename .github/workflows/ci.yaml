@@ -31,6 +31,28 @@ jobs:
           # AUTHENTICATION, and which has no test files at all — outside the lock.
           semgrep scan --config .semgrep/ --error --metrics=off internal/ cmd/
 
+  # ORG-LEVEL CLASS GUARD, not a Track guard. talyvor-docs and talyvor-track independently
+  # shipped the identical defect — a compose file supplying a real default for
+  # GATEWAY_AUTH_SECRET — and two separate audits found them. A per-repo test cannot catch
+  # the next repo, so scripts/check-compose-secrets.sh is COPIED VERBATIM from talyvor-docs
+  # (byte-identical; sha256 e4e82ee8…) and contains no repo-specific knowledge: no service
+  # names, no paths, and no memory of any particular string. It matched Track's
+  # POSTGRES_PASSWORD defaults by SHAPE, three of which nobody had reported.
+  #
+  # Deliberately its own job, with no `needs:`, so it runs in parallel and reports
+  # independently of the Go suite — the finding it makes is a deploy blocker, not a test
+  # failure, and should not be buried behind a 2-minute test job.
+  compose-secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: no compose file may supply a secret value
+        run: ./scripts/check-compose-secrets.sh
+
   # Formal static-analysis gate (T3): golangci-lint (errcheck, govet, ineffassign,
   # staticcheck, unused). Config in .golangci.yml. Blocking — a finding fails the build.
   lint:

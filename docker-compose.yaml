@@ -4,7 +4,13 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:-changeme}@postgres:5432/talyvor_track?sslmode=disable
+      # POSTGRES_PASSWORD has NO default. It shipped as `${POSTGRES_PASSWORD:-changeme}` in
+      # three places here, which is the same shape as the gateway-secret defect one line
+      # below: a `:-` fallback SUPPLIES the value, so `docker compose up` with no operator
+      # input started Postgres with a password published in this repo. Caught by
+      # scripts/check-compose-secrets.sh, which finds it by SHAPE — it has no knowledge of
+      # this repo or of the string `changeme`.
+      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 16) — there is no default; `changeme` shipped here for the life of this file}@postgres:5432/talyvor_track?sslmode=disable
       - TRACK_REDIS_URL=redis://redis:6379
       # Realtime HA fan-out across instances (T13). OFF by default — this single
       # bundled instance needs no cross-instance sharing. Set true when scaling
@@ -55,7 +61,7 @@ services:
     environment:
       POSTGRES_DB: talyvor_track
       POSTGRES_USER: track
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 16) — there is no default; `changeme` shipped here for the life of this file}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -73,7 +79,8 @@ services:
     build: .
     command: ["migrate", "up"]
     environment:
-      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:-changeme}@postgres:5432/talyvor_track?sslmode=disable
+      # No default — same reason as the track service above.
+      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 16) — there is no default; `changeme` shipped here for the life of this file}@postgres:5432/talyvor_track?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
