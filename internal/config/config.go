@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/talyvor/track/internal/gatewayauth"
 )
 
 type Config struct {
@@ -80,10 +82,11 @@ const MinMemberSyncSecretLen = 16
 // IntegrationEncryptionKeyLen is the required decoded key length: 32 bytes for AES-256.
 const IntegrationEncryptionKeyLen = 32
 
-// MinGatewayAuthSecretLen mirrors the edge gateway's GATEWAY_AUTH_SECRET minimum
-// (edge-infra auth-service config.rs); a shorter shared secret on either side is a
-// configuration error.
-const MinGatewayAuthSecretLen = 16
+// MinGatewayAuthSecretLen is re-exported from internal/gatewayauth, which OWNS the rule
+// (the boundary that enforces it also defines the minimum it can defend). Two separately
+// declared numbers could drift; this cannot. gatewayauth.Middleware refuses to start
+// below it regardless, so this boot check is the friendly early failure, not the guard.
+const MinGatewayAuthSecretLen = gatewayauth.MinSecretLen
 
 func Load() (*Config, error) {
 	c := &Config{

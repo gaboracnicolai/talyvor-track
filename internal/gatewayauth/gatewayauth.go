@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 )
 
@@ -27,6 +28,13 @@ const (
 	HeaderUserTeams   = "X-User-Teams"   // JWT teams claim, comma-separated
 	HeaderAuthIss     = "X-Auth-Iss"     // JWT issuer
 )
+
+// MinSecretLen is the shortest shared secret this boundary will defend. It mirrors the
+// edge gateway's own GATEWAY_AUTH_SECRET minimum (edge-infra auth-service config.rs).
+// The constant lives HERE, with the boundary that enforces it, so there is exactly one
+// authority: internal/config re-exports it for the boot check rather than re-declaring
+// a number that could drift.
+const MinSecretLen = 16
 
 // Identity is the gateway-verified caller identity. It is placed in context ONLY after
 // the transit proof verifies. Fields may be empty if the JWT lacked the claim — T9 does
@@ -60,10 +68,25 @@ func IdentityFrom(ctx context.Context) (Identity, bool) {
 // must NOT require the gateway proof; a nil exempt protects every route.
 //
 // On a non-exempt request: x-gateway-auth is compared to the secret CONSTANT-TIME (over
-// SHA-256 digests, so there is no length-dependent path at all). Absent or mismatched →
-// 401 immediately, BEFORE any identity header is read. The identity is read and trusted
-// only after the proof verifies.
+// SHA-256 digests, so there is no length-dependent path at all). Absent, empty, or
+// mismatched → 401 immediately, BEFORE any identity header is read. The identity is read
+// and trusted only after the proof verifies.
+//
+// FAIL-CLOSED BY CONSTRUCTION (audit fix). Middleware PANICS on a secret shorter than
+// MinSecretLen — an undefendable boundary refuses to start rather than serving an open
+// one. This is deliberately a panic and not an error return: it fires at wiring time, in
+// main, before the listener binds, so a misconfigured deploy dies loudly at boot instead
+// of accepting forged identity for its whole lifetime. Previously the ONLY protection
+// was a length check in internal/config; a binary, test harness, or refactor that reached
+// Middleware without going through config.Load got a boundary where sha256("") ==
+// sha256("") authorized every proofless request.
 func Middleware(secret string, exempt func(path string) bool) func(http.Handler) http.Handler {
+	if len(secret) < MinSecretLen {
+		panic(fmt.Sprintf(
+			"gatewayauth: refusing to start — transit-proof secret is %d chars, minimum is %d. "+
+				"Set GATEWAY_AUTH_SECRET to the edge gateway's real secret. An empty or short secret "+
+				"makes every identity header forgeable.", len(secret), MinSecretLen))
+	}
 	// Pre-hash the secret once; the per-request compare is over two fixed-length digests.
 	secretDigest := sha256.Sum256([]byte(secret))
 	return func(next http.Handler) http.Handler {
@@ -74,7 +97,15 @@ func Middleware(secret string, exempt func(path string) bool) func(http.Handler)
 			}
 
 			// Transit proof FIRST — nothing identity-related is read until this passes.
-			proofDigest := sha256.Sum256([]byte(r.Header.Get(HeaderGatewayAuth)))
+			// An ABSENT or EMPTY header is rejected outright, before any digest compare:
+			// that is what structurally removes the sha256("")==sha256("") equality, so
+			// the fail-open cannot return even if the construction guard is relaxed.
+			proof := r.Header.Get(HeaderGatewayAuth)
+			if proof == "" {
+				unauthorized(w)
+				return
+			}
+			proofDigest := sha256.Sum256([]byte(proof))
 			if subtle.ConstantTimeCompare(proofDigest[:], secretDigest[:]) != 1 {
 				unauthorized(w)
 				return

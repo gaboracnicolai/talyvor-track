@@ -14,9 +14,15 @@ services:
       - TRACK_LENS_API_KEY=${TRACK_LENS_API_KEY:-}
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}
       - TRACK_GITHUB_WEBHOOK_SECRET=${TRACK_GITHUB_WEBHOOK_SECRET:-}
-      # Track's copy of the edge gateway transit-proof secret. Track fail-closes without
-      # it (>=16 chars). Dev default here; production MUST set the gateway's real secret.
-      - GATEWAY_AUTH_SECRET=${GATEWAY_AUTH_SECRET:-dev-gateway-transit-secret-change-me}
+      # Track's copy of the edge gateway transit-proof secret — the root of the entire
+      # auth boundary: whoever knows it can present ANY identity to Track.
+      #
+      # NO DEFAULT, BY DESIGN. This used to fall back to a literal committed here, which
+      # satisfied Track's >=16-char boot check while being public — so the stack booted
+      # "fail-closed" with a secret anyone could read out of the repo. `:?` makes compose
+      # REFUSE to render the stack when the variable is unset or empty; there is nothing
+      # to fall back to. Generate one per environment: openssl rand -hex 32
+      - GATEWAY_AUTH_SECRET=${GATEWAY_AUTH_SECRET:?set GATEWAY_AUTH_SECRET to the edge gateway transit-proof secret (openssl rand -hex 32) — there is no default; a shared default is a published credential}
       - TRACK_LOG_LEVEL=${TRACK_LOG_LEVEL:-info}
     depends_on:
       postgres:
