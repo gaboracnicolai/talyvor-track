@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/testutil"
 )
 
@@ -122,5 +123,40 @@ func TestIssueCreate_OmittedCreator_ResolvesToCaller(t *testing.T) {
 	}
 	if got := issueCreatorOf(t, d, createdIssueID(t, rr)); got != aliceID {
 		t.Fatalf("creator_id = %q, want %q (resolved from the caller's membership)", got, aliceID)
+	}
+}
+
+// The store-layer half of the tenancy guard (the handler-layer half lives in
+// automation/github_tenancy_pg_test.go). An empty workspace is an ERROR, not a wildcard:
+// there is no legitimate caller that wants every tenant's ENG-42 at once, and a silent
+// wildcard is how the unscoped lookup survived review.
+func TestGetByIdentifier_EmptyWorkspace_IsAnError(t *testing.T) {
+	d := testutil.New(t)
+	ws := d.Workspace(t)
+	iss := d.Issue(t, ws.ID, "")
+
+	store := issue.NewStore(d.Pool)
+
+	// Sanity: it resolves when correctly scoped.
+	got, err := store.GetByIdentifier(context.Background(), iss.Identifier, ws.ID)
+	if err != nil || got == nil {
+		t.Fatalf("scoped lookup failed: got=%v err=%v", got, err)
+	}
+
+	// Unscoped must refuse rather than search every tenant.
+	if _, err := store.GetByIdentifier(context.Background(), iss.Identifier, ""); err == nil {
+		t.Fatal("GetByIdentifier with an empty workspace returned no error — an unscoped identifier lookup crosses tenants")
+	}
+}
+
+// A foreign workspace's identifier must not resolve, even when the identifier exists.
+func TestGetByIdentifier_ForeignWorkspace_DoesNotResolve(t *testing.T) {
+	d := testutil.New(t)
+	wsA := d.Workspace(t)
+	wsB := d.Workspace(t)
+	iss := d.Issue(t, wsA.ID, "")
+
+	if _, err := issue.NewStore(d.Pool).GetByIdentifier(context.Background(), iss.Identifier, wsB.ID); err == nil {
+		t.Fatalf("CROSS-TENANT READ: %s resolved when scoped to a workspace that does not hold it", iss.Identifier)
 	}
 }

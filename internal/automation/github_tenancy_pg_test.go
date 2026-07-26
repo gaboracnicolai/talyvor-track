@@ -165,3 +165,34 @@ func TestGitHub_ScopedWebhook_ActsOnlyOnItsOwnWorkspace(t *testing.T) {
 		t.Fatalf("CROSS-TENANT WRITE: the OTHER workspace's %s received %d comment(s)", ident, n)
 	}
 }
+
+// LAYERING (found by positive-controlling the test above): removing handlePullRequest's
+// fail-closed early return did NOT turn TestGitHub_UnscopedWebhook red, because
+// issue.Store.GetByIdentifier rejects an empty workspace on its own and handleMerged
+// skips on the error. That test therefore pins the END-TO-END property ("no scope ⇒ no
+// write") while the store is what actually enforces it — so the handler's guard had no
+// test of its own and could have been deleted silently.
+//
+// This pins the handler layer directly: with no workspace configured it must not reach
+// the store AT ALL. Two independent guards, two independent tests.
+func TestGitHub_UnscopedWebhook_ShortCircuitsBeforeTouchingTheStore(t *testing.T) {
+	fake := &fakeIssueLookup{issuesByIdentifier: map[string]*model.Issue{
+		"ENG-42": {ID: "i-1", Identifier: "ENG-42", WorkspaceID: "ws-1"},
+	}}
+	h := NewGitHubHandler(nil, fake, ghTenancySecret) // deliberately NO WithWorkspace
+
+	body := []byte(`{"action":"closed","pull_request":{"number":7,"title":"Fixes ENG-42","body":"","merged":true}}`)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, signedGitHubReq(t, ghTenancySecret, "pull_request", body))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("webhook = %d, want 200", rr.Code)
+	}
+	if fake.lookups != 0 {
+		t.Fatalf("handler made %d issue lookup(s) with no workspace scope — it must short-circuit "+
+			"before the store, not rely on the store rejecting an empty workspace", fake.lookups)
+	}
+	if len(fake.updates) != 0 || len(fake.comments) != 0 {
+		t.Fatalf("unscoped webhook produced %d update(s) and %d comment(s)", len(fake.updates), len(fake.comments))
+	}
+}

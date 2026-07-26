@@ -21,12 +21,16 @@ type fakeIssueLookup struct {
 	issuesByIdentifier map[string]*model.Issue
 	updates            []map[string]any
 	comments           []model.Comment
+	lookups            int // GetByIdentifier call count — lets a test prove the handler short-circuits
 }
 
 // GetByIdentifier ENFORCES the workspace scope, mirroring issue.Store: an identifier is
 // unique per workspace only, so a fake that ignored workspaceID would let a tenancy
 // regression pass here while failing on real Postgres.
 func (f *fakeIssueLookup) GetByIdentifier(_ context.Context, ident, workspaceID string) (*model.Issue, error) {
+	f.mu.Lock()
+	f.lookups++
+	f.mu.Unlock()
 	if workspaceID == "" {
 		return nil, errors.New("fakeIssueLookup: GetByIdentifier called without a workspace scope")
 	}
