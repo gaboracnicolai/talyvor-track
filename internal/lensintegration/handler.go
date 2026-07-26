@@ -16,7 +16,7 @@ import (
 // whole issue package.
 type issueReader interface {
 	GetByID(ctx context.Context, id string) (*model.Issue, error)
-	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
+	GetByIdentifier(ctx context.Context, identifier, workspaceID string) (*model.Issue, error)
 	TopByAICost(ctx context.Context, workspaceID string, limit int) ([]model.Issue, error)
 }
 

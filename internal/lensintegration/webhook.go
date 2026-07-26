@@ -37,7 +37,7 @@ type deliveryDeduper interface {
 // uses to find which issue + assignee to notify. Defined here as an
 // interface so tests can substitute a counter mock.
 type issueLookup interface {
-	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
+	GetByIdentifier(ctx context.Context, identifier, workspaceID string) (*model.Issue, error)
 	RecordSpendEvent(ctx context.Context, eventKey, lensFeature string, costUSD float64, tokens int, workspaceID, source string) (int, error)
 }
 
@@ -242,10 +242,12 @@ func (h *WebhookHandler) handleSpendAlert(ctx context.Context, p SpendAlertPaylo
 		)
 	}
 
-	// Look up the issue by its identifier (Lens uses the issue
-	// identifier as the X-Talyvor-Feature value). If no match,
-	// notification simply has no assignee — that's still useful.
-	issue, _ := h.issues.GetByIdentifier(ctx, p.Feature)
+	// Look up the issue by its identifier (Lens uses the issue identifier as the
+	// X-Talyvor-Feature value), SCOPED to the workspace the signed payload names. An
+	// identifier is unique per workspace only, so an unscoped lookup could notify — and
+	// broadcast the alert into the realtime room of — a different tenant's issue that
+	// merely shares the identifier. If no match, the notification simply has no assignee.
+	issue, _ := h.issues.GetByIdentifier(ctx, p.Feature, p.WorkspaceID)
 
 	if h.notifications != nil && issue != nil && issue.AssigneeID != nil {
 		_, err := h.notifications.Create(ctx, notification.Notification{

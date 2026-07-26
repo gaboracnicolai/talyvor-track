@@ -24,8 +24,9 @@ type recordingIssueLookup struct {
 	issue     *model.Issue
 }
 
-func (r *recordingIssueLookup) GetByIdentifier(_ context.Context, ident string) (*model.Issue, error) {
-	if r.issue != nil && r.issue.Identifier == ident {
+// Scoped like issue.Store: an identifier only resolves inside its own workspace.
+func (r *recordingIssueLookup) GetByIdentifier(_ context.Context, ident, workspaceID string) (*model.Issue, error) {
+	if r.issue != nil && r.issue.Identifier == ident && r.issue.WorkspaceID == workspaceID {
 		return r.issue, nil
 	}
 	return nil, nil
@@ -118,10 +119,11 @@ func TestWebhook_SpendAlertUpdatesIssueAICost(t *testing.T) {
 	assignee := "alice"
 	issues := &recordingIssueLookup{
 		issue: &model.Issue{
-			ID:         "issue-1",
-			TeamID:     "team-1",
-			Identifier: "ENG-42",
-			AssigneeID: &assignee,
+			ID:          "issue-1",
+			WorkspaceID: "ws-1", // the tenant the alert names; the lookup is now scoped to it
+			TeamID:      "team-1",
+			Identifier:  "ENG-42",
+			AssigneeID:  &assignee,
 		},
 	}
 	wh := NewWebhookHandler("s", issues, &recordingNotifications{}, &recordingNotifier{})
@@ -149,7 +151,7 @@ func TestWebhook_SpendAlertCreatesNotificationForAssignee(t *testing.T) {
 	assignee := "alice"
 	issues := &recordingIssueLookup{
 		issue: &model.Issue{
-			ID: "issue-1", TeamID: "team-1",
+			ID: "issue-1", WorkspaceID: "ws-1", TeamID: "team-1",
 			Identifier: "ENG-42", AssigneeID: &assignee,
 		},
 	}
@@ -178,7 +180,7 @@ func TestWebhook_SpendAlertBroadcastsToRealtime(t *testing.T) {
 	assignee := "alice"
 	issues := &recordingIssueLookup{
 		issue: &model.Issue{
-			ID: "issue-1", TeamID: "team-1",
+			ID: "issue-1", WorkspaceID: "ws-1", TeamID: "team-1",
 			Identifier: "ENG-42", AssigneeID: &assignee,
 		},
 	}

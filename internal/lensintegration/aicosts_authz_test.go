@@ -16,7 +16,7 @@ import (
 type stubIssues struct{ issue *model.Issue }
 
 func (s stubIssues) GetByID(context.Context, string) (*model.Issue, error) { return s.issue, nil }
-func (s stubIssues) GetByIdentifier(context.Context, string) (*model.Issue, error) {
+func (s stubIssues) GetByIdentifier(context.Context, string, string) (*model.Issue, error) {
 	return s.issue, nil
 }
 func (s stubIssues) TopByAICost(context.Context, string, int) ([]model.Issue, error) {
