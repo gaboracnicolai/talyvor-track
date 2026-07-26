@@ -42,9 +42,8 @@ func newTestHandler(t *testing.T, secret string, ids []string) http.Handler {
 }
 
 type stubLister struct {
-	ids  []string
-	err  error
-	seen int
+	ids []string
+	err error
 }
 
 func (s stubLister) ListWorkspaceIDs(ctx context.Context) ([]string, error) {
