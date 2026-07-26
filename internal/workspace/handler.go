@@ -17,6 +17,14 @@ type Handler struct{ store *Store }
 func NewHandler(store *Store) *Handler { return &Handler{store: store} }
 
 func (h *Handler) Mount(r chi.Router) {
+	// Bootstrap sits OUTSIDE /workspaces on purpose: authz.workspaceIDFromPath reads the
+	// third segment of /v1/workspaces/... as a {wsID}, so /v1/workspaces/bootstrap would be
+	// checked against the caller's memberships and 403'd — and a caller with no workspace
+	// has none by definition. It still runs behind the same gatewayauth + authz chain as
+	// everything else here (Mount receives the /v1 router); it simply carries no {wsID} for
+	// the membership check to bind to. See bootstrap.go for why it is a route at all.
+	r.Post("/bootstrap", h.Bootstrap)
+
 	r.Route("/workspaces", func(r chi.Router) {
 		r.Post("/", h.Create)
 		r.Get("/", h.List)
