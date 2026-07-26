@@ -61,7 +61,11 @@ const (
 type issueStoreIface interface {
 	Create(ctx context.Context, i model.Issue) (*model.Issue, error)
 	GetByID(ctx context.Context, id string) (*model.Issue, error)
-	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
+	GetByIdentifier(ctx context.Context, identifier, workspaceID string) (*model.Issue, error)
+	// WorkspaceOfIdentifier resolves an identifier to whichever of the caller's OWN
+	// workspaces holds it — the chokepoint's only way to derive a workspace from a
+	// tool argument that names one by human identifier. "" on no match OR ambiguity.
+	WorkspaceOfIdentifier(ctx context.Context, identifier string, allowed []string) (string, error)
 	List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error)
 	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	Search(ctx context.Context, workspaceID, query string, limit int) ([]model.Issue, error)
@@ -575,7 +579,19 @@ func (s *Server) workspaceForIssue(ctx context.Context, issueID, identifier stri
 	case issueID != "":
 		iss, err = s.issueStore.GetByID(ctx, issueID)
 	case identifier != "":
-		iss, err = s.issueStore.GetByIdentifier(ctx, identifier)
+		// An identifier is only unique PER WORKSPACE, so it cannot be resolved globally.
+		// Bound the search to the caller's own memberships and deny on ambiguity — the
+		// store returns "" when two of the caller's workspaces both hold it rather than
+		// picking one (see issue.Store.WorkspaceOfIdentifier).
+		ms, ok := authz.Memberships(ctx)
+		if !ok {
+			return "", nil
+		}
+		allowed := make([]string, 0, len(ms))
+		for _, m := range ms {
+			allowed = append(allowed, m.WorkspaceID)
+		}
+		return s.issueStore.WorkspaceOfIdentifier(ctx, identifier, allowed)
 	default:
 		return "", nil
 	}
@@ -751,7 +767,10 @@ func (s *Server) toolGetIssue(ctx context.Context, args json.RawMessage) (any, e
 	if in.IssueID != "" {
 		out, err = s.issueStore.GetByID(ctx, in.IssueID)
 	} else {
-		out, err = s.issueStore.GetByIdentifier(ctx, in.Identifier)
+		// The chokepoint authorized a workspace before dispatch; scope the read to it
+		// (scopeIssueToCaller re-checks, but the query must not cross tenants either).
+		authorizedWS, _ := authz.WorkspaceID(ctx)
+		out, err = s.issueStore.GetByIdentifier(ctx, in.Identifier, authorizedWS)
 	}
 	// D11: scope the read to the caller's authorized workspace. A foreign
 	// or missing issue is indistinguishable (errIssueNotFound).

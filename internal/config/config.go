@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/talyvor/track/internal/gatewayauth"
 )
 
 type Config struct {
@@ -80,10 +82,32 @@ const MinMemberSyncSecretLen = 16
 // IntegrationEncryptionKeyLen is the required decoded key length: 32 bytes for AES-256.
 const IntegrationEncryptionKeyLen = 32
 
-// MinGatewayAuthSecretLen mirrors the edge gateway's GATEWAY_AUTH_SECRET minimum
-// (edge-infra auth-service config.rs); a shorter shared secret on either side is a
-// configuration error.
-const MinGatewayAuthSecretLen = 16
+// publishedGatewaySecrets are GATEWAY_AUTH_SECRET values that have been PUBLISHED — shipped
+// as a default in this repo's compose file, and therefore committed to git history.
+//
+// Git history is permanent: deleting a value from HEAD does not un-publish it. Anyone who
+// has ever cloned, forked, or read this repository has it — as does GitHub's code-search
+// index — and with it can set x-gateway-auth + x-user-email and be any user in any
+// workspace. So these are rejected FOREVER, regardless of length: a secret's strength is
+// irrelevant once it is public.
+//
+// This is what makes the boot check a real guard rather than a formality. The shipped
+// default was 36 characters and SATISFIED the >= 16 bound, so the fail-closed path never
+// fired on the one configuration that actually needed it. The compose fix stops the
+// DEFAULT; this stops the VALUE — including someone pasting it out of git history.
+//
+// Add to this list, never remove from it. Ported from talyvor-docs, which hit the identical
+// defect independently.
+var publishedGatewaySecrets = map[string]bool{
+	// docker-compose.yaml, from 6f1acc8 (#22) through a3bc7b2 — 42 of 78 commits on main.
+	"dev-gateway-transit-secret-change-me": true,
+}
+
+// MinGatewayAuthSecretLen is re-exported from internal/gatewayauth, which OWNS the rule
+// (the boundary that enforces it also defines the minimum it can defend). Two separately
+// declared numbers could drift; this cannot. gatewayauth.Middleware refuses to start
+// below it regardless, so this boot check is the friendly early failure, not the guard.
+const MinGatewayAuthSecretLen = gatewayauth.MinSecretLen
 
 func Load() (*Config, error) {
 	c := &Config{
@@ -105,6 +129,14 @@ func Load() (*Config, error) {
 	// than the gateway's minimum → refuse to start rather than run insecure.
 	if len(c.GatewayAuthSecret) < MinGatewayAuthSecretLen {
 		return nil, fmt.Errorf("%w: GATEWAY_AUTH_SECRET must be set and >= %d chars (Track's copy of the edge gateway transit-proof secret)", ErrMissingEnv, MinGatewayAuthSecretLen)
+	}
+	// …and not a value that has already been published. Checked AFTER the length bound so a
+	// short secret still gets the more useful "too short" message, and deliberately not
+	// constant-time: these values are public by definition, so there is nothing to leak.
+	if publishedGatewaySecrets[c.GatewayAuthSecret] {
+		return nil, fmt.Errorf("%w: GATEWAY_AUTH_SECRET is a PUBLISHED placeholder from this "+
+			"repo and is permanently compromised — it is in git history, so it cannot be made "+
+			"secret again. Generate a fresh value: openssl rand -hex 32", ErrMissingEnv)
 	}
 	// Integration token-encryption key — OPTIONAL, but if provided it must decode to exactly 32 bytes.
 	// Fail-LOUD at boot on a misconfigured key (wrong length / not base64), never a broken-crypto surprise at

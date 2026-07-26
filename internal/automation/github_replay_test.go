@@ -34,7 +34,7 @@ func TestGitHub_ReplayedDeliveryIsDeduped(t *testing.T) {
 	fake := &fakeIssueLookup{issuesByIdentifier: map[string]*model.Issue{
 		"ENG-42": {ID: "i-1", Identifier: "ENG-42", WorkspaceID: "ws-1"},
 	}}
-	h := NewGitHubHandler(nil, fake, "topsecret").WithDeduper(&memDeduper{})
+	h := NewGitHubHandler(nil, fake, "topsecret").WithWorkspace("ws-1").WithDeduper(&memDeduper{})
 
 	// Same signed body + same delivery id, delivered twice (GitHub retry / attacker replay).
 	for i := 0; i < 2; i++ {

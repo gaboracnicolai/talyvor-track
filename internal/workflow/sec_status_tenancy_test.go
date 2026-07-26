@@ -55,7 +55,7 @@ func TestSEC_CreateStatus_CrossWorkspace_Rejected(t *testing.T) {
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
 	wfSeedMember(t, d, wsA.ID, "alice@corp.com") // member of wsA only
-	teamB := d.Team(t, wsB.ID)                    // team in wsB
+	teamB := d.Team(t, wsB.ID)                   // team in wsB
 
 	rr := httptest.NewRecorder()
 	wfChain(d).ServeHTTP(rr, wfPost(wsA.ID, teamB.ID, "alice@corp.com",

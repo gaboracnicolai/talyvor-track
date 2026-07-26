@@ -44,11 +44,25 @@ func (f *scopingIssueStore) GetByID(_ context.Context, id string) (*model.Issue,
 	}
 	return nil, errors.New("not found")
 }
-func (f *scopingIssueStore) GetByIdentifier(_ context.Context, ident string) (*model.Issue, error) {
-	if iss, ok := f.byIdentifier[ident]; ok {
+func (f *scopingIssueStore) GetByIdentifier(_ context.Context, ident, workspaceID string) (*model.Issue, error) {
+	if iss, ok := f.byIdentifier[ident]; ok && iss.WorkspaceID == workspaceID {
 		return iss, nil
 	}
 	return nil, errors.New("not found")
+}
+
+// WorkspaceOfIdentifier resolves only within `allowed` (the caller's memberships).
+func (f *scopingIssueStore) WorkspaceOfIdentifier(_ context.Context, ident string, allowed []string) (string, error) {
+	iss, ok := f.byIdentifier[ident]
+	if !ok {
+		return "", nil
+	}
+	for _, ws := range allowed {
+		if ws == iss.WorkspaceID {
+			return iss.WorkspaceID, nil
+		}
+	}
+	return "", nil
 }
 
 // unused by these tests — present only to satisfy issueStoreIface.
@@ -68,6 +82,7 @@ func (f *scopingIssueStore) Update(_ context.Context, id, workspaceID string, _ 
 func (f *scopingIssueStore) Search(context.Context, string, string, int) ([]model.Issue, error) {
 	return nil, nil
 }
+
 // CreateComment models the real store's tenancy scoping: the comment lands
 // only if its issue is in the passed workspaceID, else issue.ErrNotFound.
 func (f *scopingIssueStore) CreateComment(_ context.Context, c model.Comment, workspaceID string) (*model.Comment, error) {

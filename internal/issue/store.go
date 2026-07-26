@@ -363,10 +363,23 @@ func (s *Store) GetByID(ctx context.Context, id string) (*model.Issue, error) {
 	return out, nil
 }
 
-func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error) {
+// workspaceID is REQUIRED. This lookup used to run `WHERE identifier = $1` with no
+// tenancy filter, but migration 0022 made identifier unique PER WORKSPACE, not globally
+// — two tenants each running a team called ENG both hold ENG-42, and QueryRow returned
+// whichever row Postgres produced first. The GitHub webhook then WROTE through it
+// (status→done plus a comment), so a single global webhook secret could close any
+// tenant's issue by naming an identifier, non-deterministically. An empty workspaceID is
+// an error rather than a wildcard: there is no legitimate caller that wants every tenant's
+// ENG-42 at once, and a silent wildcard is how this got missed. Callers that must resolve
+// an identifier WITHOUT knowing the workspace up front use WorkspaceOfIdentifier, which
+// is bounded by the caller's own memberships.
+func (s *Store) GetByIdentifier(ctx context.Context, identifier, workspaceID string) (*model.Issue, error) {
+	if workspaceID == "" {
+		return nil, errors.New("issue: GetByIdentifier requires a workspace_id (an unscoped identifier lookup crosses tenants)")
+	}
 	out, err := scanIssue(s.pool.QueryRow(ctx,
-		`SELECT `+issueColumns+` FROM issues WHERE identifier = $1`,
-		identifier,
+		`SELECT `+issueColumns+` FROM issues WHERE identifier = $1 AND workspace_id = $2`,
+		identifier, workspaceID,
 	))
 	if err != nil {
 		return nil, err
@@ -815,6 +828,50 @@ func (s *Store) RecordRequestSpend(ctx context.Context, requestID, feature strin
 		return false, false, fmt.Errorf("issue: record request spend: %w", qErr)
 	}
 	return resolvedN > 0, insertedN > 0, nil
+}
+
+// WorkspaceOfIdentifier resolves which of the CALLER'S OWN workspaces holds an issue with
+// this human identifier. It exists for the one legitimate shape that cannot name the
+// workspace up front — the MCP tools/call chokepoint, where a tool is invoked with
+// {"identifier":"ENG-42"} and the workspace must be derived before it can be authorized.
+//
+// Fail-closed on both ends:
+//   - the search is bounded to `allowed` (the caller's resolved memberships), so it can
+//     never see a tenant the caller has no relationship with;
+//   - AMBIGUITY IS A DENIAL. If the caller belongs to two workspaces that both hold
+//     ENG-42, this returns "" rather than picking one. Choosing arbitrarily is exactly
+//     what the unscoped lookup did, and "the caller is a member of both" does not make an
+//     arbitrary choice correct — it makes it a silent mis-target.
+//
+// Returns "" (no error) for no match, so callers get the same no-oracle denial for
+// "does not exist" and "not yours".
+func (s *Store) WorkspaceOfIdentifier(ctx context.Context, identifier string, allowed []string) (string, error) {
+	if identifier == "" || len(allowed) == 0 {
+		return "", nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT workspace_id FROM issues WHERE identifier = $1 AND workspace_id = ANY($2) LIMIT 2`,
+		identifier, allowed,
+	)
+	if err != nil {
+		return "", fmt.Errorf("issue: workspace of identifier: %w", err)
+	}
+	defer rows.Close()
+	var found []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			return "", err
+		}
+		found = append(found, ws)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(found) != 1 {
+		return "", nil // 0 = not found/not yours; >1 = ambiguous ⇒ deny, never guess
+	}
+	return found[0], nil
 }
 
 // TopByAICost returns the workspace's most expensive issues in

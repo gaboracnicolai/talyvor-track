@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -20,10 +21,20 @@ type fakeIssueLookup struct {
 	issuesByIdentifier map[string]*model.Issue
 	updates            []map[string]any
 	comments           []model.Comment
+	lookups            int // GetByIdentifier call count — lets a test prove the handler short-circuits
 }
 
-func (f *fakeIssueLookup) GetByIdentifier(_ context.Context, ident string) (*model.Issue, error) {
-	if i, ok := f.issuesByIdentifier[ident]; ok {
+// GetByIdentifier ENFORCES the workspace scope, mirroring issue.Store: an identifier is
+// unique per workspace only, so a fake that ignored workspaceID would let a tenancy
+// regression pass here while failing on real Postgres.
+func (f *fakeIssueLookup) GetByIdentifier(_ context.Context, ident, workspaceID string) (*model.Issue, error) {
+	f.mu.Lock()
+	f.lookups++
+	f.mu.Unlock()
+	if workspaceID == "" {
+		return nil, errors.New("fakeIssueLookup: GetByIdentifier called without a workspace scope")
+	}
+	if i, ok := f.issuesByIdentifier[ident]; ok && i.WorkspaceID == workspaceID {
 		return i, nil
 	}
 	return nil, nil
@@ -105,7 +116,7 @@ func TestGitHub_PRMergedSetsIssueStatusToDone(t *testing.T) {
 			"ENG-42": {ID: "i-1", Identifier: "ENG-42", WorkspaceID: "ws-1"},
 		},
 	}
-	h := NewGitHubHandler(nil, issues, "s")
+	h := NewGitHubHandler(nil, issues, "s").WithWorkspace("ws-1")
 
 	req := signedGitHubReq(t, "s", "pull_request", body)
 	h.ServeHTTP(httptest.NewRecorder(), req)
@@ -133,7 +144,7 @@ func TestGitHub_PRMergedAddsClosingComment(t *testing.T) {
 			"ENG-42": {ID: "i-1", Identifier: "ENG-42", WorkspaceID: "ws-1"},
 		},
 	}
-	h := NewGitHubHandler(nil, issues, "s")
+	h := NewGitHubHandler(nil, issues, "s").WithWorkspace("ws-1")
 
 	h.ServeHTTP(httptest.NewRecorder(), signedGitHubReq(t, "s", "pull_request", body))
 

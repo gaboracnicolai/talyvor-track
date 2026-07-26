@@ -16,11 +16,12 @@ import (
 	"github.com/talyvor/track/internal/testutil"
 )
 
-// convertEnv seeds a workspace, team, board, and post, and returns a router with the
-// convert route mounted plus the path-relevant IDs.
-func convertEnv(t *testing.T) (router http.Handler, wsID, boardID, postID, teamID string) {
+// convertEnv seeds a workspace, team, board, and post, and returns the DB (so a test can
+// assert on the persisted row, not just the response) plus a router with the convert
+// route mounted and the path-relevant IDs.
+func convertEnv(t *testing.T) (d *testutil.DB, router http.Handler, wsID, boardID, postID, teamID string) {
 	t.Helper()
-	d := testutil.New(t)
+	d = testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
 	fb := featureboard.NewStore(d.Pool)
@@ -37,7 +38,19 @@ func convertEnv(t *testing.T) (router http.Handler, wsID, boardID, postID, teamI
 	h := featureboard.NewHandler(fb, issue.NewStore(d.Pool))
 	r := chi.NewRouter()
 	r.Post("/workspaces/{wsID}/boards/{boardID}/posts/{postID}/convert", h.AdminConvert)
-	return r, ws.ID, board.ID, post.ID, team.ID
+	return d, r, ws.ID, board.ID, post.ID, team.ID
+}
+
+// issueCreatorFromDB reads the persisted creator_id of a converted issue. Asserting on
+// the ROW rather than the response is what makes the authorship tests load-bearing.
+func issueCreatorFromDB(t *testing.T, d *testutil.DB, issueID string) string {
+	t.Helper()
+	var creator string
+	if err := d.Pool.QueryRow(context.Background(),
+		`SELECT creator_id FROM issues WHERE id=$1`, issueID).Scan(&creator); err != nil {
+		t.Fatalf("read creator_id for issue %s: %v", issueID, err)
+	}
+	return creator
 }
 
 func convert(t *testing.T, r http.Handler, wsID, boardID, postID, body string) *httptest.ResponseRecorder {
@@ -55,24 +68,30 @@ func convert(t *testing.T, r http.Handler, wsID, boardID, postID, body string) *
 	return rr
 }
 
-// TestAdminConvert_MissingCreatorID_ClearError — omitting creator_id yields a clear
-// contract error, not the cryptic CONVERT_FAILED DB failure from issues.Create.
-func TestAdminConvert_MissingCreatorID_ClearError(t *testing.T) {
-	r, wsID, boardID, postID, teamID := convertEnv(t)
-	rr := convert(t, r, wsID, boardID, postID, `{"team_id":"`+teamID+`"}`)
+// TestAdminConvert_MissingTeamID_ClearError — team_id is a genuine client-supplied
+// parameter (the admin chooses which team receives the issue), so omitting it is still a
+// clear contract error rather than a cryptic CONVERT_FAILED from issues.Create.
+//
+// NOTE: this test previously asserted the SAME contract for creator_id. That assertion
+// was pinning the forged-authorship defect — it required the client to name the actor,
+// which is precisely what let a caller name someone else. Requiring an identity the
+// server already knows is never a contract; it is an injection point. Authorship is now
+// covered by convert_authorship_test.go.
+func TestAdminConvert_MissingTeamID_ClearError(t *testing.T) {
+	_, r, wsID, boardID, postID, _ := convertEnv(t)
+	rr := convert(t, r, wsID, boardID, postID, `{}`)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "creator_id required") {
-		t.Fatalf("body = %s, want a clear 'creator_id required' message", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "team_id required") {
+		t.Fatalf("body = %s, want a clear 'team_id required' message", rr.Body.String())
 	}
 }
 
-// TestAdminConvert_Valid_CreatesIssue — with team_id + creator_id the post converts to
-// an issue (201).
+// TestAdminConvert_Valid_CreatesIssue — with team_id the post converts to an issue (201).
 func TestAdminConvert_Valid_CreatesIssue(t *testing.T) {
-	r, wsID, boardID, postID, teamID := convertEnv(t)
-	rr := convert(t, r, wsID, boardID, postID, `{"team_id":"`+teamID+`","creator_id":"admin-1"}`)
+	_, r, wsID, boardID, postID, teamID := convertEnv(t)
+	rr := convert(t, r, wsID, boardID, postID, `{"team_id":"`+teamID+`"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
 	}

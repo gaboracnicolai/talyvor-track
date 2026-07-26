@@ -151,7 +151,11 @@ func main() {
 	defer pool.Close()
 
 	// Stores own the SQL; handlers own the JSON; main wires them.
-	hub := realtime.NewHub()
+	// The room authorizer is what keeps a connected client inside its own tenant: a
+	// subscribe names a room ("team:<id>", "issue:<id>") and this proves the object lives
+	// in the client's authorized workspace. Without it the hub can only vouch for
+	// "workspace:<own>" rooms and DENIES the rest — degraded, never open.
+	hub := realtime.NewHub().WithRoomAuthorizer(realtime.NewPGRoomAuthorizer(pool))
 	// T13 HA: opt-in Redis pub/sub so realtime events cross Track instances.
 	// OFF by default — a single instance behaves exactly as before and never
 	// touches Redis. When TRACK_HA_ENABLED is set, mirror events through
@@ -255,7 +259,18 @@ func main() {
 	slackNotifier := automation.NewSlackNotifier()
 	automationEngine := automation.New(pool, issueStore, slackNotifier)
 	automationHandler := automation.NewHandler(automationEngine)
+	// The GitHub webhook is authenticated by ONE global secret and carries no tenant
+	// signal, while PR references ("Closes ENG-42") are only unique per workspace. It is
+	// therefore bound to an explicit workspace; unset ⇒ deliveries are authenticated and
+	// acknowledged but perform NO issue side effects (fail-closed) rather than writing to
+	// whichever tenant the database happened to return first.
+	githubWorkspace := os.Getenv("TRACK_GITHUB_WEBHOOK_WORKSPACE_ID")
+	if githubWorkspace == "" && os.Getenv("TRACK_GITHUB_WEBHOOK_SECRET") != "" {
+		slog.Warn("automation: TRACK_GITHUB_WEBHOOK_SECRET is set but TRACK_GITHUB_WEBHOOK_WORKSPACE_ID is not — " +
+			"github webhooks will authenticate but take no issue action (fail-closed)")
+	}
 	githubHandler := automation.NewGitHubHandler(automationEngine, issueStore, os.Getenv("TRACK_GITHUB_WEBHOOK_SECRET")).
+		WithWorkspace(githubWorkspace).     // tenancy scope: no workspace ⇒ no issue writes
 		WithDeduper(webhookdedup.New(pool)) // SEC-7: durable X-GitHub-Delivery cross-delivery replay guard
 
 	// Adapter bridges the issue handler's string-typed automation

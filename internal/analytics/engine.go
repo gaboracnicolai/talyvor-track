@@ -138,9 +138,9 @@ type BurndownReport struct {
 // enrichments.
 func (e *Engine) GetBurndown(ctx context.Context, cycleID, workspaceID string) (*BurndownReport, error) {
 	var (
-		name             string
-		start, end       time.Time
-		total            int
+		name       string
+		start, end time.Time
+		total      int
 	)
 	if err := e.pool.QueryRow(ctx,
 		`SELECT c.name, c.start_date, c.end_date,
@@ -306,7 +306,7 @@ func (e *Engine) GetTimeToResolution(ctx context.Context, workspaceID, teamID st
 	days = clampDays(days)
 
 	var (
-		args   = []any{workspaceID, days}
+		args    = []any{workspaceID, days}
 		teamSQL = ""
 	)
 	if teamID != "" {
@@ -406,8 +406,8 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 
 	// Totals + averages — one row scan.
 	var (
-		total   float64
-		count   int
+		total float64
+		count int
 	)
 	if err := e.pool.QueryRow(ctx, `
         SELECT COALESCE(SUM(ai_cost_usd), 0), COUNT(*) FILTER (WHERE ai_cost_usd > 0)

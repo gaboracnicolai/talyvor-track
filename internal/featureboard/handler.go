@@ -151,23 +151,33 @@ func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
 		return
 	}
+	// SEC-5 (identity): the converting admin is the verified session member, resolved from
+	// their membership — not a body field. This handler used to accept creator_id from the
+	// request ("the converting admin supplies their own member id"), which let any member
+	// attribute a converted issue to anyone. Requiring an identity the server already holds
+	// is not a contract; it is an injection point.
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok || actorID == "" {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no resolved member for this workspace")
+		return
+	}
 	postID := chi.URLParam(r, "postID")
 	var in struct {
-		TeamID    string `json:"team_id"`
-		CreatorID string `json:"creator_id"`
+		TeamID string `json:"team_id"`
+		// CreatorID is DECODED AND IGNORED. It stays declared only so existing callers
+		// that still send it get their conversion done instead of a 400 from
+		// DecodeJSON's DisallowUnknownFields — the value is never read. Same posture as
+		// the MCP add_comment tool's author_id argument and issue.Handler.Create.
+		CreatorID string `json:"creator_id,omitempty"`
 	}
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
+	_ = in.CreatorID // never an identity source; the actor is actorID above
+	// team_id IS a real client choice (which team receives the issue), so it keeps its
+	// explicit contract error rather than failing cryptically inside issues.Create.
 	if in.TeamID == "" {
 		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "team_id required")
-		return
-	}
-	// The converted issue's creator_id is NOT NULL; require it explicitly so an omitted
-	// value is a clear contract error here, not a cryptic DB failure deep in
-	// issues.Create. The converting admin supplies their own member id.
-	if in.CreatorID == "" {
-		writeErr(w, http.StatusBadRequest, "BAD_PARAMS", "creator_id required")
 		return
 	}
 	post, err := h.store.GetPost(r.Context(), postID)
@@ -191,7 +201,7 @@ func (h *Handler) AdminConvert(w http.ResponseWriter, r *http.Request) {
 		TeamID:      in.TeamID,
 		Title:       post.Title,
 		Description: post.Description + "\n\n(Converted from feature board post)",
-		CreatorID:   in.CreatorID,
+		CreatorID:   actorID,
 		Status:      model.StatusBacklog,
 	})
 	if err != nil {

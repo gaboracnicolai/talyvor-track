@@ -4,7 +4,13 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:-changeme}@postgres:5432/talyvor_track?sslmode=disable
+      # POSTGRES_PASSWORD has NO default. It shipped as `${POSTGRES_PASSWORD:-changeme}` in
+      # three places here, which is the same shape as the gateway-secret defect one line
+      # below: a `:-` fallback SUPPLIES the value, so `docker compose up` with no operator
+      # input started Postgres with a password published in this repo. Caught by
+      # scripts/check-compose-secrets.sh, which finds it by SHAPE — it has no knowledge of
+      # this repo or of the string `changeme`.
+      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 16) — there is no default; `changeme` shipped here for the life of this file}@postgres:5432/talyvor_track?sslmode=disable
       - TRACK_REDIS_URL=redis://redis:6379
       # Realtime HA fan-out across instances (T13). OFF by default — this single
       # bundled instance needs no cross-instance sharing. Set true when scaling
@@ -14,9 +20,15 @@ services:
       - TRACK_LENS_API_KEY=${TRACK_LENS_API_KEY:-}
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}
       - TRACK_GITHUB_WEBHOOK_SECRET=${TRACK_GITHUB_WEBHOOK_SECRET:-}
-      # Track's copy of the edge gateway transit-proof secret. Track fail-closes without
-      # it (>=16 chars). Dev default here; production MUST set the gateway's real secret.
-      - GATEWAY_AUTH_SECRET=${GATEWAY_AUTH_SECRET:-dev-gateway-transit-secret-change-me}
+      # Track's copy of the edge gateway transit-proof secret — the root of the entire
+      # auth boundary: whoever knows it can present ANY identity to Track.
+      #
+      # NO DEFAULT, BY DESIGN. This used to fall back to a literal committed here, which
+      # satisfied Track's >=16-char boot check while being public — so the stack booted
+      # "fail-closed" with a secret anyone could read out of the repo. `:?` makes compose
+      # REFUSE to render the stack when the variable is unset or empty; there is nothing
+      # to fall back to. Generate one per environment: openssl rand -hex 32
+      - GATEWAY_AUTH_SECRET=${GATEWAY_AUTH_SECRET:?set GATEWAY_AUTH_SECRET to the edge gateway transit-proof secret (openssl rand -hex 32) — there is no default; a shared default is a published credential}
       - TRACK_LOG_LEVEL=${TRACK_LOG_LEVEL:-info}
     depends_on:
       postgres:
@@ -49,7 +61,7 @@ services:
     environment:
       POSTGRES_DB: talyvor_track
       POSTGRES_USER: track
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 16) — there is no default; `changeme` shipped here for the life of this file}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -67,7 +79,8 @@ services:
     build: .
     command: ["migrate", "up"]
     environment:
-      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:-changeme}@postgres:5432/talyvor_track?sslmode=disable
+      # No default — same reason as the track service above.
+      - TRACK_DATABASE_URL=postgres://track:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 16) — there is no default; `changeme` shipped here for the life of this file}@postgres:5432/talyvor_track?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy

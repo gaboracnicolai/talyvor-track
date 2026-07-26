@@ -26,7 +26,32 @@ jobs:
       - name: Tenancy + workspace-authz IDOR regression locks
         run: |
           python -m pip install --quiet semgrep
-          semgrep scan --config .semgrep/ --error --metrics=off internal/
+          # cmd/ IS IN SCOPE. The scan used to cover internal/ only, which left
+          # cmd/track/main.go — the file that defines gwExempt, i.e. WHICH ROUTES SKIP
+          # AUTHENTICATION, and which has no test files at all — outside the lock.
+          semgrep scan --config .semgrep/ --error --metrics=off internal/ cmd/
+
+  # ORG-LEVEL CLASS GUARD, not a Track guard. talyvor-docs and talyvor-track independently
+  # shipped the identical defect — a compose file supplying a real default for
+  # GATEWAY_AUTH_SECRET — and two separate audits found them. A per-repo test cannot catch
+  # the next repo, so scripts/check-compose-secrets.sh is COPIED VERBATIM from talyvor-docs
+  # (byte-identical; sha256 e4e82ee8…) and contains no repo-specific knowledge: no service
+  # names, no paths, and no memory of any particular string. It matched Track's
+  # POSTGRES_PASSWORD defaults by SHAPE, three of which nobody had reported.
+  #
+  # Deliberately its own job, with no `needs:`, so it runs in parallel and reports
+  # independently of the Go suite — the finding it makes is a deploy blocker, not a test
+  # failure, and should not be buried behind a 2-minute test job.
+  compose-secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: no compose file may supply a secret value
+        run: ./scripts/check-compose-secrets.sh
 
   # Formal static-analysis gate (T3): golangci-lint (errcheck, govet, ineffassign,
   # staticcheck, unused). Config in .golangci.yml. Blocking — a finding fails the build.
@@ -40,6 +65,23 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+      # Format gate. There was none: golangci-lint v2 moved formatters OUT of `linters:`,
+      # so .golangci.yml (which has no `formatters:` block) checked no formatting at all
+      # and four files had drifted on main. `gofmt -l` is the single authority here —
+      # deliberately not a golangci formatter, so there is exactly one definition of
+      # "formatted" and no settings-shape trap. It also covers testdata/, which
+      # golangci-lint does not.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
+          echo "gofmt: clean"
+
       - name: golangci-lint
         run: |
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
@@ -87,8 +129,36 @@ jobs:
         run: go run ./cmd/track migrate status
         env:
           TRACK_DATABASE_URL: postgres://postgres:postgres@localhost:5432/track?sslmode=disable
+      # The real-Postgres tests now FAIL rather than skip when TRACK_TEST_DATABASE_URL is
+      # absent (internal/testutil.RequireDatabaseURL), so a database that never came up
+      # can no longer produce a green run with the whole tenancy/IDOR suite silently
+      # skipped. `-short` is the single deliberate escape — assert CI never uses it, so
+      # nobody can turn a red gate green by adding a flag.
+      - name: guard — the suite must not run in -short mode
+        run: |
+          # Anchored to a line that STARTS with the invocation (optionally after `run:`)
+          # so this check cannot match its own grep pattern or any prose above it.
+          if grep -RnE '^[[:space:]]*(run:[[:space:]]*)?go test .*-short' .github/workflows/; then
+            echo "::error::CI runs go test with -short, which skips every real-Postgres test"
+            exit 1
+          fi
+          echo "no -short in CI"
+
       - name: go test
         run: go test -timeout 120s -race -count=1 ./...
+
+      # Positive control on the gate itself: with the DSN removed the suite MUST fail.
+      # A gate nobody has watched fail is a gate nobody knows still works — this is the
+      # cheapest way to keep "missing database ⇒ red" true rather than assumed.
+      - name: guard — a missing database must FAIL, not skip
+        env:
+          TRACK_TEST_DATABASE_URL: ""
+        run: |
+          if go test -count=1 ./internal/authz/ >/dev/null 2>&1; then
+            echo "::error::the tenancy suite PASSED with no database — it is skipping, not running"
+            exit 1
+          fi
+          echo "confirmed: no database => red"
 
   frontend:
     runs-on: ubuntu-latest

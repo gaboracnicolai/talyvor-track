@@ -42,8 +42,32 @@ func (f *fakeIssueStore) Create(ctx context.Context, i model.Issue) (*model.Issu
 func (f *fakeIssueStore) GetByID(ctx context.Context, id string) (*model.Issue, error) {
 	return f.getByIDFn(ctx, id)
 }
-func (f *fakeIssueStore) GetByIdentifier(ctx context.Context, ident string) (*model.Issue, error) {
-	return f.getByIdentFn(ctx, ident)
+
+// GetByIdentifier ENFORCES the workspace scope like issue.Store does — a fake that
+// ignored workspaceID would let a cross-tenant regression pass here.
+func (f *fakeIssueStore) GetByIdentifier(ctx context.Context, ident, workspaceID string) (*model.Issue, error) {
+	iss, err := f.getByIdentFn(ctx, ident)
+	if err != nil || iss == nil {
+		return iss, err
+	}
+	if workspaceID == "" || iss.WorkspaceID != workspaceID {
+		return nil, nil
+	}
+	return iss, nil
+}
+
+// WorkspaceOfIdentifier mirrors the store: bounded to `allowed`, "" on no match.
+func (f *fakeIssueStore) WorkspaceOfIdentifier(ctx context.Context, ident string, allowed []string) (string, error) {
+	iss, err := f.getByIdentFn(ctx, ident)
+	if err != nil || iss == nil {
+		return "", nil
+	}
+	for _, ws := range allowed {
+		if ws == iss.WorkspaceID {
+			return iss.WorkspaceID, nil
+		}
+	}
+	return "", nil
 }
 func (f *fakeIssueStore) List(ctx context.Context, filter issue.IssueFilter) ([]model.Issue, error) {
 	return f.listFn(ctx, filter)

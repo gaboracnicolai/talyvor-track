@@ -30,7 +30,7 @@ var identifierRE = regexp.MustCompile(`(#?\d+|[A-Z]+-\d+)`)
 // GitHub handler uses. Same interface pattern as other packages:
 // keep dependencies narrow, keep tests cheap.
 type issueLookup interface {
-	GetByIdentifier(ctx context.Context, identifier string) (*model.Issue, error)
+	GetByIdentifier(ctx context.Context, identifier, workspaceID string) (*model.Issue, error)
 	Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*model.Issue, error)
 	CreateComment(ctx context.Context, c model.Comment, workspaceID string) (*model.Comment, error)
 }
@@ -45,14 +45,35 @@ type deliveryDeduper interface {
 }
 
 type GitHubWebhookHandler struct {
-	engine  *Engine
-	issues  issueLookup
-	secret  string
-	deduper deliveryDeduper
+	engine *Engine
+	issues issueLookup
+	secret string
+	// workspaceID is the tenant this webhook may act on. Empty ⇒ no issue side effects
+	// (fail-closed); see WithWorkspace.
+	workspaceID string
+	deduper     deliveryDeduper
 }
 
 func NewGitHubHandler(engine *Engine, issues issueLookup, secret string) *GitHubWebhookHandler {
 	return &GitHubWebhookHandler{engine: engine, issues: issues, secret: secret}
+}
+
+// WithWorkspace binds this webhook to ONE workspace — the tenant whose GitHub org holds
+// the shared TRACK_GITHUB_WEBHOOK_SECRET. Wired from TRACK_GITHUB_WEBHOOK_WORKSPACE_ID.
+//
+// Why a workspace is mandatory to act: PR bodies reference issues by human identifier
+// ("Closes ENG-42"), which is unique per workspace, not globally. The webhook carries no
+// tenant signal of its own, and one global secret authenticates every delivery — so
+// without an explicit scope the handler had to guess, and guessed by whatever row
+// Postgres returned first.
+//
+// UNSET ⇒ the handler still authenticates and 200s the delivery, but performs NO issue
+// side effects (fail-closed). A single-tenant deployment sets this to its workspace id.
+// TRUE multi-tenant GitHub integration needs per-workspace webhook secrets (a repo→
+// workspace binding), which this does not provide and does not pretend to.
+func (h *GitHubWebhookHandler) WithWorkspace(workspaceID string) *GitHubWebhookHandler {
+	h.workspaceID = workspaceID
+	return h
 }
 
 // WithDeduper wires the durable X-GitHub-Delivery replay guard. Optional (nil = no cross-delivery dedup).
@@ -134,6 +155,15 @@ func (h *GitHubWebhookHandler) handlePullRequest(ctx context.Context, body []byt
 	if len(refs) == 0 {
 		return
 	}
+	// FAIL-CLOSED: with no configured workspace there is no tenant this delivery may act
+	// on. Referenced identifiers are only unique per workspace, so acting anyway means
+	// writing to whichever tenant Postgres happened to return.
+	if h.workspaceID == "" {
+		slog.Warn("automation: github webhook has no workspace scope — skipping issue actions",
+			slog.Int("refs", len(refs)),
+			slog.String("hint", "set TRACK_GITHUB_WEBHOOK_WORKSPACE_ID to the workspace this GitHub org belongs to"))
+		return
+	}
 
 	switch {
 	case pl.Action == "closed" && pl.PullRequest.Merged:
@@ -148,7 +178,7 @@ func (h *GitHubWebhookHandler) handlePullRequest(ctx context.Context, body []byt
 // (notify Slack, move to next cycle, etc.).
 func (h *GitHubWebhookHandler) handleMerged(ctx context.Context, refs []string, pl pullRequestPayload) {
 	for _, ref := range refs {
-		iss, err := h.issues.GetByIdentifier(ctx, ref)
+		iss, err := h.issues.GetByIdentifier(ctx, ref, h.workspaceID)
 		if err != nil || iss == nil {
 			continue
 		}
@@ -173,7 +203,7 @@ func (h *GitHubWebhookHandler) handleMerged(ctx context.Context, refs []string, 
 
 func (h *GitHubWebhookHandler) handleOpened(ctx context.Context, refs []string, pl pullRequestPayload) {
 	for _, ref := range refs {
-		iss, err := h.issues.GetByIdentifier(ctx, ref)
+		iss, err := h.issues.GetByIdentifier(ctx, ref, h.workspaceID)
 		if err != nil || iss == nil {
 			continue
 		}

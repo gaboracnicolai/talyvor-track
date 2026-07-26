@@ -11,8 +11,8 @@ import (
 
 	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/gatewayauth"
-	"github.com/talyvor/track/internal/workspace"
 	"github.com/talyvor/track/internal/testutil"
+	"github.com/talyvor/track/internal/workspace"
 )
 
 const secret = "test-gateway-transit-secret-0123456789"

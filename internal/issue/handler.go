@@ -154,12 +154,25 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
 		return
 	}
+	// SEC-5 (identity): the creator is ALWAYS the verified session member. Resolved from
+	// the caller's membership by the authz middleware — never the spoofable X-Member-Id,
+	// never a body field. Same rule the comment path already enforces below.
+	actorID, ok := authz.MemberID(r.Context())
+	if !ok || actorID == "" {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no resolved member for this workspace")
+		return
+	}
 	var body createBody
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	in := body.Issue
 	in.WorkspaceID = wsID
+	// A supplied creator_id is IGNORED (forged-actor class). Previously it rode in from
+	// JSON and the store never checked it named a member — issues.creator_id has no FK
+	// and the ref-integrity loop does not cover it — so a caller could file issues signed
+	// by a member of another workspace, or by a string naming nobody at all.
+	in.CreatorID = actorID
 
 	// Apply the template's defaults before validation runs so any
 	// required custom-field values seeded by the template count

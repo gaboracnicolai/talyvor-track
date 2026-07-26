@@ -66,9 +66,12 @@ type Client struct {
 
 const (
 	clientSendBuffer = 256
-	writeTimeout     = 10 * time.Second
-	readTimeout      = 60 * time.Second
-	pingInterval     = 30 * time.Second
+	// roomAuthTimeout bounds the room-ownership lookup so a slow database cannot wedge a
+	// read pump. A timeout denies the subscription (fail-closed), it never grants it.
+	roomAuthTimeout = 3 * time.Second
+	writeTimeout    = 10 * time.Second
+	readTimeout     = 60 * time.Second
+	pingInterval    = 30 * time.Second
 )
 
 func newClient(id, workspaceID, memberID string, conn *websocket.Conn) *Client {
@@ -99,6 +102,11 @@ type Hub struct {
 	// Redis and re-injects theirs (see bridge.go). nil in single-instance mode —
 	// every bridge method is nil-safe, so the hot path stays branch-light.
 	bridge *RedisBridge
+
+	// rooms4uth resolves whether an object-keyed room (team:/issue:) belongs to a
+	// client's workspace. nil ⇒ those rooms are DENIED, never allowed (see
+	// WithRoomAuthorizer). Set during setup, before Run; not mutated afterwards.
+	rooms4uth RoomAuthorizer
 }
 
 func NewHub() *Hub {
@@ -277,20 +285,46 @@ func (h *Hub) BroadcastToWorkspace(wsID string, ev Event) {
 	h.BroadcastToRoom("workspace:"+wsID, ev)
 }
 
-// Subscribe adds a client to a room. Thread-safe; can be called from
-// the WebSocket read pump after parsing a subscribe message.
-func (h *Hub) Subscribe(clientID, roomID string) {
+// Subscribe adds a client to a room, IF the room belongs to that client's authorized
+// workspace. Thread-safe; called from the WebSocket read pump after parsing a subscribe
+// message. Returns whether the subscription was granted.
+//
+// The tenancy decision is made HERE, in the one place every subscription passes through,
+// rather than in readPump — so a future caller cannot join a room by bypassing the check.
+// Room ownership needs a database read for team:/issue:, so the lookup happens OUTSIDE
+// the hub mutex; only the map mutation is locked.
+func (h *Hub) Subscribe(clientID, roomID string) bool {
+	h.mu.RLock()
+	c, ok := h.clients[clientID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), roomAuthTimeout)
+	defer cancel()
+	if !h.authorizeRoom(ctx, c, roomID) {
+		slog.Warn("realtime: subscribe refused — room is not in the client's workspace",
+			slog.String("client_id", clientID),
+			slog.String("workspace_id", c.WorkspaceID),
+			slog.String("room_id", roomID),
+		)
+		return false
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	c, ok := h.clients[clientID]
-	if !ok {
-		return
+	// Re-read under the write lock: the client may have unregistered while the ownership
+	// lookup was in flight, and resurrecting it here would leak an entry in h.rooms.
+	if _, still := h.clients[clientID]; !still {
+		return false
 	}
 	c.rooms[roomID] = struct{}{}
 	if _, ok := h.rooms[roomID]; !ok {
 		h.rooms[roomID] = make(map[string]*Client)
 	}
 	h.rooms[roomID][clientID] = c
+	return true
 }
 
 func (h *Hub) Unsubscribe(clientID, roomID string) {
@@ -336,15 +370,18 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	// context (stamped by wsAuthz from the gateway proof), never from the query. Previously /v1/ws was
 	// gwExempt and trusted query workspace_id/member_id — GET /v1/ws?workspace_id=<victim> subscribed the
 	// socket to another tenant's live event stream. Fail-closed: no verified membership → 403, no upgrade.
-	if _, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID); !ok {
+	// The actor comes from the Membership AuthorizeWorkspace RESOLVED, not from a second
+	// lookup. The previous code discarded it and called authz.MemberID, which only answers
+	// on a /v1/workspaces/{wsID}/… path — that is the only shape the authz middleware sets
+	// an authorized workspace for. /v1/ws is flat, so that gate could never pass and the
+	// route 403'd every caller, including fully valid members. Realtime was dead in
+	// production while the negative-only test kept CI green.
+	m, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID)
+	if !ok || m.MemberID == "" {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	memberID, ok := authz.MemberID(r.Context())
-	if !ok || memberID == "" {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
+	memberID := m.MemberID
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -386,7 +423,10 @@ func (h *Hub) readPump(c *Client) {
 		switch msg.Type {
 		case "subscribe":
 			if msg.RoomID != "" {
-				h.Subscribe(c.ID, msg.RoomID)
+				// A refusal is logged inside Subscribe and is deliberately NOT reported
+				// to the client: telling a caller "that room exists but is not yours"
+				// would turn the socket into a cross-tenant existence oracle.
+				_ = h.Subscribe(c.ID, msg.RoomID)
 			}
 		case "unsubscribe":
 			if msg.RoomID != "" {
