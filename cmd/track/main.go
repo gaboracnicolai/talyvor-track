@@ -151,7 +151,11 @@ func main() {
 	defer pool.Close()
 
 	// Stores own the SQL; handlers own the JSON; main wires them.
-	hub := realtime.NewHub()
+	// The room authorizer is what keeps a connected client inside its own tenant: a
+	// subscribe names a room ("team:<id>", "issue:<id>") and this proves the object lives
+	// in the client's authorized workspace. Without it the hub can only vouch for
+	// "workspace:<own>" rooms and DENIES the rest — degraded, never open.
+	hub := realtime.NewHub().WithRoomAuthorizer(realtime.NewPGRoomAuthorizer(pool))
 	// T13 HA: opt-in Redis pub/sub so realtime events cross Track instances.
 	// OFF by default — a single instance behaves exactly as before and never
 	// touches Redis. When TRACK_HA_ENABLED is set, mirror events through

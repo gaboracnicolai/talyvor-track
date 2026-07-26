@@ -132,7 +132,11 @@ func TestBroadcastToRoom_SkipsActor(t *testing.T) {
 	}
 }
 
-func TestSubscribe_AddsClientToRoom(t *testing.T) {
+// Subscribe is now a tenancy chokepoint (audit finding 7): a room is joined only when it
+// belongs to the client's authorized workspace. This test previously subscribed a ws-1
+// client to "team:eng" with no ownership check at all and asserted success — it was
+// pinning the hole. The three branches are covered separately below.
+func TestSubscribe_OwnWorkspaceRoom_NeedsNoAuthorizer(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()
 
@@ -140,15 +144,95 @@ func TestSubscribe_AddsClientToRoom(t *testing.T) {
 	h.registerForTest(c)
 	time.Sleep(20 * time.Millisecond)
 
-	h.Subscribe("c1", "team:eng")
-	if h.ClientCount("team:eng") != 1 {
-		t.Errorf("ClientCount(team:eng) = %d, want 1", h.ClientCount("team:eng"))
+	room := "workspace:ws-1"
+	if !h.Subscribe("c1", room) {
+		t.Fatal("a client was refused its OWN workspace room — that decision is a string compare, no lookup needed")
 	}
+	if h.ClientCount(room) != 1 {
+		t.Errorf("ClientCount(%s) = %d, want 1", room, h.ClientCount(room))
+	}
+}
+
+// A foreign workspace room is refused on the string compare alone.
+func TestSubscribe_ForeignWorkspaceRoom_Refused(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+
+	h.registerForTest(newTestClient("c1", "ws-1", "alice"))
+	time.Sleep(20 * time.Millisecond)
+
+	if h.Subscribe("c1", "workspace:ws-2") {
+		t.Fatal("a ws-1 client joined ws-2's room")
+	}
+	if h.ClientCount("workspace:ws-2") != 0 {
+		t.Errorf("ClientCount(workspace:ws-2) = %d, want 0", h.ClientCount("workspace:ws-2"))
+	}
+}
+
+// No authorizer wired ⇒ object-keyed rooms are DENIED, not allowed. A hub that cannot
+// prove ownership must refuse; degrading the feature is correct, opening it is not.
+func TestSubscribe_ObjectRoom_WithoutAuthorizer_Refused(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+
+	h.registerForTest(newTestClient("c1", "ws-1", "alice"))
+	time.Sleep(20 * time.Millisecond)
+
+	for _, room := range []string{"team:eng", "issue:i-1"} {
+		if h.Subscribe("c1", room) {
+			t.Fatalf("joined %s with no room authorizer — ownership was never proven", room)
+		}
+	}
+}
+
+// With an authorizer, ownership decides — and a room in another workspace still loses.
+func TestSubscribe_ObjectRoom_FollowsAuthorizer(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.WithRoomAuthorizer(fakeRoomAuth{owned: map[string]string{"eng": "ws-1", "other": "ws-2"}})
+
+	h.registerForTest(newTestClient("c1", "ws-1", "alice"))
+	time.Sleep(20 * time.Millisecond)
+
+	if !h.Subscribe("c1", "team:eng") {
+		t.Fatal("refused a team room the authorizer says is in ws-1")
+	}
+	if h.Subscribe("c1", "team:other") {
+		t.Fatal("joined a team room the authorizer says is in ws-2")
+	}
+	if h.Subscribe("c1", "team:unknown") {
+		t.Fatal("joined a team room the authorizer does not recognise — unknown must deny")
+	}
+}
+
+// Malformed and unknown-kind room ids are refused rather than guessed at.
+func TestSubscribe_MalformedRoomID_Refused(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.WithRoomAuthorizer(fakeRoomAuth{owned: map[string]string{"eng": "ws-1"}})
+
+	h.registerForTest(newTestClient("c1", "ws-1", "alice"))
+	time.Sleep(20 * time.Millisecond)
+
+	for _, room := range []string{"", "workspace:", ":ws-1", "ws-1", "presence:ws-1", "team:a:b"} {
+		if h.Subscribe("c1", room) {
+			t.Errorf("joined malformed/unknown room %q", room)
+		}
+	}
+}
+
+// fakeRoomAuth is a decision table: objectID → owning workspace.
+type fakeRoomAuth struct{ owned map[string]string }
+
+func (f fakeRoomAuth) AuthorizeRoom(_ context.Context, workspaceID, _, objectID string) (bool, error) {
+	ws, ok := f.owned[objectID]
+	return ok && ws == workspaceID, nil
 }
 
 func TestUnsubscribe_RemovesClientFromRoom(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()
+	h.WithRoomAuthorizer(fakeRoomAuth{owned: map[string]string{"eng": "ws-1"}})
 
 	c := newTestClient("c1", "ws-1", "alice")
 	h.registerForTest(c)
