@@ -114,6 +114,7 @@ CI runs three jobs: Go test (race detector enabled), frontend typecheck + build,
 [Business Source License 1.1](LICENSE) (BUSL-1.1). **Not an open-source licence today.**
 
 You may read, modify and self-host Talyvor Track, including in production, for your own
-organisation's purposes. You may **not** offer Talyvor Track to third parties as a hosted or
-managed service. See the `Additional Use Grant` in [LICENSE](LICENSE) for the exact boundary,
-and the `Change Date`, on which this converts to Apache License 2.0.
+organisation's purposes, and an integrator may run it on behalf of a single client. You may
+**not** run one deployment serving two or more unrelated organisations — that needs a
+commercial licence (`hello@talyvor.com`). See the `Additional Use Grant` in [LICENSE](LICENSE)
+for the exact boundary, and the `Change Date`, on which this converts to Apache License 2.0.
