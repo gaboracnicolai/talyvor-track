@@ -174,6 +174,39 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	// by a member of another workspace, or by a string naming nobody at all.
 	in.CreatorID = actorID
 
+	// TEAM: THE ONE REQUIRED FIELD WITH NO SOURCE.
+	//
+	// WorkspaceID and CreatorID are derived above from the authorized workspace and the resolved
+	// member — the caller names neither. TeamID was the exception: required by the store and by
+	// issues.team_id (NOT NULL REFERENCES teams(id)), but supplied by nobody. The BFF forwards
+	// {"title": …} verbatim, so every create from the web UI answered CREATE_FAILED.
+	//
+	// ⚠ THIS RESOLVES, IT DOES NOT GUESS. With exactly one team there is no choice to make and
+	// asking the caller to name it is ceremony. With several, picking one would silently file an
+	// issue somewhere the caller did not ask for — so that stays an error, and the error now says
+	// what to do instead of repeating the opaque "TeamID … required" that started this.
+	if in.TeamID == "" {
+		teamID, n, err := h.store.SoleTeam(r.Context(), wsID)
+		switch {
+		case err != nil:
+			writeErr(w, http.StatusInternalServerError, "TEAM_LOOKUP_FAILED", "could not resolve a team for this workspace")
+			return
+		case n == 0:
+			// Unreachable once CreateWithOwner seeds a default team, and left explicit rather than
+			// assumed: a workspace predating that change still has none, and this says so instead
+			// of failing as a missing field.
+			writeErr(w, http.StatusBadRequest, "NO_TEAM",
+				"this workspace has no team — create one before filing issues")
+			return
+		case n > 1:
+			writeErr(w, http.StatusBadRequest, "TEAM_REQUIRED",
+				"this workspace has several teams — name one in team_id")
+			return
+		default:
+			in.TeamID = teamID
+		}
+	}
+
 	// Apply the template's defaults before validation runs so any
 	// required custom-field values seeded by the template count
 	// toward the required-field check.

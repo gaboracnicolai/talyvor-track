@@ -31,9 +31,30 @@ type templateSeeder interface {
 	SeedDefaults(ctx context.Context, workspaceID string) error
 }
 
+// workflowSeeder is the subset of workflow.Engine that workspace calls after creating the default
+// team. Same one-way-graph reason as templateSeeder above. Note the argument is a TEAM id, not a
+// workspace id — the two seeders share a method name and differ in what they seed.
+type workflowSeeder interface {
+	SeedDefaults(ctx context.Context, teamID string) error
+}
+
+// DefaultTeamName and DefaultTeamIdentifier are the workspace's first team.
+//
+// ⚠ THE IDENTIFIER IS PRODUCT-VISIBLE. issue.Store.Create builds every issue's human key as
+// "<team identifier>-<number>", so this is what a new user's first issue is CALLED: GEN-1. It is
+// the one invented string in this change, and it is deliberately generic — the workspace is created
+// before anyone has told us what it is for (bootstrap has no name claim and calls the workspace
+// "My workspace"), so a guessed domain-specific name would be worse than a neutral one. Teams are
+// renamable and their identifier is editable; this only has to be sane on day one.
+const (
+	DefaultTeamName       = "General"
+	DefaultTeamIdentifier = "GEN"
+)
+
 type Store struct {
-	pool   pgxDB
-	seeder templateSeeder
+	pool     pgxDB
+	seeder   templateSeeder
+	workflow workflowSeeder
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -51,6 +72,15 @@ func newStore(db pgxDB) *Store { return &Store{pool: db} }
 // Task templates. Optional — without it, workspaces start empty.
 func (s *Store) WithTemplateSeeder(t templateSeeder) *Store {
 	s.seeder = t
+	return s
+}
+
+// WithWorkflowSeeder wires the workflow engine so the default team gets the same six built-in
+// statuses a hand-created team gets from team.Handler.Create. Optional in the same sense as the
+// template seeder: without it the workspace and its team still exist and still take issues, which
+// is why the TEAM is created in the transaction and the STATUSES are not.
+func (s *Store) WithWorkflowSeeder(wf workflowSeeder) *Store {
+	s.workflow = wf
 	return s
 }
 
@@ -124,6 +154,25 @@ func (s *Store) CreateWithOwner(ctx context.Context, ws model.Workspace, ownerEm
 	); err != nil {
 		return nil, fmt.Errorf("workspace: seed owner member: %w", err)
 	}
+	// THE DEFAULT TEAM, IN THE SAME TRANSACTION AND FOR THE SAME REASON AS THE OWNER MEMBER.
+	//
+	// The comment above argues a workspace with no members is unreachable, so a partial failure must
+	// leave neither. A workspace with no TEAM is unusable by the identical argument, and it was:
+	// issues.team_id is NOT NULL REFERENCES teams(id), so every create-issue in a freshly created
+	// workspace answered CREATE_FAILED. The product's primary write was dead for every new user on
+	// every deployment, and nothing failed until someone clicked the button.
+	//
+	// So the team is a structural prerequisite, not an enrichment, and it belongs beside the owner
+	// rather than in the best-effort seed below. The workflow statuses ARE an enrichment — their
+	// absence degrades a Track-native feature and does not stop an issue being written — which is
+	// exactly why they stay post-commit and this does not.
+	var teamID string
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO teams (workspace_id, name, identifier) VALUES ($1, $2, $3) RETURNING id`,
+		out.ID, DefaultTeamName, DefaultTeamIdentifier,
+	).Scan(&teamID); err != nil {
+		return nil, fmt.Errorf("workspace: seed default team: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -132,6 +181,11 @@ func (s *Store) CreateWithOwner(ctx context.Context, ws model.Workspace, ownerEm
 	// + its owner.
 	if s.seeder != nil {
 		_ = s.seeder.SeedDefaults(ctx, out.ID)
+	}
+	// Same posture, and the same reason team.Handler.Create uses for its own seed call: a workspace
+	// whose default team lacks workflow statuses is still a usable workspace.
+	if s.workflow != nil {
+		_ = s.workflow.SeedDefaults(ctx, teamID)
 	}
 	return out, nil
 }
