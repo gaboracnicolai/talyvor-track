@@ -1047,3 +1047,42 @@ func (s *Store) BulkUpdate(ctx context.Context, workspaceID string, updates []Bu
 	}
 	return updated, nil
 }
+
+// SoleTeam returns the workspace's team when it has exactly one, along with how many it has.
+//
+// The COUNT is returned rather than a bare (id, found) because the three cases are three different
+// answers to the caller: none is a workspace that cannot take issues at all, one is an unambiguous
+// default, and several is a genuine question only the caller can settle. Collapsing them into
+// "found / not found" is what produced the original failure — a required field reported as missing
+// when the real problem was that nothing had ever created the thing it referred to.
+//
+// ⚠ SCOPED TO THE AUTHORIZED WORKSPACE, which is the caller's own (issue.Handler.Create passes the
+// id resolved by the authz middleware, never a body field). The LIMIT 2 is enough to distinguish
+// one from many without reading a large team list.
+func (s *Store) SoleTeam(ctx context.Context, workspaceID string) (string, int, error) {
+	if s.pool == nil {
+		return "", 0, errors.New("issue: store has no pool")
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id FROM teams WHERE workspace_id = $1 ORDER BY created_at LIMIT 2`, workspaceID)
+	if err != nil {
+		return "", 0, fmt.Errorf("issue: sole team: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", 0, fmt.Errorf("issue: sole team scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, fmt.Errorf("issue: sole team rows: %w", err)
+	}
+	if len(ids) == 1 {
+		return ids[0], 1, nil
+	}
+	return "", len(ids), nil
+}

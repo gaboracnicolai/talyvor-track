@@ -188,7 +188,7 @@ func main() {
 	// Workspace creation auto-seeds the default templates so new
 	// teams land into a workspace that already has Bug Report,
 	// Feature Request, etc. ready to go.
-	workspaceStore := workspace.NewStore(pool).WithTemplateSeeder(templateStore)
+	workspaceStore := workspace.NewStore(pool).WithTemplateSeeder(templateStore).WithWorkflowSeeder(workflowEngine)
 	customFieldStore := customfield.NewStore(pool)
 	dependencyStore := dependency.NewStore(pool)
 	timeStore := timetracking.NewStore(pool)
