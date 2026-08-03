@@ -19,6 +19,7 @@ services:
       - TRACK_LENS_URL=${TRACK_LENS_URL:-http://localhost:8080}
       - TRACK_LENS_API_KEY=${TRACK_LENS_API_KEY:-}
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}
+      - TRACK_LENS_DASHBOARD_URL=${TRACK_LENS_DASHBOARD_URL:-}
       - TRACK_GITHUB_WEBHOOK_SECRET=${TRACK_GITHUB_WEBHOOK_SECRET:-}
       # Track's copy of the edge gateway transit-proof secret — the root of the entire
       # auth boundary: whoever knows it can present ANY identity to Track.

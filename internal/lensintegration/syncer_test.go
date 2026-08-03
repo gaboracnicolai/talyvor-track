@@ -90,7 +90,20 @@ func TestSyncFeatureSpend_LandsEachRequestRow(t *testing.T) {
 	}
 }
 
-func TestSyncFeatureSpend_SkipsEmptyFeatureOrRequestID(t *testing.T) {
+// This test used to assert that an empty FEATURE and an empty REQUEST_ID were both skipped
+// before the writer. Only the second half was ever right, and the two were bundled under one
+// count so the difference could not be seen:
+//
+//   - empty request_id — CORRECTLY skipped. There is no dedup key, and the same 24h window is
+//     re-read ~96×/day, so writing it would re-credit that cost on every tick. UNCHANGED.
+//   - empty feature — the DEFECT. The row below carries $99.99 and 75k tokens precisely so a
+//     silent drop is expensive, and dropping it is exactly what happened: untagged spend
+//     reached no durable surface at all, leaving issues.ai_cost_usd a subset presented as a
+//     total. It now reaches the writer and lands UNATTRIBUTED (NULL issue_id, no issue
+//     credited) — the attribution is still refused, the accounting no longer is.
+//
+// Both rules are asserted separately here so neither can change again behind a count.
+func TestSyncFeatureSpend_UntaggedRowIsRecorded_RequestIDLessRowIsNot(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, byRequestBody(`[
             {"request_id":"r0","feature":"","cost_usd":99.99,"input_tokens":50000,"output_tokens":25000,"ts":"t"},
@@ -107,11 +120,25 @@ func TestSyncFeatureSpend_SkipsEmptyFeatureOrRequestID(t *testing.T) {
 	if err := syncer.SyncFeatureSpend(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("SyncFeatureSpend: %v", err)
 	}
-	if len(updater.calls) != 1 {
-		t.Fatalf("got %d calls, want 1 (empty feature + empty request_id must be skipped before the writer)", len(updater.calls))
+
+	seen := map[string]bool{}
+	for _, c := range updater.calls {
+		seen[c.RequestID] = true
+		if c.RequestID == "" {
+			t.Errorf("a row with no request_id reached the writer — it cannot be deduplicated, "+
+				"so the ~96 re-pulls/day of this window would each re-credit it: %+v", c)
+		}
 	}
-	if updater.calls[0].Feature != "ENG-7" || updater.calls[0].RequestID != "r7" {
-		t.Errorf("only the ENG-7/r7 row should reach the writer; got %+v", updater.calls[0])
+	if !seen["r0"] {
+		t.Errorf("the untagged $99.99 row never reached the writer — untagged spend must be "+
+			"recorded as unattributed, not dropped; calls: %+v", updater.calls)
+	}
+	if !seen["r7"] {
+		t.Errorf("the attributable ENG-7 row never reached the writer; calls: %+v", updater.calls)
+	}
+	if len(updater.calls) != 2 {
+		t.Errorf("got %d calls, want 2 (r0 unattributed + r7 attributed; the request_id-less "+
+			"row is the only one refused): %+v", len(updater.calls), updater.calls)
 	}
 }
 

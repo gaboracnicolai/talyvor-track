@@ -41,6 +41,7 @@ Set your Lens URL for AI cost attribution:
 TRACK_LENS_URL=http://your-lens:8080
 TRACK_LENS_API_KEY=tlv_...
 TRACK_LENS_WEBHOOK_SECRET=...
+TRACK_LENS_DASHBOARD_URL=          # optional; where `lens_url` points. Unset ⇒ no link.
 ```
 
 Every issue now shows how much LLM spend it accrued — both via the 15-minute reconciliation poll and via Lens webhooks for near-real-time updates.

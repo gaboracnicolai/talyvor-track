@@ -12,8 +12,10 @@ const defaultSyncInterval = 15 * time.Minute
 // Defined as an interface so tests can drop in a counter mock without
 // spinning up pgxmock or the full Track DB schema.
 type costUpdater interface {
-	// RecordRequestSpend lands one per-request cost on the single identifier-matched issue, exactly-once by
-	// request_id. resolved=false ⇒ the feature addresses no issue (the caller skips + logs the orphan).
+	// RecordRequestSpend lands one per-request cost EXACTLY ONCE by request_id: on the single
+	// identifier-matched issue when the feature resolves, and as an UNATTRIBUTED ledger row
+	// (NULL issue_id, no issue credited) when it does not. resolved=false therefore still means
+	// "no issue was credited" — but the money is now recorded either way.
 	RecordRequestSpend(ctx context.Context, requestID, feature string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error)
 }
 
@@ -39,9 +41,21 @@ func NewSyncer(client *Client, updater costUpdater, workspaces workspaceLister) 
 // same 24h ~96×/day — re-credits nothing (ON CONFLICT). Errors are logged at WARN; a missing Lens or a
 // partial outage never breaks Track.
 //
-// FAIL-SAFE: a row whose feature doesn't resolve to exactly one issue (0 identifier matches), or an anonymous
-// / request_id-less row, is SKIPPED and counted — never written as an orphan, never fanned out. The skipped
-// count + skipped cost are logged so orphan spend is observable, not silently dropped.
+// NO COST IS EVER CREDITED TO AN ISSUE IT DOES NOT BELONG TO — but nothing dedupable is dropped
+// either. A row whose feature resolves to no issue (untagged spend, or a feature matching no
+// identifier) is recorded as UNATTRIBUTED: a ledger row with a NULL issue_id, no issue credited.
+// That distinction is the whole point — the attribution is refused, the accounting is not.
+//
+// This used to `continue` before the store on an empty feature and discard the unresolved case,
+// summing both into a local float that reached exactly one slog line. issues.ai_cost_usd — which
+// the frontend renders as THE AI cost of an issue — was therefore a subset presented as a total,
+// and no figure could be reconciled against the Lens invoice. Read the recorded total back with
+// issue.Store.UnattributedSpend; both AI-cost endpoints surface it.
+//
+// THE ONE ROW STILL REFUSED is a row with no request_id: it has no dedup key, and this same 24h
+// window is re-read ~96×/day, so writing it would multiply that cost by the number of pulls. It
+// is counted and logged SEPARATELY rather than folded into the unattributed total — a number that
+// cannot be deduplicated must not be added to one that can.
 func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error {
 	if s.client == nil || !s.client.IsConfigured() {
 		return ErrNotConfigured
@@ -54,16 +68,19 @@ func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error
 		)
 		return nil
 	}
-	var landed, skipped int
-	var skippedCost float64
+	var attributed, unattributed, undedupable int
+	var unattributedCost, undedupableCost float64
 	for _, rs := range rows {
-		if rs.Feature == "" || rs.RequestID == "" {
-			// Anonymous spend (no X-Talyvor-Feature) or a row without a request_id: can't address one issue
-			// or can't dedup exactly-once. Skip rather than risk an orphan or a double-count.
-			skipped++
-			skippedCost += rs.CostUSD
+		if rs.RequestID == "" {
+			// No dedup key. Cannot be written at any cost — the re-pulled window would
+			// re-credit it on every tick. Counted so it is still visible.
+			undedupable++
+			undedupableCost += rs.CostUSD
 			continue
 		}
+		// An empty feature is passed through deliberately: it resolves to nothing and lands
+		// as unattributed. It is the LARGEST such bucket in practice — any Lens key used
+		// without X-Talyvor-Feature.
 		resolved, didLand, err := s.updater.RecordRequestSpend(ctx, rs.RequestID, rs.Feature, rs.CostUSD, rs.InputTokens+rs.OutputTokens, workspaceID)
 		if err != nil {
 			slog.Warn("lensintegration: RecordRequestSpend failed",
@@ -74,29 +91,23 @@ func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error
 			)
 			continue
 		}
-		if !resolved {
-			// FAIL-SAFE: the feature addresses no issue (identifier match = 0). Never write an orphan, never
-			// fall back to the lens_feature fanout. Log so the orphan cost stays observable.
-			skipped++
-			skippedCost += rs.CostUSD
-			slog.Warn("lensintegration: request spend skipped — feature resolves to no issue",
-				slog.String("workspace_id", workspaceID),
-				slog.String("feature", rs.Feature),
-				slog.String("request_id", rs.RequestID),
-				slog.Float64("cost_usd", rs.CostUSD),
-			)
+		if !didLand {
+			continue // already recorded on an earlier pull; nothing re-credited, nothing re-counted
+		}
+		if resolved {
+			attributed++
 			continue
 		}
-		if didLand {
-			landed++
-		}
-		// resolved && !didLand ⇒ this request_id already landed on an earlier pull; not re-credited.
+		unattributed++
+		unattributedCost += rs.CostUSD
 	}
 	slog.Info("lensintegration: per-request spend sync complete",
 		slog.String("workspace_id", workspaceID),
-		slog.Int("landed", landed),
-		slog.Int("skipped", skipped),
-		slog.Float64("skipped_cost_usd", skippedCost),
+		slog.Int("attributed", attributed),
+		slog.Int("unattributed", unattributed),
+		slog.Float64("unattributed_cost_usd", unattributedCost),
+		slog.Int("undedupable", undedupable),
+		slog.Float64("undedupable_cost_usd", undedupableCost),
 		slog.Int("total_rows", len(rows)),
 	)
 	return nil

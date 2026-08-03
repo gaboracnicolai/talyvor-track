@@ -26,6 +26,20 @@ type Config struct {
 	LensAPIKey        string
 	LensWebhookSecret string
 
+	// LensDashboardURL is where the AI-cost responses link a human to see request-level
+	// spend — emitted as `lens_url`. OPTIONAL and empty by default; unset means no link is
+	// emitted at all.
+	//
+	// IT IS CONFIGURED RATHER THAN DERIVED, and that is the whole point. Track used to build
+	// this link as LensURL + "/dashboard" whenever LensURL was set. But LensURL is Lens's API
+	// base, and /dashboard is a BROWSER route that Lens registers only under
+	// LENS_DASHBOARD_ENABLED (default false) — a variable Lens's own docker-compose does not
+	// even forward, so the path is unreachable on the standard deploy whatever the operator
+	// sets. Track cannot observe another service's feature flag, and mirroring it here would
+	// be two values that must agree with nothing comparing them. So the destination is
+	// declared, or there is no link. TRACK_LENS_DASHBOARD_URL.
+	LensDashboardURL string
+
 	// LensWebhookFreshness (SEC-7) is the max age of a Lens spend alert's signed
 	// emitted_at; an older alert is rejected by the webhook (a replay guard for
 	// captures re-POSTed after the dedup key was pruned). TRACK_LENS_WEBHOOK_FRESHNESS
@@ -117,6 +131,7 @@ func Load() (*Config, error) {
 		LensURL:              os.Getenv("TRACK_LENS_URL"),
 		LensAPIKey:           os.Getenv("TRACK_LENS_API_KEY"),
 		LensWebhookSecret:    os.Getenv("TRACK_LENS_WEBHOOK_SECRET"),
+		LensDashboardURL:     strings.TrimSpace(os.Getenv("TRACK_LENS_DASHBOARD_URL")),
 		GatewayAuthSecret:    os.Getenv("GATEWAY_AUTH_SECRET"),
 		HAEnabled:            parseBool(os.Getenv("TRACK_HA_ENABLED")),
 		RedisURL:             os.Getenv("TRACK_REDIS_URL"),
