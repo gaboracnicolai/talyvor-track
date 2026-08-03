@@ -47,6 +47,14 @@ func TestGetIssueAICosts_CrossTenant_Denied(t *testing.T) {
 	if att.Code == http.StatusOK || strings.Contains(att.Body.String(), "99.99") {
 		t.Errorf("cross-tenant LEAK: ws-A read ws-B issue AI cost (status %d): %s", att.Code, att.Body.String())
 	}
+	// …and specifically 404, NOT 403. The handler writes StatusNotFound deliberately — a 403
+	// would confirm the id exists somewhere, turning this endpoint into an existence oracle
+	// that an attacker can sweep. Nothing asserted that: the check above only says "not 200",
+	// so a change to 403 passed the suite while quietly reintroducing the oracle.
+	if att.Code != http.StatusNotFound {
+		t.Errorf("cross-tenant denial = %d, want 404 — a 403 confirms the issue id exists in "+
+			"another workspace, which is the oracle the 404 exists to deny", att.Code)
+	}
 
 	// POSITIVE: the issue's own workspace still reads it.
 	ok := call("ws-B")

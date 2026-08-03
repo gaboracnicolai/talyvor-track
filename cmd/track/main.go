@@ -239,7 +239,7 @@ func main() {
 	// optional — empty URL keeps every endpoint reachable but Lens
 	// data is just absent.
 	lensClient := lensintegration.New(cfg.LensURL, cfg.LensAPIKey)
-	lensHandler := lensintegration.NewHandler(lensClient, issueStore)
+	lensHandler := lensintegration.NewHandler(lensClient, issueStore).WithDashboardURL(cfg.LensDashboardURL)
 	lensWebhook := lensintegration.NewWebhookHandler(cfg.LensWebhookSecret, issueStore, notificationStore, notifier).
 		WithDeduper(webhookdedup.New(pool)).    // SEC-7: durable Lens event_id cross-delivery replay guard
 		WithFreshness(cfg.LensWebhookFreshness) // SEC-7: reject spend alerts older than the window

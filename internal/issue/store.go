@@ -783,6 +783,33 @@ func (s *Store) RecordSpendEvent(ctx context.Context, eventKey, lensFeature stri
 	return int(tag.RowsAffected()), nil
 }
 
+// UnattributedSpend totals the workspace's AI spend that reached NO issue — the ledger rows the
+// per-request sync wrote with a NULL issue_id because their feature addressed no issue (an untagged
+// request, or a feature matching no identifier).
+//
+// It is deliberately a QUERY over the same append-only ledger that issues.ai_cost_usd sums, not a
+// separately-maintained counter: attributed + unattributed = the ledger total BY CONSTRUCTION, over
+// the same lifetime window, so the two can never drift into disagreeing. A stored second number
+// would be a number to reconcile rather than the reconciliation.
+//
+// The legacy webhook path (RecordSpendEvent) inserts only `FROM matched m`, so it never produces a
+// NULL issue_id row — `issue_id IS NULL` means exactly "unattributed per-request spend" and nothing
+// else.
+func (s *Store) UnattributedSpend(ctx context.Context, workspaceID string) (costUSD float64, requests int, err error) {
+	if workspaceID == "" {
+		return 0, 0, errors.New("issue: UnattributedSpend requires workspace_id")
+	}
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(cost_usd), 0), COUNT(*)
+           FROM ai_spend_events
+          WHERE workspace_id = $1 AND issue_id IS NULL`,
+		workspaceID,
+	).Scan(&costUSD, &requests); err != nil {
+		return 0, 0, fmt.Errorf("issue: unattributed spend: %w", err)
+	}
+	return costUSD, requests, nil
+}
+
 // RecordRequestSpend lands ONE per-request cost on the single issue whose identifier == feature, EXACTLY
 // ONCE. It is the SYNCER's live accumulator (T7 follow-up, Build 2) — replacing the feature-total
 // delta-reconciler (ReconcileFeatureSpend, deleted). Two load-bearing properties:
@@ -795,23 +822,42 @@ func (s *Store) RecordSpendEvent(ctx context.Context, eventKey, lensFeature stri
 //     syncer re-reads the last-24h window ~96×/day) conflicts ⇒ no row, no re-credit. The credit is a
 //     data-modifying CTE that runs iff `ins` produced a row — never a re-sum toward a total.
 //
+// UNATTRIBUTED SPEND IS RECORDED, NOT DROPPED. A row whose feature resolves to no issue —
+// because it carried no X-Talyvor-Feature at all, or a feature matching no identifier — still
+// lands in the ledger, with a NULL issue_id and no issue credited. That is what the ledger was
+// designed for: migration 0017 states "the unique index treats a NULL issue_id (orphan spend with
+// no matching issue) as the empty string so those dedup too", but this path only ever inserted
+// so an unresolved feature produced zero rows and the money left no durable trace. Without it,
+// issues.ai_cost_usd is a SUBSET presented as a TOTAL and nothing can be reconciled against the
+// Lens invoice. Read it back with UnattributedSpend.
+//
+// event_key is per-request ('req:'||request_id) on BOTH branches. It has to be: the legacy unique
+// index over (event_key, COALESCE(issue_id, empty)) is NOT partial, so two unattributed rows
+// both carrying the empty-string column default would collide on the SAME key and the second
+// INSERT would fail outright.
+//
+// A request_id-less row is still REFUSED — it has no dedup key, and the syncer re-reads the same
+// window ~96×/day, so writing one would multiply that cost by the number of pulls. An empty
+// FEATURE is fine (it simply resolves to nothing); an empty REQUEST_ID is not.
+//
 // Returns (resolved, landed):
 //
-//	resolved=false → no issue has identifier=feature ⇒ caller SKIPS + logs the orphan (nothing is written).
-//	resolved=true, landed=true  → fresh insert; issue credited once.
-//	resolved=true, landed=false → request_id already recorded (a re-pull) ⇒ issue NOT re-credited.
+//	resolved=false, landed=true  → no issue matched; recorded as unattributed, no issue credited.
+//	resolved=true,  landed=true  → fresh insert; issue credited once.
+//	landed=false                 → request_id already recorded (a re-pull) ⇒ nothing re-credited.
 func (s *Store) RecordRequestSpend(ctx context.Context, requestID, feature string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error) {
-	if requestID == "" || feature == "" || workspaceID == "" {
-		return false, false, errors.New("issue: RecordRequestSpend requires request_id, feature, workspace_id")
+	if requestID == "" || workspaceID == "" {
+		return false, false, errors.New("issue: RecordRequestSpend requires request_id, workspace_id")
 	}
 	var resolvedN, insertedN int
 	qErr := s.pool.QueryRow(ctx, `
         WITH target AS (
-            SELECT id FROM issues WHERE identifier = $2 AND workspace_id = $3
+            SELECT id FROM issues WHERE $2 <> '' AND identifier = $2 AND workspace_id = $3
         ),
         ins AS (
             INSERT INTO ai_spend_events (request_id, event_key, workspace_id, issue_id, lens_feature, cost_usd, tokens, source)
-            SELECT $1, 'req:' || $1, $3, t.id, $2, $4, $5, 'sync-request' FROM target t
+            SELECT $1, 'req:' || $1, $3, (SELECT id FROM target), $2, $4, $5,
+                   CASE WHEN EXISTS (SELECT 1 FROM target) THEN 'sync-request' ELSE 'sync-request-unattributed' END
             ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING
             RETURNING issue_id, cost_usd, tokens
         ),

@@ -138,26 +138,44 @@ func TestPerRequest_NoDoubleCount_TotalEqualsDistinctSum(t *testing.T) {
 	}
 }
 
-// (proof d) FAIL-SAFE: (i) a feature matching NO identifier → skipped, zero rows, no orphan. (ii) a feature
-// that is a shared lens_feature on >1 issues (but no identifier) → skipped, never fanned out.
-func TestPerRequest_FailSafe_SkipsUnresolvable(t *testing.T) {
+// (proof d) FAIL-SAFE: an unresolvable feature CREDITS NOTHING — not the named issue, not any
+// issue sharing a lens_feature. (i) a feature matching NO identifier. (ii) a feature that is a
+// shared lens_feature on >1 issues but is nobody's identifier.
+//
+// This used to also assert ZERO ledger rows, under the name "no orphan row". That conflated two
+// different things. The invariant that protects a customer is that no issue is credited money it
+// did not incur — which every assertion below still proves, unchanged. "No row anywhere" was the
+// mechanism, not the invariant, and it had a cost: the money disappeared from the ledger
+// entirely, so issues.ai_cost_usd summed to less than the Lens bill with nothing recording the
+// difference. The row is now written with a NULL issue_id, crediting nothing. That is STRICTLY
+// STRONGER than writing nothing: it proves both that no issue moved AND that the spend is
+// accounted for. See UnattributedSpend.
+func TestPerRequest_FailSafe_UnresolvableCreditsNothing(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
 	store := st(d)
 
 	// (i) no issue has identifier = "GHOST-1".
-	resolved, landed, err := store.RecordRequestSpend(ctx, "req-ghost", "GHOST-1", 9.99, 0, ws.ID)
+	resolved, _, err := store.RecordRequestSpend(ctx, "req-ghost", "GHOST-1", 9.99, 0, ws.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved || landed {
-		t.Fatalf("unresolvable feature must SKIP: resolved=%v landed=%v", resolved, landed)
+	if resolved {
+		t.Fatalf("unresolvable feature must not resolve: resolved=%v", resolved)
 	}
-	var ghostRows int
-	_ = d.Pool.QueryRow(ctx, `SELECT count(*) FROM ai_spend_events WHERE request_id='req-ghost'`).Scan(&ghostRows)
-	if ghostRows != 0 {
-		t.Fatalf("no orphan row must be written for an unresolvable feature, got %d", ghostRows)
+	// The row exists and is attributed to NO issue — never to a guessed one.
+	var ghostRows, ghostAttributed int
+	if err := d.Pool.QueryRow(ctx,
+		`SELECT count(*), count(issue_id) FROM ai_spend_events WHERE request_id='req-ghost'`,
+	).Scan(&ghostRows, &ghostAttributed); err != nil {
+		t.Fatal(err)
+	}
+	if ghostRows != 1 {
+		t.Fatalf("unresolvable spend must be recorded as unattributed, got %d rows", ghostRows)
+	}
+	if ghostAttributed != 0 {
+		t.Fatalf("ORPHAN: the unattributed row named an issue_id (%d non-null)", ghostAttributed)
 	}
 
 	// (ii) two issues share lens_feature "dup-feat"; no issue has identifier="dup-feat".
@@ -165,15 +183,24 @@ func TestPerRequest_FailSafe_SkipsUnresolvable(t *testing.T) {
 	y := d.Issue(t, ws.ID, "")
 	setLensFeature(t, d, x.ID, "dup-feat")
 	setLensFeature(t, d, y.ID, "dup-feat")
-	resolved2, landed2, err := store.RecordRequestSpend(ctx, "req-dup", "dup-feat", 7.00, 0, ws.ID)
+	resolved2, _, err := store.RecordRequestSpend(ctx, "req-dup", "dup-feat", 7.00, 0, ws.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved2 || landed2 {
-		t.Fatalf("shared-lens_feature (no identifier) must SKIP, never fan out: resolved=%v landed=%v", resolved2, landed2)
+	if resolved2 {
+		t.Fatalf("shared-lens_feature (no identifier) must not resolve: resolved=%v", resolved2)
 	}
+	// THE LOAD-BEARING ASSERTION, unchanged: cost never fans out onto lens_feature matches.
 	if cx, cy := issueCost(t, d, x.ID), issueCost(t, d, y.ID); cx != 0 || cy != 0 {
 		t.Fatalf("FANOUT: shared-lens_feature issues must stay 0, got X=%.2f Y=%.2f", cx, cy)
+	}
+	var dupAttributed int
+	if err := d.Pool.QueryRow(ctx,
+		`SELECT count(issue_id) FROM ai_spend_events WHERE request_id='req-dup'`).Scan(&dupAttributed); err != nil {
+		t.Fatal(err)
+	}
+	if dupAttributed != 0 {
+		t.Fatalf("FANOUT: the shared-lens_feature row named an issue_id (%d non-null)", dupAttributed)
 	}
 }
 
