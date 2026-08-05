@@ -124,7 +124,12 @@ func runMigrate(args []string) {
 }
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// ⚠ THE LEVEL COMES FROM TRACK_LOG_LEVEL, which until now was parsed and thrown away: this
+	// handler took nil options, i.e. the package default of Info, so the documented knob did
+	// nothing. See config.ParseLogLevel.
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: config.ParseLogLevel(os.Getenv(config.LogLevelEnv)),
+	}))
 	slog.SetDefault(logger)
 
 	// Subcommand: `track migrate up|status` runs the schema migrator and exits.

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -17,7 +18,6 @@ import (
 type Config struct {
 	ListenAddr  string
 	DatabaseURL string
-	LogLevel    string
 
 	// Talyvor Lens integration. All three are optional — an empty
 	// LensURL keeps Track running in standalone mode (no AI cost
@@ -131,7 +131,6 @@ func Load() (*Config, error) {
 	c := &Config{
 		ListenAddr:           getEnv("TRACK_LISTEN_ADDR", "0.0.0.0:3000"),
 		DatabaseURL:          os.Getenv("TRACK_DATABASE_URL"),
-		LogLevel:             getEnv("TRACK_LOG_LEVEL", "info"),
 		LensURL:              os.Getenv("TRACK_LENS_URL"),
 		LensAPIKey:           os.Getenv("TRACK_LENS_API_KEY"),
 		LensMintKey:          os.Getenv("TRACK_LENS_MINT_KEY"),
@@ -208,5 +207,34 @@ func parseBool(v string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// LogLevelEnv is the variable the logger's level comes from. It is read directly by main rather
+// than carried on Config, because the logger must exist before Load() can report a config error —
+// and a Config field nobody reads is exactly the defect this fixes.
+const LogLevelEnv = "TRACK_LOG_LEVEL"
+
+// ParseLogLevel turns TRACK_LOG_LEVEL into a slog level.
+//
+// ⚠ THIS EXISTS BECAUSE THE VALUE WAS PARSED AND NEVER USED. TRACK_LOG_LEVEL is documented in
+// .env.example and forwarded by docker-compose, Config.LogLevel was populated from it, and no code
+// anywhere read that field — the logger was built with nil handler options, which means the
+// package default of Info. Setting it to debug did nothing, silently, which is the worst way for
+// an operational control to fail: the person turning it up during an incident concludes the
+// problem is elsewhere.
+//
+// An unrecognised value is Info rather than a boot failure: a typo in a log level must not take
+// the service down, and must not silently mean "off" either.
+func ParseLogLevel(v string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }

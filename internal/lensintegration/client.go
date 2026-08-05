@@ -221,6 +221,15 @@ func (c *Client) GetAnomalies(ctx context.Context, workspaceID string) ([]map[st
 
 // Healthy returns true when Lens responds OK to /v1/api/health.
 // Returns false on any error, timeout, or non-2xx status.
+//
+// ⚠ IT MEANS 2xx, WHICH IS WHAT THIS COMMENT ALWAYS SAID. The code tested StatusCode < 500, so
+// 401, 403, 429 and 404 all reported HEALTHY — including the case where the health route does not
+// exist at all, which is the failure mode a bare status check is least able to see. The comment
+// was right and the code was wrong.
+//
+// ⚠ AND IT PROVES REACHABILITY, NOT AUTHORISATION. Lens mounts /v1/api/health unauthenticated, so
+// this probe passes with no credential and cannot tell you whether Track can read anything. That
+// is why GetAICosts reports the authenticated read separately instead of inferring it from here.
 func (c *Client) Healthy(ctx context.Context) bool {
 	if !c.IsConfigured() {
 		return false
@@ -236,5 +245,5 @@ func (c *Client) Healthy(ctx context.Context) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode < 500
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }

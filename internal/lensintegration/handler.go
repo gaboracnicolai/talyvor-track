@@ -41,6 +41,20 @@ const unattributedNote = "AI spend that reached no issue: requests sent without 
 // A FAILED READ MUST NOT REPORT $0. Zero unattributed spend is a strong, checkable claim
 // ("every dollar reached an issue"); a store that could not answer has not earned it, and a
 // fabricated zero is indistinguishable from a real one at the point it is read.
+// spendFailureReason turns a failed Lens read into something the operator can act on.
+//
+// ⚠ IT NAMES THE VARIABLE WHEN THE CREDENTIAL IS ABSENT, because that is the overwhelmingly common
+// cause and the one a user cannot diagnose from a 401 they never see. Anything else is reported as
+// what it is rather than guessed at.
+func (h *Handler) spendFailureReason(err error) string {
+	if h.lens.APIKey() == "" {
+		return "Lens spend could not be read: TRACK_LENS_API_KEY is unset, so Track cannot " +
+			"authenticate to Lens. Set it to a Lens workspace key (tlv_...). This is not the same " +
+			"credential as TRACK_LENS_MINT_KEY, which enables the AI features."
+	}
+	return "Lens spend could not be read: " + err.Error()
+}
+
 func (h *Handler) unattributedBlock(ctx context.Context, wsID string) (map[string]any, bool) {
 	reader, ok := h.issues.(unattributedReader)
 	if !ok {
@@ -150,6 +164,20 @@ func (h *Handler) GetAICosts(w http.ResponseWriter, r *http.Request) {
 		// subset, and without this field nothing on the response explains the gap.
 		// Omitted (never zeroed) when it could not be read — see unattributedBlock.
 		Unattributed map[string]any `json:"unattributed,omitempty"`
+		// ⚠ THE DIFFERENCE BETWEEN "NOTHING WAS SPENT" AND "I COULD NOT ASK".
+		//
+		// Every Lens read below is best-effort, and each failure used to be swallowed by its own
+		// `if err == nil`. With TRACK_LENS_URL set and no credential — the state this deployment
+		// is actually in — every authenticated read 401s and the response came back as
+		// {lens_configured: true, lens_healthy: true, top_issues: [], anomalies: []}: byte for
+		// byte what a correctly configured workspace with genuinely zero spend returns. A total
+		// that could not be obtained was being presented as a total that was measured.
+		//
+		// lens_healthy cannot cover this, because Lens serves /v1/api/health without a credential:
+		// it is true precisely when the credential is missing. So the authenticated read reports
+		// for itself. The same rule unattributedBlock already follows, one function above.
+		SpendUnreadable bool   `json:"spend_unreadable,omitempty"`
+		SpendReason     string `json:"spend_unreadable_reason,omitempty"`
 	}
 	out := response{LensConfigured: true, LensHealthy: h.lens.Healthy(ctx)}
 	if haveUnattributed {
@@ -158,6 +186,11 @@ func (h *Handler) GetAICosts(w http.ResponseWriter, r *http.Request) {
 
 	if summary, err := h.lens.GetSpendSummary(ctx, wsID, 30); err == nil {
 		out.Summary = summary
+	} else {
+		out.SpendUnreadable = true
+		out.SpendReason = h.spendFailureReason(err)
+		slog.Warn("lensintegration: spend summary read failed — reporting it rather than showing $0",
+			slog.String("workspace_id", wsID), slog.String("err", err.Error()))
 	}
 	if anoms, err := h.lens.GetAnomalies(ctx, wsID); err == nil {
 		out.Anomalies = anoms
