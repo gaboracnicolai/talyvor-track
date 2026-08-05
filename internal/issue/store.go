@@ -846,13 +846,41 @@ func (s *Store) UnattributedSpend(ctx context.Context, workspaceID string) (cost
 //	resolved=true,  landed=true  → fresh insert; issue credited once.
 //	landed=false                 → request_id already recorded (a re-pull) ⇒ nothing re-credited.
 func (s *Store) RecordRequestSpend(ctx context.Context, requestID, feature string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error) {
+	return s.RecordRequestSpendAttributed(ctx, requestID, feature, "", costUSD, tokens, workspaceID)
+}
+
+// RecordRequestSpendAttributed is RecordRequestSpend with the ISSUE the caller was working on.
+//
+// ⚠ WHY THIS EXISTS. Attribution resolved by matching the request's FEATURE against an issue
+// identifier. That is right for someone tagging by hand (X-Talyvor-Feature: ENG-42) and wrong for
+// the editor we ship: the Code extension sends the feature as an IDE affordance ("code-chat",
+// "code-completion"), so it matched no issue and every request from it credited nothing. The issue
+// was known all along — the extension sends X-Talyvor-Issue, Lens captures it, and #401 finally made
+// it joinable to the spend row and returned it as `issue_id` on /v1/api/spend/by-request.
+//
+// ⚠ ISSUE FIRST, FEATURE AS FALLBACK, AND THE FALLBACK IS LOAD-BEARING. Manual taggers work today
+// and must keep working, so an EMPTY issue resolves exactly as before. The issue wins when both
+// resolve: a feature naming some other issue must never outrank the issue the user was actually on.
+//
+// ⚠ AND WHEN NEITHER RESOLVES the money is still recorded, with a NULL issue_id — #66's rule. This
+// is the branch this change touches most directly, so it is asserted rather than assumed: spend that
+// matches nothing must be visible as unattributed, never dropped and never guessed onto an issue.
+//
+// Exactly-once is unchanged and still keyed on request_id: the syncer re-reads the same 24h window
+// roughly 96 times a day, so a re-pull must insert nothing and credit nothing.
+func (s *Store) RecordRequestSpendAttributed(ctx context.Context, requestID, feature, issueIdentifier string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error) {
 	if requestID == "" || workspaceID == "" {
 		return false, false, errors.New("issue: RecordRequestSpend requires request_id, workspace_id")
 	}
 	var resolvedN, insertedN int
 	qErr := s.pool.QueryRow(ctx, `
         WITH target AS (
-            SELECT id FROM issues WHERE $2 <> '' AND identifier = $2 AND workspace_id = $3
+            -- Preference, not a union: the issue header wins outright when it resolves, and the
+            -- feature is consulted only when there is no issue to consult. UNIQUE(workspace_id,
+            -- identifier) means each arm yields 0 or 1 row, so this can never fan out.
+            SELECT id FROM issues WHERE $6 <> '' AND identifier = $6 AND workspace_id = $3
+            UNION ALL
+            SELECT id FROM issues WHERE $6 = '' AND $2 <> '' AND identifier = $2 AND workspace_id = $3
         ),
         ins AS (
             INSERT INTO ai_spend_events (request_id, event_key, workspace_id, issue_id, lens_feature, cost_usd, tokens, source)
@@ -868,7 +896,7 @@ func (s *Store) RecordRequestSpend(ctx context.Context, requestID, feature strin
             RETURNING i.id
         )
         SELECT (SELECT count(*) FROM target), (SELECT count(*) FROM ins)`,
-		requestID, feature, workspaceID, costUSD, tokens,
+		requestID, feature, workspaceID, costUSD, tokens, issueIdentifier,
 	).Scan(&resolvedN, &insertedN)
 	if qErr != nil {
 		return false, false, fmt.Errorf("issue: record request spend: %w", qErr)

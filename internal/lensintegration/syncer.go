@@ -17,6 +17,9 @@ type costUpdater interface {
 	// (NULL issue_id, no issue credited) when it does not. resolved=false therefore still means
 	// "no issue was credited" — but the money is now recorded either way.
 	RecordRequestSpend(ctx context.Context, requestID, feature string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error)
+	// RecordRequestSpendAttributed is the same write with the issue the caller was working on
+	// preferred over the feature — see issue.Store for why the fallback is load-bearing.
+	RecordRequestSpendAttributed(ctx context.Context, requestID, feature, issueIdentifier string, costUSD float64, tokens int, workspaceID string) (resolved, landed bool, err error)
 }
 
 // workspaceLister returns the workspace IDs the syncer should poll on
@@ -81,11 +84,16 @@ func (s *Syncer) SyncFeatureSpend(ctx context.Context, workspaceID string) error
 		// An empty feature is passed through deliberately: it resolves to nothing and lands
 		// as unattributed. It is the LARGEST such bucket in practice — any Lens key used
 		// without X-Talyvor-Feature.
-		resolved, didLand, err := s.updater.RecordRequestSpend(ctx, rs.RequestID, rs.Feature, rs.CostUSD, rs.InputTokens+rs.OutputTokens, workspaceID)
+		// ⚠ THE ISSUE IS PREFERRED, THE FEATURE IS THE FALLBACK. The Code extension sends the
+		// feature as an IDE affordance ("code-chat"), so matching on it credited nothing for every
+		// request from the editor we ship. It also sends the issue, which Lens now returns. An
+		// empty issue resolves exactly as before, which is what keeps manual taggers working.
+		resolved, didLand, err := s.updater.RecordRequestSpendAttributed(ctx, rs.RequestID, rs.Feature, rs.IssueID, rs.CostUSD, rs.InputTokens+rs.OutputTokens, workspaceID)
 		if err != nil {
 			slog.Warn("lensintegration: RecordRequestSpend failed",
 				slog.String("workspace_id", workspaceID),
 				slog.String("feature", rs.Feature),
+				slog.String("issue", rs.IssueID),
 				slog.String("request_id", rs.RequestID),
 				slog.String("err", err.Error()),
 			)
