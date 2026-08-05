@@ -15,6 +15,11 @@ import (
 	"github.com/talyvor/track/internal/model"
 )
 
+// testMintKey stands for a configured TRACK_LENS_MINT_KEY. These tests are about what the engine
+// does WHEN AI is configured, so they say so explicitly rather than relying on the old behaviour
+// where any Lens URL implied a working credential — which is the defect unconfigured_test.go pins.
+const testMintKey = "test-mint-key"
+
 // stubSearcher records calls to the full-text fallback so the
 // semantic-search tests can verify the fallback fired exactly when
 // expected.
@@ -101,7 +106,7 @@ func TestTriageIssue_ReturnsPriorityFromLLM(t *testing.T) {
 	})
 
 	lens := lensintegration.New(srv.URL, "tlv_test")
-	engine := New(lens, nil, nil)
+	engine := New(lens, nil, nil, testMintKey)
 
 	got, err := engine.TriageIssue(context.Background(), model.Issue{
 		ID: "i-1", Identifier: "ENG-42",
@@ -119,7 +124,7 @@ func TestTriageIssue_ReturnsPriorityFromLLM(t *testing.T) {
 }
 
 func TestTriageIssue_HandlesLensUnavailable(t *testing.T) {
-	engine := New(lensintegration.New("", ""), nil, nil)
+	engine := New(lensintegration.New("", ""), nil, nil, testMintKey)
 	_, err := engine.TriageIssue(context.Background(), model.Issue{Identifier: "ENG-1"})
 	if !errors.Is(err, ErrAIUnavailable) {
 		t.Errorf("expected ErrAIUnavailable; got %v", err)
@@ -137,7 +142,7 @@ func TestFindDuplicates_ReturnsCandidatesAboveThreshold(t *testing.T) {
 		},
 	})
 	lens := lensintegration.New(srv.URL, "tlv_test")
-	engine := New(lens, nil, nil)
+	engine := New(lens, nil, nil, testMintKey)
 
 	candidates := []model.Issue{
 		{ID: "i-old-1", Identifier: "ENG-100", Title: "Payment declined on checkout"},
@@ -163,7 +168,7 @@ func TestFindDuplicates_ReturnsEmptyWhenNoDuplicates(t *testing.T) {
 		},
 	})
 	lens := lensintegration.New(srv.URL, "tlv_test")
-	engine := New(lens, nil, nil)
+	engine := New(lens, nil, nil, testMintKey)
 
 	got, err := engine.FindDuplicates(context.Background(),
 		model.Issue{Identifier: "ENG-1", Title: "x"},
@@ -177,7 +182,7 @@ func TestFindDuplicates_ReturnsEmptyWhenNoDuplicates(t *testing.T) {
 }
 
 func TestSummarizeThread_SkipsWhenFewerThan10Comments(t *testing.T) {
-	engine := New(lensintegration.New("http://unused", "k"), nil, nil)
+	engine := New(lensintegration.New("http://unused", "k"), nil, nil, testMintKey)
 	out, err := engine.SummarizeThread(context.Background(),
 		model.Issue{ID: "i-1", Identifier: "ENG-1"},
 		make([]model.Comment, 5))
@@ -201,7 +206,7 @@ func TestSummarizeThread_ReturnsSummaryForLongThread(t *testing.T) {
 		},
 	})
 	lens := lensintegration.New(srv.URL, "tlv_test")
-	engine := New(lens, nil, nil)
+	engine := New(lens, nil, nil, testMintKey)
 
 	comments := make([]model.Comment, 12)
 	for i := range comments {
@@ -244,7 +249,7 @@ func TestSuggestSprintIssues_ReturnsRecommended(t *testing.T) {
 		},
 	})
 	lens := lensintegration.New(srv.URL, "tlv_test")
-	engine := New(lens, nil, nil)
+	engine := New(lens, nil, nil, testMintKey)
 
 	backlog := []model.Issue{
 		{ID: "i-1", Title: "Bug 1", Priority: model.PriorityUrgent},
@@ -265,7 +270,7 @@ func TestSemanticSearch_FallsBackToFullText(t *testing.T) {
 	stub := &stubSearcher{
 		results: []model.Issue{{ID: "i-x", Title: "fallback"}},
 	}
-	engine := New(lensintegration.New("", ""), stub, nil)
+	engine := New(lensintegration.New("", ""), stub, nil, testMintKey)
 
 	got, err := engine.SemanticSearch(context.Background(), "ws-1", "anything", 10)
 	if err != nil {
@@ -287,7 +292,7 @@ func TestSemanticSearch_FallsBackOnEmbeddingError(t *testing.T) {
 		},
 	})
 	stub := &stubSearcher{results: []model.Issue{{ID: "i-x"}}}
-	engine := New(lensintegration.New(srv.URL, "k"), stub, nil)
+	engine := New(lensintegration.New(srv.URL, "k"), stub, nil, testMintKey)
 
 	if _, err := engine.SemanticSearch(context.Background(), "ws-1", "q", 10); err != nil {
 		t.Fatalf("SemanticSearch: %v", err)
@@ -298,7 +303,7 @@ func TestSemanticSearch_FallsBackOnEmbeddingError(t *testing.T) {
 }
 
 func TestEstimateIssueCost_ReturnsReasonableEstimates(t *testing.T) {
-	engine := New(lensintegration.New("", ""), nil, nil)
+	engine := New(lensintegration.New("", ""), nil, nil, testMintKey)
 
 	cases := []struct {
 		name  string

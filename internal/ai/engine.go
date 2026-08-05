@@ -72,7 +72,10 @@ type Engine struct {
 	creds       tokenProvider
 	issueSearch fullTextSearcher
 	pool        pgxDB
-	httpClient  *http.Client
+	// mintKey is held only to answer IsAvailable/UnavailableReason honestly; the credential itself
+	// is used by lenscreds, never by this struct.
+	mintKey    string
+	httpClient *http.Client
 
 	// Thread summary cache: issueID → cached entry. Bounded by the
 	// number of long threads in the workspace, which is small in
@@ -91,25 +94,49 @@ const summaryTTL = time.Hour
 // New constructs the AI engine. lensClient may be a zero-value Client
 // (LensURL unset) — methods detect that via IsConfigured and return
 // graceful "ai_available: false" responses to handlers.
-func New(lensClient *lensintegration.Client, issueSearch fullTextSearcher, pool *pgxpool.Pool) *Engine {
+// ⚠ THE MINT CREDENTIAL IS A SEPARATE VARIABLE FROM THE READ KEY, AND IT HAS TO BE.
+//
+// TRACK_LENS_API_KEY was doing two jobs whose credential requirements are mutually exclusive:
+//
+//   - the spend reads (/v1/api/spend/*) need a WORKSPACE key (tlv_…), because Lens resolves the
+//     workspace from the key and refuses "no workspace identity" without one;
+//   - minting a per-workspace token (/v1/auth/token) needs admin, or since Lens #402 the narrow
+//     LENS_MINT_KEY — and that credential authenticates with NO workspace, so it is refused by the
+//     spend reads.
+//
+// No single value satisfies both. A tlv_ key cannot mint, which is why Track's AI has never worked
+// and why the README's `TRACK_LENS_API_KEY=tlv_...` described something that could not function.
+// The one value that would satisfy both is the global admin key, and that is exactly the credential
+// that must never enter Track — a Track compromise would become Lens admin over every tenant.
+//
+// So mintKey is passed separately. Empty is a supported state: IsAvailable reports false and every
+// AI feature says plainly that it is not configured.
+func New(lensClient *lensintegration.Client, issueSearch fullTextSearcher, pool *pgxpool.Pool, mintKey string) *Engine {
 	var db pgxDB
 	if pool != nil {
 		db = pool
 	}
-	// The provider mints per-workspace JWTs against the same Lens, using
-	// the shared key ONLY on the admin-gated mint endpoint. Standalone
-	// mode (empty URL/key) is fine — IsAvailable gates every call before
-	// the provider is ever reached.
-	creds := lenscreds.New(lensClient.BaseURL(), lensClient.APIKey())
-	return newEngine(lensClient, creds, issueSearch, db)
+	// ⚠ lenscreds sends only workspace_id and ttl_hours — no "scopes". That matters: Lens #402
+	// REFUSES a mint-scoped credential that names its own scopes, so a client that sent them would
+	// be 403ed. Track needs no change there; the token it receives carries {proxy}, which covers
+	// the only two Lens routes this engine calls (/v1/proxy/anthropic, /v1/proxy/openai).
+	creds := lenscreds.New(lensClient.BaseURL(), mintKey)
+	return newEngineWithMint(lensClient, creds, issueSearch, db, mintKey)
 }
 
 func newEngine(lens lensAccess, creds tokenProvider, issueSearch fullTextSearcher, db pgxDB) *Engine {
+	// Existing callers construct an engine that is available whenever Lens is: they inject their
+	// own creds, so there is no separate credential for them to be missing.
+	return newEngineWithMint(lens, creds, issueSearch, db, "configured-by-injection")
+}
+
+func newEngineWithMint(lens lensAccess, creds tokenProvider, issueSearch fullTextSearcher, db pgxDB, mintKey string) *Engine {
 	return &Engine{
 		lens:         lens,
 		creds:        creds,
 		issueSearch:  issueSearch,
 		pool:         db,
+		mintKey:      mintKey,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		summaryCache: make(map[string]cachedSummary),
 	}
@@ -119,10 +146,35 @@ func newEngine(lens lensAccess, creds tokenProvider, issueSearch fullTextSearche
 // handler turns this into a 503-ish response with {ai_available: false}.
 var ErrAIUnavailable = errors.New("ai: Lens is not available")
 
-// IsAvailable reports whether the AI engine can make calls. Cheap —
-// just checks the Lens client's configuration state.
+// IsAvailable reports whether the AI engine can make calls.
+//
+// ⚠ IT CHECKS THE CREDENTIAL, NOT JUST THE URL. It used to ask only whether TRACK_LENS_URL was
+// set, so a deployment with a URL and no mint credential — which is every deployment today —
+// reported itself AVAILABLE. Every "AI is not configured" path in this repository sits behind this
+// method, so returning true made all of them unreachable: instead of the graceful answer both the
+// HTTP handler and the MCP server were written to give, a user got a 502 carrying a raw Lens 403
+// about a credential they have never heard of. A feature that reports itself ready and cannot
+// work is worse than one that says it is off.
 func (e *Engine) IsAvailable() bool {
-	return e != nil && e.lens != nil && e.lens.IsConfigured()
+	return e != nil && e.lens != nil && e.lens.IsConfigured() && e.mintKey != ""
+}
+
+// UnavailableReason says, in one sentence, what to do about it. Empty when the engine is available.
+//
+// ⚠ IT NAMES THE VARIABLE AND DELIBERATELY DOES NOT NAME LENS_API_KEY. The global admin key would
+// make minting work, which is exactly why mentioning it here would be dangerous: it is the one
+// credential that must never be pasted into Track.
+func (e *Engine) UnavailableReason() string {
+	switch {
+	case e == nil || e.lens == nil || !e.lens.IsConfigured():
+		return "AI is not configured: TRACK_LENS_URL is unset, so Track has no Lens to call."
+	case e.mintKey == "":
+		return "AI is not configured: set TRACK_LENS_MINT_KEY to the value of Lens's LENS_MINT_KEY. " +
+			"It is a narrow credential that may only mint a per-workspace token; TRACK_LENS_API_KEY " +
+			"is a workspace key and cannot mint, which is why AI has never run on this deployment."
+	default:
+		return ""
+	}
 }
 
 // callAnthropicViaLens POSTs an Anthropic-shaped request to Lens's

@@ -49,15 +49,24 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, apiError{Error: msg, Code: code})
 }
 
-// unavailable is the "Lens not configured" response. 200 OK with a
-// flag — the frontend renders an empty-state card instead of an error.
-func unavailable(w http.ResponseWriter) {
-	writeJSON(w, http.StatusOK, map[string]bool{"ai_available": false})
+// unavailableFor is the "AI is not configured" response.
+//
+// 200 with a flag rather than a 5xx: the feature being switched off is not a server fault, and a
+// 502 invites a retry that can never succeed.
+//
+// ⚠ IT CARRIES A REASON, because "ai_available: false" on its own is an empty result. It tells the
+// caller the feature is off and nothing about how to turn it on, and it is indistinguishable from
+// "Lens is down" — so the person who could fix it has no way to know that they can.
+func unavailableFor(w http.ResponseWriter, e *Engine) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ai_available": false,
+		"reason":       e.UnavailableReason(),
+	})
 }
 
 func (h *Handler) Triage(w http.ResponseWriter, r *http.Request) {
 	if !h.engine.IsAvailable() {
-		unavailable(w)
+		unavailableFor(w, h.engine)
 		return
 	}
 	wsID, ok := authz.WorkspaceID(r.Context())
@@ -98,7 +107,7 @@ func (h *Handler) FindDuplicates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.engine.IsAvailable() {
-		unavailable(w)
+		unavailableFor(w, h.engine)
 		return
 	}
 	// SEC-5: scoped read — a foreign issue id yields ErrNotFound → 404 (no cross-tenant disclosure).
@@ -143,7 +152,7 @@ func (h *Handler) Summary(w http.ResponseWriter, r *http.Request) {
 	out, err := h.engine.SummarizeThread(r.Context(), *iss, comments)
 	if err != nil {
 		if err == ErrAIUnavailable {
-			unavailable(w)
+			unavailableFor(w, h.engine)
 			return
 		}
 		writeErr(w, http.StatusBadGateway, "AI_ERROR", err.Error())
@@ -163,7 +172,7 @@ func (h *Handler) SuggestSprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.engine.IsAvailable() {
-		unavailable(w)
+		unavailableFor(w, h.engine)
 		return
 	}
 	var in struct {

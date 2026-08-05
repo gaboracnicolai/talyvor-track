@@ -39,12 +39,38 @@ Set your Lens URL for AI cost attribution:
 
 ```bash
 TRACK_LENS_URL=http://your-lens:8080
-TRACK_LENS_API_KEY=tlv_...
+TRACK_LENS_API_KEY=tlv_...         # a Lens WORKSPACE key — reads per-issue spend
+TRACK_LENS_MINT_KEY=               # the value of Lens's LENS_MINT_KEY — required for AI features
 TRACK_LENS_WEBHOOK_SECRET=...
 TRACK_LENS_DASHBOARD_URL=          # optional; where `lens_url` points. Unset ⇒ no link.
 ```
 
 Every issue now shows how much LLM spend it accrued — both via the 15-minute reconciliation poll and via Lens webhooks for near-real-time updates.
+
+### Two Lens credentials, and why one cannot do both jobs
+
+These are different keys on purpose, and setting only the first is why Track's AI features do
+nothing:
+
+| variable | what it is | what it is for |
+|---|---|---|
+| `TRACK_LENS_API_KEY` | a Lens **workspace** key (`tlv_…`) | reading per-issue spend from `/v1/api/spend/*` |
+| `TRACK_LENS_MINT_KEY` | the value of Lens's **`LENS_MINT_KEY`** | minting the per-workspace token every AI feature needs |
+
+Lens resolves a workspace from a `tlv_` key, which is what the spend reads require — and a `tlv_`
+key authenticates with `IsAdmin=false`, so it is refused by the token-mint endpoint. The mint
+credential is the reverse: it carries no workspace, so it can mint and cannot read spend. No single
+value satisfies both.
+
+> **⚠ Never set either of these to Lens's `LENS_API_KEY`.** That global admin key would satisfy
+> both — which is exactly the problem. It grants LXC grants, royalty adjudication and minting for
+> every tenant, so a Track compromise would become Lens admin over the whole deployment.
+> `LENS_MINT_KEY` exists precisely so Track does not have to hold it: its only power is minting a
+> per-workspace token. It authenticates with `IsAdmin=false`, so it fails every one of Lens's
+> admin gates by construction rather than by a list someone has to maintain.
+
+With `TRACK_LENS_MINT_KEY` unset, Track keeps working and every AI feature says so plainly rather
+than failing — the API returns `{"ai_available": false, "reason": "…"}` naming the variable to set.
 
 ## MCP integration (Claude Code, Codex, custom agents)
 

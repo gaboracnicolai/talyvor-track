@@ -24,6 +24,8 @@ import (
 
 const secret = "test-gateway-transit-secret-0123456789"
 
+const testMintKey = "test-mint-key"
+
 func seedMember(t *testing.T, d *testutil.DB, wsID, email string) string {
 	t.Helper()
 	var id string
@@ -55,7 +57,7 @@ func mcpChain(d *testutil.DB) http.Handler {
 		issueStore,
 		project.NewStore(d.Pool),
 		cycle.NewStore(d.Pool),
-		ai.New(lensintegration.New("", ""), issueStore, d.Pool), // degraded AI (not exercised here)
+		ai.New(lensintegration.New("", ""), issueStore, d.Pool, testMintKey), // degraded AI (not exercised here)
 		analytics.New(d.Pool),
 		"test",
 	).WithMembersPool(d.Pool)

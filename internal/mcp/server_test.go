@@ -108,6 +108,9 @@ type fakeAIEngine struct {
 }
 
 func (f *fakeAIEngine) IsAvailable() bool { return f.available }
+
+// UnavailableReason mirrors the real engine: the fake is "configured", so it has nothing to say.
+func (f *fakeAIEngine) UnavailableReason() string { return "" }
 func (f *fakeAIEngine) TriageIssue(ctx context.Context, i model.Issue) (*ai.TriageResult, error) {
 	return f.triageFn(ctx, i)
 }

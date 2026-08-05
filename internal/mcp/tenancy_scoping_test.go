@@ -99,7 +99,8 @@ func (f *scopingIssueStore) CreateComment(_ context.Context, c model.Comment, wo
 // BEFORE any LLM work (and any data leak) happened.
 type scopingAI struct{ triaged int }
 
-func (a *scopingAI) IsAvailable() bool { return true }
+func (a *scopingAI) IsAvailable() bool         { return true }
+func (a *scopingAI) UnavailableReason() string { return "" }
 func (a *scopingAI) TriageIssue(_ context.Context, i model.Issue) (*ai.TriageResult, error) {
 	a.triaged++
 	return &ai.TriageResult{Summary: "TRIAGED:" + i.Title, Confidence: 1}, nil
