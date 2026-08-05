@@ -156,8 +156,13 @@ func (c *Client) GetSpendByFeature(ctx context.Context, workspaceID string, days
 // carries the RequestID that keys Track's exactly-once accumulation. Feature is the X-Talyvor-Feature the
 // caller set (Track convention = the issue identifier).
 type RequestSpend struct {
-	RequestID    string  `json:"request_id"`
-	Feature      string  `json:"feature"`
+	RequestID string `json:"request_id"`
+	Feature   string `json:"feature"`
+	// IssueID is the issue the caller was working on, from the X-Talyvor-Issue header. Lens #401
+	// (migration 0116) made it joinable to the spend row and returns it here; field name verified
+	// against internal/api/server.go:732 rather than assumed. EMPTY for any caller that sent no
+	// issue header — which is every manual tagger — so it is a preference, never a requirement.
+	IssueID      string  `json:"issue_id"`
 	CostUSD      float64 `json:"cost_usd"`
 	InputTokens  int     `json:"input_tokens"`
 	OutputTokens int     `json:"output_tokens"`

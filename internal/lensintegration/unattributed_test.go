@@ -267,3 +267,14 @@ func TestAICosts_ReaderWithoutUnattributedSeam_StillServes(t *testing.T) {
 		t.Errorf("a reader with no unattributed seam must omit the block, not invent one")
 	}
 }
+
+// RecordRequestSpendAttributed applies the same preference the real store does — issue first,
+// feature as fallback — then reuses the existing behaviour, so the fake cannot drift into modelling
+// a different rule from production.
+func (f *ledgerUpdater) RecordRequestSpendAttributed(ctx context.Context, requestID, feature, issueIdentifier string, cost float64, tokens int, ws string) (bool, bool, error) {
+	key := feature
+	if issueIdentifier != "" {
+		key = issueIdentifier
+	}
+	return f.RecordRequestSpend(ctx, requestID, key, cost, tokens, ws)
+}
