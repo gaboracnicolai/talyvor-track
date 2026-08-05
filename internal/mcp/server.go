@@ -83,6 +83,7 @@ type cycleStoreIface interface {
 
 type aiEngineIface interface {
 	IsAvailable() bool
+	UnavailableReason() string
 	TriageIssue(ctx context.Context, i model.Issue) (*ai.TriageResult, error)
 }
 
@@ -955,7 +956,9 @@ func (s *Server) toolTriageIssue(ctx context.Context, args json.RawMessage) (any
 		return map[string]any{
 			"ai_available": false,
 			"issue_id":     in.IssueID,
-			"reason":       "Lens not configured or AI engine offline",
+			// ⚠ The reason is the engine's, not a generic string. An agent that is told "offline"
+			// will retry; one told which variable is unset can report something a human can fix.
+			"reason": s.aiEngine.UnavailableReason(),
 		}, nil
 	}
 	iss, err := s.issueStore.GetByID(ctx, in.IssueID)

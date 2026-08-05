@@ -251,7 +251,7 @@ func main() {
 	// AI engine: every Track AI feature routes through Lens via this
 	// engine. issueStore doubles as the full-text fallback for
 	// semantic search; pool is needed for the issue_embeddings table.
-	aiEngine := ai.New(lensClient, issueStore, pool)
+	aiEngine := ai.New(lensClient, issueStore, pool, cfg.LensMintKey)
 	aiHandler := ai.NewHandler(aiEngine, issueStore)
 
 	// Automation engine. Slack notifier is the only side-channel —

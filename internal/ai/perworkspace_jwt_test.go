@@ -32,7 +32,7 @@ func (s *stubExecDB) QueryRow(context.Context, string, ...any) pgx.Row { return 
 // bucket and the "default" spend attribution.
 func TestDataPath_CarriesPerWorkspaceJWT_NotSharedKey(t *testing.T) {
 	f := newAIFakeLens(t)
-	engine := New(lensintegration.New(f.server.URL, sharedAdminKey), nil, nil)
+	engine := New(lensintegration.New(f.server.URL, sharedAdminKey), nil, nil, testMintKey)
 
 	_, err := engine.TriageIssue(context.Background(), model.Issue{
 		ID: "i-1", Identifier: "ENG-1", WorkspaceID: "ws-A",
@@ -58,14 +58,23 @@ func TestDataPath_CarriesPerWorkspaceJWT_NotSharedKey(t *testing.T) {
 	if ws != "ws-A" {
 		t.Errorf("data-path JWT claims workspace %q, want ws-A", ws)
 	}
-	// The shared key may ride ONLY the mint endpoint.
+	// ⚠ THE MINT NOW USES THE NARROW MINT CREDENTIAL, AND THIS ASSERTION USED TO SAY "admin key".
+	//
+	// It was right when it was written: lenscreds was constructed from the Lens client's own API
+	// key, so whatever Track held for reads was also what it minted with. That is precisely the
+	// coupling being removed — a workspace key cannot mint, and the only value that could do both
+	// jobs was Lens's global admin key. So the expectation is updated rather than the product, and
+	// it is now STRICTLY STRONGER: the read key must be spent on nothing at all.
 	for _, a := range mintAuth {
-		if a != "Bearer "+sharedAdminKey {
-			t.Errorf("mint used %q, want the admin key", a)
+		if a != "Bearer "+testMintKey {
+			t.Errorf("mint used %q, want the narrow mint credential", a)
+		}
+		if a == "Bearer "+sharedAdminKey {
+			t.Errorf("mint used the read key — a workspace key cannot mint, and the admin key must never be here")
 		}
 	}
 	if len(mintAuth) == 0 {
-		t.Errorf("expected the admin key to be spent on a mint before the data-path call")
+		t.Errorf("expected a mint before the data-path call")
 	}
 }
 
@@ -84,9 +93,10 @@ func TestDataPath_CarriesPerWorkspaceJWT_NotSharedKey(t *testing.T) {
 func TestTwoTenants_IsolatedEndToEnd_NoSharedKeyOnDataPath(t *testing.T) {
 	f := newAIFakeLens(t)
 	client := lensintegration.New(f.server.URL, sharedAdminKey)
-	// Build creds exactly as production New() does, but inject a stub DB
-	// so the embeddings/index path runs without a real Postgres.
-	creds := lenscreds.New(client.BaseURL(), client.APIKey())
+	// Build creds exactly as production New() does — from the SEPARATE mint credential, not from
+	// the client's read key — but inject a stub DB so the embeddings/index path runs without a
+	// real Postgres.
+	creds := lenscreds.New(client.BaseURL(), testMintKey)
 	engine := newEngine(client, creds, nil, &stubExecDB{})
 
 	tenants := []struct {
@@ -155,9 +165,11 @@ func TestTwoTenants_IsolatedEndToEnd_NoSharedKeyOnDataPath(t *testing.T) {
 	if mintByWs["ws-A"] != 1 || mintByWs["ws-B"] != 1 {
 		t.Errorf("each workspace must mint exactly once; byWorkspace=%v", mintByWs)
 	}
+	// ⚠ The mint credential is the ONLY credential that may appear on the mint endpoint, and the
+	// read key must appear NOWHERE — not on the data path, not here.
 	for _, a := range mintAuth {
-		if a != "Bearer "+sharedAdminKey {
-			t.Errorf("mint used %q, want the admin key (mint is the ONLY place the shared key may appear)", a)
+		if a != "Bearer "+testMintKey {
+			t.Errorf("mint used %q, want the narrow mint credential", a)
 		}
 	}
 }

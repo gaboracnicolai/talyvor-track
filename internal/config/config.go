@@ -22,8 +22,12 @@ type Config struct {
 	// Talyvor Lens integration. All three are optional — an empty
 	// LensURL keeps Track running in standalone mode (no AI cost
 	// data, but every other endpoint works).
-	LensURL           string
-	LensAPIKey        string
+	LensURL    string
+	LensAPIKey string
+	// LensMintKey is Lens's LENS_MINT_KEY: a narrow credential whose ONLY power is minting a
+	// per-workspace token. It is separate from LensAPIKey because the two roles need different
+	// credentials — see internal/ai.New. Never set this to Lens's global LENS_API_KEY.
+	LensMintKey       string
 	LensWebhookSecret string
 
 	// LensDashboardURL is where the AI-cost responses link a human to see request-level
@@ -130,6 +134,7 @@ func Load() (*Config, error) {
 		LogLevel:             getEnv("TRACK_LOG_LEVEL", "info"),
 		LensURL:              os.Getenv("TRACK_LENS_URL"),
 		LensAPIKey:           os.Getenv("TRACK_LENS_API_KEY"),
+		LensMintKey:          os.Getenv("TRACK_LENS_MINT_KEY"),
 		LensWebhookSecret:    os.Getenv("TRACK_LENS_WEBHOOK_SECRET"),
 		LensDashboardURL:     strings.TrimSpace(os.Getenv("TRACK_LENS_DASHBOARD_URL")),
 		GatewayAuthSecret:    os.Getenv("GATEWAY_AUTH_SECRET"),
