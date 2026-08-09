@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/talyvor/track/internal/model"
@@ -24,7 +25,7 @@ const linearIssuesQuery = `query($teamId: String!, $after: String) {
   team(id: $teamId) {
     issues(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { identifier title description state { name } priority labels { nodes { name } } }
+      nodes { identifier title description state { name type } priority labels { nodes { name } } }
     }
   }
 }`
@@ -59,6 +60,12 @@ type linearNode struct {
 	Description string `json:"description"`
 	State       struct {
 		Name string `json:"name"`
+		// Type is Linear's CANONICAL state category — the value a team cannot rename. Absent ⇒ ""
+		// ⇒ today's name-only behaviour, which is what makes the query change fail-safe on the
+		// decoding side. The query change itself is not fail-safe (an unknown field 400s the whole
+		// document), which is why it was measured against the live schema before it was made; see
+		// mapLinearStateType and scripts/w34-linear-schema-probe.py.
+		Type string `json:"type"`
 	} `json:"state"`
 	Priority int `json:"priority"`
 	Labels   struct {
@@ -174,6 +181,10 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 			labels = append(labels, l.Name)
 		}
 		status, statusOK := mapLinearStatus(n.State.Name)
+		var fallback statusFallback
+		if !statusOK {
+			status, fallback = resolveLinearStateType(n.State.Type, status)
+		}
 		prio, prioOK := linearPriorityFromInt(n.Priority)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
@@ -184,7 +195,7 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 				Priority:    prio,
 				Labels:      labels,
 			},
-			notes: collectNotes(n.State.Name, status, statusOK, statusFallback{}, strconv.Itoa(n.Priority), prio, prioOK),
+			notes: collectNotes(n.State.Name, status, statusOK, fallback, strconv.Itoa(n.Priority), prio, prioOK),
 		})
 	}
 	return out
@@ -209,6 +220,24 @@ func linearPriorityFromInt(p int) (model.IssuePriority, bool) {
 	default:
 		return model.PriorityNone, false
 	}
+}
+
+// resolveLinearStateType is the second chance an unrecognised Linear state NAME gets. It never runs
+// for a name mapLinearStatus knows, so a recognised import is byte-for-byte what it was.
+//
+// It returns the status to use plus the note material describing WHICH of the three things happened,
+// because a type that never arrived must not be reportable as one that arrived and resolved — that is
+// the only way a real tenant's first import can tell anyone whether this code executed. Exactly
+// #73's argument for the Jira half; the failure shape is the provider-independent one.
+func resolveLinearStateType(typ string, unresolved model.IssueStatus) (model.IssueStatus, statusFallback) {
+	if strings.TrimSpace(typ) == "" {
+		return unresolved, statusFallback{via: viaNoStateType}
+	}
+	mapped, ok := mapLinearStateType(typ)
+	if !ok {
+		return unresolved, statusFallback{via: viaStateType, value: typ}
+	}
+	return mapped, statusFallback{via: viaStateType, value: typ, resolved: true}
 }
 
 // linearSource drains the Linear cursor pagination behind Next() — the seam pattern from Build A: buffer a
