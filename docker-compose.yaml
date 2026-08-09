@@ -23,6 +23,30 @@ services:
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}
       - TRACK_LENS_DASHBOARD_URL=${TRACK_LENS_DASHBOARD_URL:-}
       - TRACK_GITHUB_WEBHOOK_SECRET=${TRACK_GITHUB_WEBHOOK_SECRET:-}
+      # ⚠ THE THREE BELOW WERE READ BY THE PROCESS AND DECLARED NOWHERE. Same mechanism as the
+      # secrets above: this service has an explicit `environment:` list and no `env_file:`, so a
+      # variable set in .env that is not named here reaches NOTHING. The container starts, passes
+      # its healthcheck, and the capability is simply inert — there is no error to read.
+      # cmd/track/compose_env_reach_test.go now enumerates credential-shaped names FROM THE SOURCE
+      # and fails when one is not forwarded, so this cannot recur by omission.
+      #
+      # Gates LIVE Jira/Linear API import in its entirety (AES-256-GCM at rest for each
+      # workspace's provider token). Unset ⇒ integrations.Store is never constructed, so
+      # WithIntegrationChecker is never called (linear_api/jira_api enqueue is refused) and
+      # WithProviderConfig is never called (those jobs fail "integrations not configured").
+      # The ONLY signal is one slog.Info at boot. Must decode to exactly 32 bytes:
+      # `openssl rand -base64 32`. Empty ⇒ live API import stays off, CSV import unaffected.
+      - TRACK_INTEGRATION_ENCRYPTION_KEY=${TRACK_INTEGRATION_ENCRYPTION_KEY:-}
+      # Signs guest-access tokens. Unset ⇒ internal/guest/store.go mints a RANDOM per-process
+      # secret, so every guest token dies on restart and no two replicas accept each other's.
+      # The code's own comment says the operator must set it — and until this line existed there
+      # was no way to. Empty is still a working dev default, deliberately.
+      - TRACK_GUEST_SECRET=${TRACK_GUEST_SECRET:-}
+      # Bearer secret for the two gwExempt service endpoints Docs pulls: GET /v1/service/members
+      # and GET /v1/service/workspaces. Unset ⇒ Track boots and both 401 EVERYTHING, which reads
+      # to Docs as "Track has no members". Optional, but >= MinMemberSyncSecretLen when set —
+      # boot-fail-closed, since it gates every tenant's roster.
+      - TRACK_MEMBER_SYNC_SECRET=${TRACK_MEMBER_SYNC_SECRET:-}
       # Track's copy of the edge gateway transit-proof secret — the root of the entire
       # auth boundary: whoever knows it can present ANY identity to Track.
       #
