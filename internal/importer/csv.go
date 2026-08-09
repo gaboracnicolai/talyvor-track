@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/talyvor/track/internal/model"
@@ -49,10 +50,44 @@ func New(issues issueCreator) *Importer {
 // ImportResult is the per-call summary returned to API callers. The
 // JSON shape is part of the public API contract — don't rename
 // fields without a coordinated client change.
+//
+// Warnings covers rows that DID import but with a field the mapper could not place on Track's
+// scale. That is a different outcome from Skipped (a row that never landed) and it used to be
+// invisible: an issue in a status Track does not know became `backlog` and the caller was told
+// {imported:N, skipped:0, errors:[]}. Measured on 014b6e2 — 11 of 22 realistic Jira statuses and
+// 7 of 13 Linear states fell through, "Deployed" and Linear's own default "Duplicate" among them.
 type ImportResult struct {
 	Imported int      `json:"imported"`
 	Skipped  int      `json:"skipped"`
 	Errors   []string `json:"errors"`
+	Warnings []string `json:"warnings"`
+}
+
+// FieldNote records ONE provider value a mapper could not place. The pipeline COUNTS these
+// (map[FieldNote]int) rather than accumulating a string per row: a 10,000-row import of one
+// unknown status must produce one warning, not ten thousand.
+type FieldNote struct {
+	Field  string // "status" | "priority"
+	Value  string // the provider's value, verbatim — "" means the source supplied none
+	Mapped string // the Track value it was given instead, so the warning is self-describing
+}
+
+// mappedIssue pairs a mapped issue with the notes its mapping produced. The API sources map a
+// whole page at a time, so the notes have to travel next to the issue rather than be returned
+// separately — otherwise they cannot be attributed to a row.
+type mappedIssue struct {
+	issue model.Issue
+	notes []FieldNote
+}
+
+// statusNote / priorityNote build the note for a value a mapper rejected. Kept next to
+// ImportResult so the vocabulary ("status", "priority") has one definition.
+func statusNote(raw string, mapped model.IssueStatus) FieldNote {
+	return FieldNote{Field: "status", Value: raw, Mapped: string(mapped)}
+}
+
+func priorityNote(raw string, mapped model.IssuePriority) FieldNote {
+	return FieldNote{Field: "priority", Value: raw, Mapped: strconv.Itoa(int(mapped))}
 }
 
 // columnIndex maps a header name to its index in a CSV row. Built
@@ -103,51 +138,82 @@ func (imp *Importer) ImportLinearCSV(ctx context.Context, workspaceID, teamID st
 	return imp.run(ctx, workspaceID, teamID, src)
 }
 
-func linearRowMapper(ci columnIndex, row []string) (model.Issue, error) {
+func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	title := ci.get(row, "Title")
 	if title == "" {
-		return model.Issue{}, errEmptyTitle
+		return mappedIssue{}, errEmptyTitle
 	}
-	return model.Issue{
-		Title:       title,
-		Description: ci.get(row, "Description"),
-		Status:      mapLinearStatus(ci.get(row, "Status")),
-		Priority:    mapLinearPriority(ci.get(row, "Priority")),
-		Labels:      splitLabels(ci.get(row, "Labels")),
+	rawStatus, rawPrio := ci.get(row, "Status"), ci.get(row, "Priority")
+	status, statusOK := mapLinearStatus(rawStatus)
+	prio, prioOK := mapLinearPriority(rawPrio)
+	return mappedIssue{
+		issue: model.Issue{
+			Title:       title,
+			Description: ci.get(row, "Description"),
+			Status:      status,
+			Priority:    prio,
+			Labels:      splitLabels(ci.get(row, "Labels")),
+		},
+		notes: collectNotes(rawStatus, status, statusOK, rawPrio, prio, prioOK),
 	}, nil
 }
 
-func mapLinearStatus(s string) model.IssueStatus {
+// collectNotes is the one place a (value, recognised) pair becomes a reportable note, so the two
+// providers and the two transports cannot drift on what counts as degraded.
+func collectNotes(rawStatus string, status model.IssueStatus, statusOK bool, rawPrio string, prio model.IssuePriority, prioOK bool) []FieldNote {
+	var notes []FieldNote
+	if !statusOK {
+		notes = append(notes, statusNote(rawStatus, status))
+	}
+	if !prioOK {
+		notes = append(notes, priorityNote(rawPrio, prio))
+	}
+	return notes
+}
+
+// The mappers below return (value, recognised). The VALUE is unchanged from before this change —
+// an unknown status is still imported as backlog, because inventing a meaning for "Deployed"
+// needs the provider's canonical state category and that is a separate, riskier change. What is
+// new is that they no longer claim the fallback was a mapping.
+//
+// ⚠ THE EMPTY STRING IS ASYMMETRIC, ON PURPOSE. An absent PRIORITY is a real value: both
+// providers model "no priority", so "" ⇒ PriorityNone is a mapping, not a failure. An absent
+// STATUS is not: every Linear and Jira issue has one, so an empty one means we did not find it —
+// which is exactly what happens when a CSV's status column is named something else, silently
+// importing every row as backlog.
+func mapLinearStatus(s string) (model.IssueStatus, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "backlog":
-		return model.StatusBacklog
+		return model.StatusBacklog, true
 	case "todo", "to do":
-		return model.StatusTodo
+		return model.StatusTodo, true
 	case "in progress", "in_progress":
-		return model.StatusInProgress
+		return model.StatusInProgress, true
 	case "in review", "in_review":
-		return model.StatusInReview
+		return model.StatusInReview, true
 	case "done", "completed":
-		return model.StatusDone
+		return model.StatusDone, true
 	case "cancelled", "canceled":
-		return model.StatusCancelled
+		return model.StatusCancelled, true
 	default:
-		return model.StatusBacklog
+		return model.StatusBacklog, false
 	}
 }
 
-func mapLinearPriority(p string) model.IssuePriority {
+func mapLinearPriority(p string) (model.IssuePriority, bool) {
 	switch strings.ToLower(strings.TrimSpace(p)) {
 	case "urgent":
-		return model.PriorityUrgent
+		return model.PriorityUrgent, true
 	case "high":
-		return model.PriorityHigh
+		return model.PriorityHigh, true
 	case "medium":
-		return model.PriorityMedium
+		return model.PriorityMedium, true
 	case "low":
-		return model.PriorityLow
+		return model.PriorityLow, true
+	case "", "none", "no priority":
+		return model.PriorityNone, true
 	default:
-		return model.PriorityNone
+		return model.PriorityNone, false
 	}
 }
 
@@ -176,7 +242,7 @@ func (imp *Importer) ImportJiraCSV(ctx context.Context, workspaceID, teamID stri
 	return imp.run(ctx, workspaceID, teamID, src)
 }
 
-func jiraRowMapper(ci columnIndex, row []string) (model.Issue, error) {
+func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	title := ci.get(row, "Summary")
 	if title == "" {
 		// Some Jira exports use "Title" as the summary column header
@@ -184,50 +250,58 @@ func jiraRowMapper(ci columnIndex, row []string) (model.Issue, error) {
 		title = ci.get(row, "Title")
 	}
 	if title == "" {
-		return model.Issue{}, errEmptyTitle
+		return mappedIssue{}, errEmptyTitle
 	}
-	return model.Issue{
-		Title:       title,
-		Description: ci.get(row, "Description"),
-		Status:      mapJiraStatus(ci.get(row, "Status")),
-		Priority:    mapJiraPriority(ci.get(row, "Priority")),
-		Labels:      splitLabels(ci.get(row, "Labels")),
+	rawStatus, rawPrio := ci.get(row, "Status"), ci.get(row, "Priority")
+	status, statusOK := mapJiraStatus(rawStatus)
+	prio, prioOK := mapJiraPriority(rawPrio)
+	return mappedIssue{
+		issue: model.Issue{
+			Title:       title,
+			Description: ci.get(row, "Description"),
+			Status:      status,
+			Priority:    prio,
+			Labels:      splitLabels(ci.get(row, "Labels")),
+		},
+		notes: collectNotes(rawStatus, status, statusOK, rawPrio, prio, prioOK),
 	}, nil
 }
 
-func mapJiraStatus(s string) model.IssueStatus {
+func mapJiraStatus(s string) (model.IssueStatus, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "backlog":
-		return model.StatusBacklog
+		return model.StatusBacklog, true
 	case "to do", "todo", "open", "reopened":
-		return model.StatusTodo
+		return model.StatusTodo, true
 	case "in progress":
-		return model.StatusInProgress
+		return model.StatusInProgress, true
 	case "in review", "code review":
-		return model.StatusInReview
+		return model.StatusInReview, true
 	case "done", "closed", "resolved":
-		return model.StatusDone
+		return model.StatusDone, true
 	case "cancelled", "canceled", "won't do", "won't fix":
-		return model.StatusCancelled
+		return model.StatusCancelled, true
 	default:
-		return model.StatusBacklog
+		return model.StatusBacklog, false
 	}
 }
 
-func mapJiraPriority(p string) model.IssuePriority {
+func mapJiraPriority(p string) (model.IssuePriority, bool) {
 	switch strings.ToLower(strings.TrimSpace(p)) {
 	case "highest", "blocker", "critical":
-		return model.PriorityUrgent
+		return model.PriorityUrgent, true
 	case "high", "major":
-		return model.PriorityHigh
+		return model.PriorityHigh, true
 	case "medium":
-		return model.PriorityMedium
+		return model.PriorityMedium, true
 	case "low":
-		return model.PriorityLow
+		return model.PriorityLow, true
 	case "lowest", "trivial", "minor":
-		return model.PriorityLow
+		return model.PriorityLow, true
+	case "", "none":
+		return model.PriorityNone, true
 	default:
-		return model.PriorityNone
+		return model.PriorityNone, false
 	}
 }
 
@@ -235,7 +309,7 @@ func mapJiraPriority(p string) model.IssuePriority {
 
 var errEmptyTitle = errors.New("row has no title; skipping")
 
-type rowMapper func(columnIndex, []string) (model.Issue, error)
+type rowMapper func(columnIndex, []string) (mappedIssue, error)
 
 // The per-provider CSV parse + the shared write pipeline now live behind the IssueSource seam in source.go
 // (csvSource + run). ImportLinearCSV / ImportJiraCSV above build a csvSource and feed it to run — behaviour

@@ -108,13 +108,13 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 func (r *Runner) execute(ctx context.Context, job *Job) {
 	src, err := r.sourceFor(ctx, job)
 	if err != nil {
-		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error())
+		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
 	// workspace_id + team_id are read from the JOB ROW — the only workspace this job can write into.
 	out, err := r.imp.run(ctx, job.WorkspaceID, job.TeamID, src)
 	if err != nil {
-		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error())
+		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
 	summary := ""
@@ -122,7 +122,14 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 		summary = fmt.Sprintf("%d row(s) failed; first: %s", out.Skipped, out.Errors[0])
 	}
 	// out.Skipped = rows that failed to import → the job's `failed`; `skipped` is reserved (0 for now).
-	_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, 0, out.Skipped, summary)
+	// ⚠ MEASURED, NOT FIXED HERE: `skipped` has no writer that passes anything but this literal 0, so
+	// the column and its JSON field are structurally zero on every job ever run. Reported in the queue
+	// — deciding whether to populate or remove a field already in the API response is not this merge's.
+	//
+	// out.Warnings = rows that DID import, degraded. They do NOT change terminalStatus: the import
+	// succeeded, and calling it partial would conflate "some rows were rejected" with "every row
+	// landed but some fields could not be mapped". The distinction is the point of the column.
+	_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, 0, out.Skipped, summary, out.Warnings)
 }
 
 // sourceFor dispatches on source_type → (IssueSource). A '*_csv' job reads its payload from the cold table

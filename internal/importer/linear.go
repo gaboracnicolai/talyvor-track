@@ -89,7 +89,7 @@ type linearResp struct {
 }
 
 type linearPage struct {
-	issues  []model.Issue
+	issues  []mappedIssue
 	hasNext bool
 	cursor  string
 }
@@ -166,39 +166,48 @@ func linearResetBackoff(h http.Header) time.Duration {
 	return time.Second
 }
 
-func mapLinearNodes(nodes []linearNode) []model.Issue {
-	out := make([]model.Issue, 0, len(nodes))
+func mapLinearNodes(nodes []linearNode) []mappedIssue {
+	out := make([]mappedIssue, 0, len(nodes))
 	for _, n := range nodes {
 		labels := make([]string, 0, len(n.Labels.Nodes))
 		for _, l := range n.Labels.Nodes {
 			labels = append(labels, l.Name)
 		}
-		out = append(out, model.Issue{
-			Identifier:  n.Identifier, // the provider-key (ENG-123) — what C.2's upsert + PR #30 resolve on
-			Title:       n.Title,
-			Description: n.Description,
-			Status:      mapLinearStatus(n.State.Name),
-			Priority:    linearPriorityFromInt(n.Priority),
-			Labels:      labels,
+		status, statusOK := mapLinearStatus(n.State.Name)
+		prio, prioOK := linearPriorityFromInt(n.Priority)
+		out = append(out, mappedIssue{
+			issue: model.Issue{
+				Identifier:  n.Identifier, // the provider-key (ENG-123) — what C.2's upsert + PR #30 resolve on
+				Title:       n.Title,
+				Description: n.Description,
+				Status:      status,
+				Priority:    prio,
+				Labels:      labels,
+			},
+			notes: collectNotes(n.State.Name, status, statusOK, strconv.Itoa(n.Priority), prio, prioOK),
 		})
 	}
 	return out
 }
 
 // linearPriorityFromInt maps Linear's numeric priority (0 none, 1 urgent, 2 high, 3 medium/normal, 4 low) to
-// Track's scale. Unknown ⇒ none.
-func linearPriorityFromInt(p int) model.IssuePriority {
+// Track's scale, and reports whether the value was ON that scale. 0 is a REAL value the user chose
+// ("No priority"), so it is recognised; anything outside 0..4 is not a Linear priority and falls
+// back to none — now reported rather than assumed.
+func linearPriorityFromInt(p int) (model.IssuePriority, bool) {
 	switch p {
+	case 0:
+		return model.PriorityNone, true
 	case 1:
-		return model.PriorityUrgent
+		return model.PriorityUrgent, true
 	case 2:
-		return model.PriorityHigh
+		return model.PriorityHigh, true
 	case 3:
-		return model.PriorityMedium
+		return model.PriorityMedium, true
 	case 4:
-		return model.PriorityLow
+		return model.PriorityLow, true
 	default:
-		return model.PriorityNone
+		return model.PriorityNone, false
 	}
 }
 
@@ -208,7 +217,7 @@ func linearPriorityFromInt(p int) model.IssuePriority {
 // silent stop that would look like a complete import.
 type linearSource struct {
 	client  *linearClient
-	buf     []model.Issue
+	buf     []mappedIssue
 	pos     int
 	cursor  string
 	hasNext bool
@@ -241,8 +250,8 @@ func (s *linearSource) Next() (SourceRow, bool) {
 			return SourceRow{}, false
 		}
 	}
-	iss := s.buf[s.pos]
+	m := s.buf[s.pos]
 	s.pos++
 	s.rowNum++
-	return SourceRow{Issue: iss, RowNum: s.rowNum}, true
+	return SourceRow{Issue: m.issue, RowNum: s.rowNum, Notes: m.notes}, true
 }

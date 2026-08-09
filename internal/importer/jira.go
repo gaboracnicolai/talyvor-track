@@ -67,7 +67,7 @@ type jiraResp struct {
 }
 
 type jiraPage struct {
-	issues    []model.Issue
+	issues    []mappedIssue
 	isLast    bool
 	nextToken string
 }
@@ -123,20 +123,25 @@ func firstJiraError(body []byte) string {
 	return "unknown error"
 }
 
-func mapJiraIssues(issues []jiraIssue) []model.Issue {
-	out := make([]model.Issue, 0, len(issues))
+func mapJiraIssues(issues []jiraIssue) []mappedIssue {
+	out := make([]mappedIssue, 0, len(issues))
 	for _, it := range issues {
 		labels := it.Fields.Labels
 		if labels == nil {
 			labels = []string{}
 		}
-		out = append(out, model.Issue{
-			Identifier:  it.Key, // provider-key (PROJ-123)
-			Title:       it.Fields.Summary,
-			Description: adfToText(it.Fields.Description),
-			Status:      mapJiraStatus(it.Fields.Status.Name),
-			Priority:    mapJiraPriority(it.Fields.Priority.Name),
-			Labels:      labels,
+		status, statusOK := mapJiraStatus(it.Fields.Status.Name)
+		prio, prioOK := mapJiraPriority(it.Fields.Priority.Name)
+		out = append(out, mappedIssue{
+			issue: model.Issue{
+				Identifier:  it.Key, // provider-key (PROJ-123)
+				Title:       it.Fields.Summary,
+				Description: adfToText(it.Fields.Description),
+				Status:      status,
+				Priority:    prio,
+				Labels:      labels,
+			},
+			notes: collectNotes(it.Fields.Status.Name, status, statusOK, it.Fields.Priority.Name, prio, prioOK),
 		})
 	}
 	return out
@@ -190,7 +195,7 @@ func walkADF(n adfNode, b *strings.Builder) {
 // observability (surface the error once via SourceRow.Err, then stop; never a silent complete-looking stop).
 type jiraSource struct {
 	client    *jiraClient
-	buf       []model.Issue
+	buf       []mappedIssue
 	pos       int
 	nextToken string
 	isLast    bool
@@ -223,8 +228,8 @@ func (s *jiraSource) Next() (SourceRow, bool) {
 			return SourceRow{}, false
 		}
 	}
-	iss := s.buf[s.pos]
+	m := s.buf[s.pos]
 	s.pos++
 	s.rowNum++
-	return SourceRow{Issue: iss, RowNum: s.rowNum}, true
+	return SourceRow{Issue: m.issue, RowNum: s.rowNum, Notes: m.notes}, true
 }

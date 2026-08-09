@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/talyvor/track/internal/model"
 )
@@ -23,10 +24,14 @@ import (
 // pipeline's create-error message ("row N: create: ..."), so error strings stay byte-identical after the
 // extraction. The Issue carries the mapped fields only (Identifier/LensFeature left unset here — Build C
 // populates them); the pipeline stamps WorkspaceID/TeamID/CreatorID.
+// Notes carries the fields this row's mapper could not place on Track's scale. The row still
+// imports (the fallback value is unchanged); run tallies the notes into ImportResult.Warnings so
+// a degraded import stops reporting itself as a clean one.
 type SourceRow struct {
 	Issue  model.Issue
 	RowNum int
 	Err    error
+	Notes  []FieldNote
 }
 
 // IssueSource is the extracted seam. Next returns the next row and ok=false when the source is exhausted.
@@ -44,7 +49,8 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		return nil, errors.New("importer: workspace_id and team_id are required")
 	}
 
-	out := &ImportResult{Errors: []string{}}
+	out := &ImportResult{Errors: []string{}, Warnings: []string{}}
+	degraded := map[FieldNote]int{}
 	for {
 		row, ok := src.Next()
 		if !ok {
@@ -74,9 +80,30 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 			out.Errors = append(out.Errors, fmt.Sprintf("row %d: create: %v", row.RowNum, err))
 			continue
 		}
+		// Tallied only AFTER the write succeeded — a row that never landed is a Skipped row,
+		// not a degraded one, and counting it in both places would double-report one failure.
+		for _, n := range row.Notes {
+			degraded[n]++
+		}
 		out.Imported++
 	}
+	out.Warnings = renderWarnings(degraded)
 	return out, nil
+}
+
+// renderWarnings turns the tally into one sorted, self-describing line per distinct (field, value).
+// Sorted because an unordered report cannot be diffed between two runs of the same import.
+func renderWarnings(degraded map[FieldNote]int) []string {
+	out := make([]string, 0, len(degraded))
+	for n, count := range degraded {
+		if n.Value == "" {
+			out = append(out, fmt.Sprintf("no %s value on %d issue(s) — imported as %q", n.Field, count, n.Mapped))
+			continue
+		}
+		out = append(out, fmt.Sprintf("unrecognised %s %q on %d issue(s) — imported as %q", n.Field, n.Value, count, n.Mapped))
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ─── CSV source ─────────────────────────────────────────────
@@ -133,9 +160,9 @@ func (s *csvSource) Next() (SourceRow, bool) {
 	if len(row) < s.expectedCols {
 		return SourceRow{RowNum: s.rowNum, Err: fmt.Errorf("row %d: expected %d columns, got %d", s.rowNum, s.expectedCols, len(row))}, true
 	}
-	issueModel, err := s.mapper(s.ci, row)
+	mapped, err := s.mapper(s.ci, row)
 	if err != nil {
 		return SourceRow{RowNum: s.rowNum, Err: fmt.Errorf("row %d: %v", s.rowNum, err)}, true
 	}
-	return SourceRow{Issue: issueModel, RowNum: s.rowNum}, true
+	return SourceRow{Issue: mapped.issue, RowNum: s.rowNum, Notes: mapped.notes}, true
 }
