@@ -57,9 +57,24 @@ func New(issues issueCreator) *Importer {
 // invisible: an issue in a status Track does not know became `backlog` and the caller was told
 // {imported:N, skipped:0, errors:[]}. Measured on 014b6e2 — 11 of 22 realistic Jira statuses and
 // 7 of 13 Linear states fell through, "Deployed" and Linear's own default "Duplicate" among them.
+// Refused covers rows the importer DECLINED to write, by policy, with nothing wrong: the provider
+// key collided with an issue a human created and #71's upsert predicate protected it. That is a
+// THIRD outcome, distinct from Skipped (a row that could not land) and from Warnings (a row that
+// landed degraded) — and until it was split out it was counted in Skipped, which the runner writes
+// to the job's `failed` column. MEASURED at dcfbaa3: an import that correctly protected three
+// human-written issues reported {status:"failed", imported:0, skipped:0, failed:3}. Correct
+// behaviour reported as failure.
+//
+// ⚠ THE NAMES CROSS OVER AND THAT IS PRE-EXISTING, said rather than quietly re-litigated:
+// ImportResult.Skipped (json "skipped") means ROWS THAT FAILED and the runner writes it to the
+// job's `failed`; import_jobs.skipped now carries Refused. Renaming ImportResult.Skipped → Failed
+// is the tidy-up that would end the confusion, and it changes a shipped JSON key — this struct's
+// own comment above forbids doing that without a coordinated client change, so it is reported in
+// the queue rather than smuggled into a fidelity fix.
 type ImportResult struct {
 	Imported int      `json:"imported"`
 	Skipped  int      `json:"skipped"`
+	Refused  int      `json:"refused"`
 	Errors   []string `json:"errors"`
 	Warnings []string `json:"warnings"`
 }

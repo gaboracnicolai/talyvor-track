@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -117,19 +118,18 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
-	summary := ""
-	if len(out.Errors) > 0 {
-		summary = fmt.Sprintf("%d row(s) failed; first: %s", out.Skipped, out.Errors[0])
-	}
-	// out.Skipped = rows that failed to import → the job's `failed`; `skipped` is reserved (0 for now).
-	// ⚠ MEASURED, NOT FIXED HERE: `skipped` has no writer that passes anything but this literal 0, so
-	// the column and its JSON field are structurally zero on every job ever run. Reported in the queue
-	// — deciding whether to populate or remove a field already in the API response is not this merge's.
+	summary := summarise(out)
+	// out.Skipped = rows that FAILED to import → the job's `failed`.
+	// out.Refused = rows the importer DECLINED to write because a human owns that identifier
+	//   (#71's policy working) → the job's `skipped`, which until this merge had no writer passing
+	//   anything but a literal 0 and was structurally zero on every job ever run. It is not a spare
+	//   column being filled to tidy up an API: it is where the refusal count belongs, and putting it
+	//   there is what stops `failed` counting rows that did not fail.
 	//
 	// out.Warnings = rows that DID import, degraded. They do NOT change terminalStatus: the import
 	// succeeded, and calling it partial would conflate "some rows were rejected" with "every row
 	// landed but some fields could not be mapped". The distinction is the point of the column.
-	_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, 0, out.Skipped, summary, out.Warnings)
+	_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, out.Refused, out.Skipped, summary, out.Warnings)
 }
 
 // sourceFor dispatches on source_type → (IssueSource). A '*_csv' job reads its payload from the cold table
@@ -180,11 +180,47 @@ func (r *Runner) csvSourceFor(ctx context.Context, jobID string, mapper rowMappe
 	return newCSVSource(bytes.NewReader(payload), mapper)
 }
 
-// terminalStatus maps an ImportResult to a job status: succeeded = nothing failed; partial = some imported +
-// some failed; failed = failures with nothing imported.
+// summarise renders error_summary. A row that FAILED and a row that was REFUSED are named
+// separately, because "3 row(s) failed" for three issues the importer correctly protected is a
+// sentence that sends someone to debug a working system.
+//
+// ⚠ BYTE-IDENTICAL TO THE PREVIOUS WORDING WHEN NOTHING WAS REFUSED — the failure-only case still
+// renders exactly "%d row(s) failed; first: %s". That is what keeps this from re-litigating a
+// sentence #72/#74 pinned by test, and TestRunner_PartialImport_Observable is the check.
+//
+// The "first:" clause carries the first per-row message either way, so no import is quieter about
+// what happened than it was before: only the counting sentence changed.
+func summarise(out *ImportResult) string {
+	if len(out.Errors) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if out.Skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d row(s) failed", out.Skipped))
+	}
+	if out.Refused > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"%d row(s) refused: an issue with that identifier already exists and was not created by an import",
+			out.Refused))
+	}
+	return strings.Join(parts, "; ") + "; first: " + out.Errors[0]
+}
+
+// terminalStatus maps an ImportResult to a job status: succeeded = every row landed; partial = some
+// imported + some did not; failed = nothing imported and something did not land.
+//
+// ⚠ REFUSALS COUNT HERE EXACTLY AS THEY DID BEFORE THE COUNTERS WERE SPLIT, AND THAT IS DELIBERATE.
+// It would be easy to read "a refusal is not a failure" as "an all-refused import succeeded" — but
+// an import that landed NOTHING must not report itself clean, which is the shape this item has
+// found eight times in the other direction. Whether all-refused should be succeeded / partial /
+// failed is a product judgement with three defensible answers and is NOT this merge's to make; it
+// is written up in the queue. So `unlanded` is the same quantity the old `out.Skipped` was, and
+// every status this function returns is byte-identical to what it returned at dcfbaa3.
+// TestJobRow_AllRowsRefused pins that, and control C4 flips it to `out.Skipped` alone and reds.
 func terminalStatus(out *ImportResult) string {
+	unlanded := out.Skipped + out.Refused
 	switch {
-	case out.Skipped == 0:
+	case unlanded == 0:
 		return JobSucceeded
 	case out.Imported > 0:
 		return JobPartial

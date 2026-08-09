@@ -71,7 +71,15 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		// before. The upserter is nil for CSV-only backing stores, so that branch is never taken there.
 		if issueModel.Identifier != "" && imp.upserter != nil {
 			if _, _, err := imp.upserter.UpsertByIdentifier(ctx, issueModel); err != nil {
-				out.Skipped++
+				// A REFUSAL IS NOT A FAILURE. #71's upsert predicate declines to overwrite an issue a
+				// human created; the row not landing is the policy working. It is counted apart so the
+				// job row can say which of the two happened — issue.Store exported the sentinel for
+				// exactly this and, until now, nobody asked.
+				if errors.Is(err, model.ErrIdentifierNotImportOwned) {
+					out.Refused++
+				} else {
+					out.Skipped++
+				}
 				out.Errors = append(out.Errors, fmt.Sprintf("row %d: upsert: %v", row.RowNum, err))
 				continue
 			}

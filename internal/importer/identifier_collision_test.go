@@ -86,9 +86,16 @@ func TestImport_DoesNotClobberANativeIssueSharingTheProviderKey(t *testing.T) {
 	}
 	// Not clobbering is only half of it: a row the import could not land must be REPORTED, never counted
 	// as imported. A silent no-op is the same lie in the other direction.
-	if out.Skipped != 1 || len(out.Errors) != 1 {
-		t.Fatalf("a collision must be reported: Imported=%d Skipped=%d Errors=%v, want Skipped=1 with one error",
-			out.Imported, out.Skipped, out.Errors)
+	//
+	// ⚠ THE COUNTER MOVED AND THE CLAIM GOT STRONGER, NOT WEAKER. This assertion used to read
+	// `out.Skipped != 1`, back when a refusal and a failure shared one counter — which is how a
+	// protective refusal reached the job's `failed` column and reported {status:"failed"} for an
+	// import that worked. It now asserts BOTH halves: the refusal is reported (Refused=1, one error)
+	// AND it is not miscounted as a failure (Skipped=0). See refused_rows_job_test.go.
+	if out.Refused != 1 || out.Skipped != 0 || len(out.Errors) != 1 {
+		t.Fatalf("a collision must be reported AS A REFUSAL: Imported=%d Refused=%d Skipped=%d Errors=%v, "+
+			"want Refused=1 Skipped=0 with one error",
+			out.Imported, out.Refused, out.Skipped, out.Errors)
 	}
 }
 

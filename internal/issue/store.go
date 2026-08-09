@@ -408,8 +408,13 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 
 // ErrIdentifierNotImportOwned is returned by UpsertByIdentifier when the provider key collides with an issue
 // this workspace created itself. Exported so a caller can distinguish "this one row could not land" from a
-// transport or tenancy failure; importer.run reports it per-row and continues, as it does any row error.
-var ErrIdentifierNotImportOwned = errors.New("identifier not owned by an import")
+// transport or tenancy failure — which importer.run now does: it counts a refusal SEPARATELY from a failure,
+// because the refusal is this policy working, not breaking.
+//
+// ⚠ IT IS AN ALIAS, NOT A SECOND VALUE. errors.Is compares identity, so a re-declaration here would be a
+// different error from the one the importer tests against and every refusal would silently score as a
+// failure again. See model.ErrIdentifierNotImportOwned for the argument.
+var ErrIdentifierNotImportOwned = model.ErrIdentifierNotImportOwned
 
 // insertedScanner adapts a row whose projection is `(xmax=0) AS inserted, ` + issueColumns so scanIssue (which
 // scans exactly issueColumns) can be reused unchanged: it prepends &inserted to the scan destinations.

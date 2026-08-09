@@ -112,7 +112,23 @@ curl -X POST "http://localhost:3000/v1/import/jira?workspace_id=WS&team_id=TEAM"
 
 Priority mapping: `Highest → urgent`, `High/Major → high`, `Medium → medium`, `Low → low`, `Lowest/Trivial → low`. Status mapping collapses `Done`, `Closed`, and `Resolved` onto Track's `done`.
 
-Both endpoints return `{"imported": N, "skipped": N, "errors": [...]}` so you can see exactly which rows didn't make it.
+Both endpoints return `{"imported": N, "skipped": N, "refused": N, "errors": [...], "warnings": [...]}` so you
+can see exactly which rows didn't make it, and why they didn't:
+
+- **skipped** — rows that FAILED: a malformed row, a transport error, a rejected write.
+- **refused** — rows the importer DECLINED to write, by policy, with nothing wrong. An API import
+  carries the provider's own key (`ENG-123`), and Track derives native identifiers in that same
+  shape, so the two can collide. When they do, the importer will not overwrite an issue a person
+  created — it reports the row instead. A refusal is the protection working, not an error.
+- **warnings** — rows that DID import, with a field the mapper could not place on Track's scale
+  (an unknown status, a date in an unrecognised format). Bounded to ten exemplars per kind, with
+  the totals always reported.
+
+The async job endpoints (`/v1/import/jobs/{id}`) report the same three counts as `imported` /
+`failed` / `skipped` columns, where `failed` is the FAILED count and `skipped` is the REFUSED count.
+⚠ The two spellings do cross over, which is a known wart: `ImportResult.skipped` (inline) means
+failures, while `import_jobs.skipped` (async) means refusals. Renaming the inline field would break
+a shipped JSON contract, so it is documented here rather than changed quietly.
 
 ## Development
 
