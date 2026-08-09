@@ -183,30 +183,61 @@ func priorityNote(raw string, mapped model.IssuePriority) FieldNote {
 	return FieldNote{Field: "priority", Value: raw, Mapped: strconv.Itoa(int(mapped))}
 }
 
-// columnIndex maps a header name to its index in a CSV row. Built
-// once per file so per-row lookup is O(1). Unknown columns are
-// silently ignored — exports often carry extra Linear/Jira fields
-// (cycle name, estimate, etc.) we don't map yet.
-type columnIndex map[string]int
+// columnIndex maps a header name to EVERY index it occupies in a CSV row, in header order. Built
+// once per file so per-row lookup is O(1). Unknown columns are silently ignored — exports often
+// carry extra Linear/Jira fields (cycle name, estimate, etc.) we don't map yet.
+//
+// ⚠ IT IS A SLICE BECAUSE A REAL EXPORT REPEATS A HEADER, AND IT USED TO BE AN int. A Jira
+// "csv-all-fields" export emits one column PER VALUE for a multi-value field, all under the same
+// name, padding every row out to the width of the most-valued issue in the result set. Measured
+// against a real instance (see jira_csv_labels_test.go for the run and its negative controls): the
+// same view answered 15 × "Labels" for one result set, 2 for another and 1 for a third, alongside
+// 19 × "Comment" and 8 × "Affects Version/s".
+//
+// With `map[string]int` the assignment below overwrote, so the LAST occurrence won — which on the
+// measured export is the padding, empty for every issue that is not the widest. 25 label values
+// present, ONE imported, five of six issues importing none while carrying two each, and the caller
+// told {imported:6, skipped:0, warnings:[]}.
+type columnIndex map[string][]int
 
 func buildIndex(header []string) columnIndex {
 	out := make(columnIndex, len(header))
 	for i, h := range header {
-		out[strings.TrimSpace(strings.ToLower(h))] = i
+		k := strings.TrimSpace(strings.ToLower(h))
+		out[k] = append(out[k], i)
 	}
 	return out
 }
 
-// get safely fetches a column by lowercased name. Returns "" if the
-// column doesn't exist or the row is too short — that lets row-level
-// validation focus on what's required (title) rather than how the
-// export was shaped.
+// get safely fetches a SINGLE-valued column by lowercased name. Returns "" if the column doesn't
+// exist or the row is too short — that lets row-level validation focus on what's required (title)
+// rather than how the export was shaped.
+//
+// ⚠ IT NAMES THE FIRST OCCURRENCE. Every column the mappers read through it is single-occurrence on
+// the measured export (Summary · Status · Priority · Description · Due Date · Resolved), so this is
+// a no-op there and is pinned as one. For a repeated header it is a deliberate choice replacing an
+// accident: last-occurrence was never decided, it was the map assignment overwriting.
 func (ci columnIndex) get(row []string, key string) string {
-	idx, ok := ci[strings.ToLower(key)]
-	if !ok || idx >= len(row) {
+	idxs := ci[strings.ToLower(key)]
+	if len(idxs) == 0 || idxs[0] >= len(row) {
 		return ""
 	}
-	return strings.TrimSpace(row[idx])
+	return strings.TrimSpace(row[idxs[0]])
+}
+
+// getAll fetches EVERY column of that name, in header order, dropping the empties an export pads
+// short rows with. This is the accessor a multi-value field must use; `get` cannot express one.
+func (ci columnIndex) getAll(row []string, key string) []string {
+	out := []string{}
+	for _, idx := range ci[strings.ToLower(key)] {
+		if idx >= len(row) {
+			continue
+		}
+		if v := strings.TrimSpace(row[idx]); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // ─── Linear ─────────────────────────────────────────────────
@@ -245,7 +276,7 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Description: ci.get(row, "Description"),
 			Status:      status,
 			Priority:    prio,
-			Labels:      splitLabels(ci.get(row, "Labels")),
+			Labels:      splitLabelColumns(ci.getAll(row, "Labels")),
 		},
 		notes: collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
 	}, nil
@@ -416,7 +447,7 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Description: ci.get(row, "Description"),
 			Status:      status,
 			Priority:    prio,
-			Labels:      splitLabels(ci.get(row, "Labels")),
+			Labels:      splitLabelColumns(ci.getAll(row, "Labels")),
 			DueDate:     due,
 			CompletedAt: completed,
 		},
@@ -507,6 +538,23 @@ type rowMapper func(columnIndex, []string) (mappedIssue, error)
 // The per-provider CSV parse + the shared write pipeline now live behind the IssueSource seam in source.go
 // (csvSource + run). ImportLinearCSV / ImportJiraCSV above build a csvSource and feed it to run — behaviour
 // unchanged; the extraction lets Build C plug a paginated API source into the same run + tenancy path.
+
+// splitLabelColumns turns the values of EVERY column named "Labels" into one ordered list. The two
+// shapes an export can use are BOTH handled and neither is guessed at: a repeated header (measured
+// on a real Jira export) contributes one value per column, and a single comma-joined cell (the only
+// shape ever measured for a Linear export, pinned since the first CSV merge) still splits on commas.
+// With one column the result is byte-identical to the old splitLabels(ci.get(...)) call.
+//
+// ⚠ NO DEDUPLICATION, said rather than left to be discovered: if an export ever listed one label in
+// two columns it would import twice. Nothing in the measured exports does, and collapsing duplicates
+// would be inventing a rule for a shape nobody has seen.
+func splitLabelColumns(cells []string) []string {
+	out := []string{}
+	for _, c := range cells {
+		out = append(out, splitLabels(c)...)
+	}
+	return out
+}
 
 // splitLabels turns Linear/Jira's comma-separated label string into a
 // trimmed slice. Returns an empty (non-nil) slice for empty input so
