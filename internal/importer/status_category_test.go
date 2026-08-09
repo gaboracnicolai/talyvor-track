@@ -286,7 +286,7 @@ func TestPinned_TheFourMeasuredCategories(t *testing.T) {
 // sentence about a field that was never in play.
 func TestCSVWarningsAreUnchangedByThisMerge(t *testing.T) {
 	out, err := New(&fakeIssueStore{}).ImportJiraCSV(t.Context(), "ws1", "team1",
-		strings.NewReader("Summary,Description,Status,Priority,Labels\nOne,d,Deployed,High,bug\n"))
+		strings.NewReader("Summary,Description,Status,Priority,Labels,Created\nOne,d,Deployed,High,bug,23/Jul/2026 7:36 PM\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

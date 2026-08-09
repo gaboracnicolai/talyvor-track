@@ -24,11 +24,14 @@ import (
 // The header below is the measured export's shape: THREE columns spelled "Labels", because the
 // widest issue in the result set has three, and every narrower row padded out with empties. See
 // jira_csv_labels_test.go for the measurement and its negative controls.
-const jiraCSVWithRepeatedLabels = "Summary,Description,Status,Priority,Labels,Labels,Labels,Due Date\n" +
-	"Widest work,d,Closed,High,alpha,beta,gamma,\n" +
-	"Narrow work,d,To Do,High,alpha,,,\n" +
-	"Middle work,d,To Do,High,alpha,beta,,\n" +
-	"Unlabelled work,d,To Do,High,,,,\n"
+// The `Created` column carries no labels meaning and is here because a real csv-all-fields export
+// always has one: without it every row is legitimately warned about (jira_csv_created.go), and the
+// "want none" assertion below would have had to be weakened to accommodate an unrelated merge.
+const jiraCSVWithRepeatedLabels = "Summary,Description,Status,Priority,Labels,Labels,Labels,Due Date,Created\n" +
+	"Widest work,d,Closed,High,alpha,beta,gamma,,23/Jul/2026 7:36 PM\n" +
+	"Narrow work,d,To Do,High,alpha,,,,23/Jul/2026 7:36 PM\n" +
+	"Middle work,d,To Do,High,alpha,beta,,,23/Jul/2026 7:36 PM\n" +
+	"Unlabelled work,d,To Do,High,,,,,23/Jul/2026 7:36 PM\n"
 
 func readIssueLabelsByTitle(t *testing.T, d *testutil.DB, wsID string) map[string][]string {
 	t.Helper()

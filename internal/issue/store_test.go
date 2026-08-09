@@ -60,14 +60,16 @@ func TestCreate_InsertsWithAutoNumberAndIdentifier(t *testing.T) {
 		WithArgs("team-1", "ws-1", "ENG", identifierScanBound).
 		WillReturnRows(pgxmock.NewRows([]string{"next"}).AddRow(42))
 
-	// 3) Insert and return the materialised row. The INSERT takes 18
-	//    positional args (every column except the server-set timestamps);
-	//    we use AnyArg() across the board since the exact ordering is
-	//    verified end-to-end against the production schema in CI.
-	//    18, not 17, since completed_at joined the column list — see the
-	//    comment above the statement and create_completed_at_test.go, which
-	//    checks the VALUE against real Postgres rather than the arity.
-	anyArgs := make([]any, 18)
+	// 3) Insert and return the materialised row. The INSERT takes 19
+	//    positional args; we use AnyArg() across the board since the exact
+	//    ordering is verified end-to-end against the production schema in CI.
+	//    19, not 18, since created_at joined the column list — no longer
+	//    "every column except the server-set timestamps", because created_at
+	//    is server-set for every native path and PROVIDER-set on an import.
+	//    See the comment above the statement and create_created_at_test.go,
+	//    which checks the VALUE and the GATE against real Postgres rather
+	//    than the arity.
+	anyArgs := make([]any, 19)
 	for k := range anyArgs {
 		anyArgs[k] = pgxmock.AnyArg()
 	}

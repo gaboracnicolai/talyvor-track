@@ -241,18 +241,43 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 		completedAt = nil
 	}
 
+	// created_at: THE PROVIDER'S OPENING TIME, AND ONLY THE PROVIDER'S. Third copy of the seam #74
+	// found in the importer's UPSERT (completed_at named nowhere in the SQL, so a perfectly mapped
+	// value was discarded) and #78 found here for the same column. This one is worse than both,
+	// because the column has `DEFAULT NOW()`: a mapper-only fix is not merely inert, it is INVISIBLE
+	// — the row lands with a plausible timestamp and the loss shows up only as a NEGATIVE time to
+	// resolution in analytics (measured: -2400.0 hours for an issue opened 200 days before import).
+	//
+	// ⚠ IT IS GATED TO THE IMPORT PATH, AND THE GATE IS LOAD-BEARING RATHER THAN TIDY. handler.Create
+	// decodes the WHOLE model.Issue off the request body and CreatedAt carries a `json:"created_at"`
+	// tag, so naming this column with no rule would newly let any authenticated client choose its own
+	// created_at — and created_at is the WINDOW PREDICATE of every analytics report
+	// (`created_at > NOW() - INTERVAL '1 day' * $2`). A client could file work that is invisible to
+	// every report, or fabricate any cycle time it liked. The handler already refuses a supplied
+	// creator_id (SEC-5: `in.CreatorID = actorID`, never a body field), so ImporterCreatorID is a
+	// value no HTTP caller can reach — which is exactly what makes it usable as the gate.
+	//
+	// A zero CreatedAt means "nobody supplied one" and takes the DEFAULT, which is every native
+	// path: Create, the MCP server, feature-board conversion and automation all leave it zero.
+	var createdAt *time.Time
+	if !issue.CreatedAt.IsZero() && issue.CreatorID == model.ImporterCreatorID {
+		t := issue.CreatedAt
+		createdAt = &t
+	}
+
 	const insertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
          assignee_id, creator_id, cycle_id, parent_id,
-         due_date, completed_at, lens_feature, labels, sort_order)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+         due_date, completed_at, lens_feature, labels, sort_order, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+            COALESCE($19::timestamptz, NOW()))
     RETURNING ` + issueColumns
 	return scanIssue(s.pool.QueryRow(ctx, insertSQL,
 		issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier,
 		issue.Title, issue.Description, string(issue.Status), int(issue.Priority),
 		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID,
-		issue.DueDate, completedAt, issue.LensFeature, issue.Labels, issue.SortOrder,
+		issue.DueDate, completedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt,
 	))
 }
 
