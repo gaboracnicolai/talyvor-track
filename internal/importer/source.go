@@ -91,14 +91,66 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 	return out, nil
 }
 
+// maxWarningExemplars bounds how many DISTINCT values of one note kind are listed individually.
+//
+// ⚠ IT BOUNDS ENUMERATION, NEVER COUNTING. Beyond it a single summary line reports how many further
+// distinct values there were and how many issues they covered, so an import is never quieter about
+// what it could not place than it is today — only less repetitive about it.
+//
+// TEN because the exemplars exist to show a SHAPE, not to inventory a column: a tenant whose date
+// serialisation or status vocabulary differs shows that in the first few values, and the counts
+// carry the size. The number is deliberately a named constant with this reasoning attached rather
+// than a literal in a loop, because the right value is a judgement and the next person should be
+// able to see what it was judged against.
+const maxWarningExemplars = 10
+
+// warningSummaryPrefix opens the one line that stands for everything past the bound. It sorts before
+// every rendered sentence (which start with a field name or "unrecognised"/"no"), so the summaries
+// group at the top of a sorted report instead of hiding among their own exemplars.
+const warningSummaryPrefix = "+ "
+
 // renderWarnings turns the tally into one sorted, self-describing line per distinct note. The note
 // keys on the PATH as well as the value (FieldNote.Via), so a tenant whose categories resolved some
 // rows and were absent on others gets both truths in one report instead of one averaged sentence.
 // Sorted because an unordered report cannot be diffed between two runs of the same import.
 func renderWarnings(degraded map[FieldNote]int) []string {
+	// Group by everything EXCEPT the value, so "this kind of finding" is one group however many
+	// different values arrived under it. The bound is applied per group: a status column full of
+	// free text must not crowd a real date finding out of the report, and vice versa.
+	type kind struct {
+		Field, Mapped, Via, ViaValue string
+		ViaResolved                  bool
+	}
+	groups := map[kind][]FieldNote{}
+	for n := range degraded {
+		k := kind{n.Field, n.Mapped, n.Via, n.ViaValue, n.ViaResolved}
+		groups[k] = append(groups[k], n)
+	}
+
 	out := make([]string, 0, len(degraded))
-	for n, count := range degraded {
-		out = append(out, n.render(count))
+	for _, notes := range groups {
+		// Sorted so the exemplars are the SAME ones on every run of the same import — the bound
+		// picks a subset, and a subset chosen by map iteration order would make two runs of one
+		// import undiffable, which is the property this function sorts for in the first place.
+		sort.Slice(notes, func(i, j int) bool { return notes[i].Value < notes[j].Value })
+
+		shown := notes
+		if len(notes) > maxWarningExemplars {
+			shown = notes[:maxWarningExemplars]
+		}
+		for _, n := range shown {
+			out = append(out, n.render(degraded[n]))
+		}
+		if len(notes) > maxWarningExemplars {
+			restValues, restIssues := 0, 0
+			for _, n := range notes[maxWarningExemplars:] {
+				restValues++
+				restIssues += degraded[n]
+			}
+			out = append(out, fmt.Sprintf(
+				"%s%d further distinct %s value(s) across %d issue(s) not listed individually (%d shown above)",
+				warningSummaryPrefix, restValues, notes[0].Field, restIssues, len(shown)))
+		}
 	}
 	sort.Strings(out)
 	return out
