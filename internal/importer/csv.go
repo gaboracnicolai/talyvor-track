@@ -68,7 +68,7 @@ type ImportResult struct {
 // (map[FieldNote]int) rather than accumulating a string per row: a 10,000-row import of one
 // unknown status must produce one warning, not ten thousand.
 type FieldNote struct {
-	Field  string // "status" | "priority"
+	Field  string // "status" | "priority" | fieldDueDate | fieldResolutionDate
 	Value  string // the provider's value, verbatim — "" means the source supplied none
 	Mapped string // the Track value it was given instead, so the warning is self-describing
 
@@ -81,7 +81,13 @@ type FieldNote struct {
 	//	Via         "" (no fallback exists for this transport — every CSV path)
 	//	            | viaCategory        — a statusCategory arrived; ViaValue is its key, verbatim
 	//	            | viaNoCategory      — none arrived
+	//	            | viaUnparseableDate — a date arrived in a shape no pinned layout accepts
+	//	            | viaStatusNotDone   — a resolution date arrived on an issue that is not done
 	//	ViaResolved true iff ViaValue is what produced Mapped
+	//
+	// The last two are the same argument applied to a value that ARRIVED AND WAS REFUSED: a due date
+	// dropped for being unparseable and a Jira with no due dates are the same empty column, and only
+	// the warning tells them apart.
 	Via         string
 	ViaValue    string
 	ViaResolved bool
@@ -90,6 +96,18 @@ type FieldNote struct {
 const (
 	viaCategory   = "statusCategory"
 	viaNoCategory = "no-statusCategory"
+
+	// The two ways a DATE the provider sent does not reach its column. Both are deliberate and both
+	// are reported, for the reason the Via fields exist at all: a value that arrived and vanished
+	// must not look like a value that never arrived.
+	viaUnparseableDate = "unparseable-date" // no pinned layout accepts the shape
+	viaStatusNotDone   = "status-not-done"  // a resolution date on an issue that did not import as done
+)
+
+// The date fields a note can be about. Named so the rendered line reads as a sentence.
+const (
+	fieldDueDate        = "due date"
+	fieldResolutionDate = "resolution date"
 )
 
 // render turns one note and its count into a single self-describing line. The three Via shapes are
@@ -102,6 +120,15 @@ func (n FieldNote) render(count int) string {
 		subject = fmt.Sprintf("no %s value on %d issue(s)", n.Field, count)
 	}
 	switch {
+	case n.Via == viaUnparseableDate:
+		// The layouts are pinned by hand from a real Jira's responses. A tenant whose serialisation
+		// differs from all of them learns it here, on its first import, instead of receiving a
+		// column of nulls that reads as "we have no due dates".
+		return fmt.Sprintf("%s %q on %d issue(s) is not a date shape this importer recognises — not recorded",
+			n.Field, n.Value, count)
+	case n.Via == viaStatusNotDone:
+		return fmt.Sprintf("%s %q on %d issue(s) not recorded — the issue imported as %q, and Track records a completion time only on %q",
+			n.Field, n.Value, count, n.Mapped, model.StatusDone)
 	case n.Via == viaCategory && n.ViaResolved:
 		return fmt.Sprintf("%s — resolved via statusCategory %q as %q", subject, n.ViaValue, n.Mapped)
 	case n.Via == viaCategory:
