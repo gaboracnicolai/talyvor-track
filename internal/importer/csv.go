@@ -405,6 +405,11 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	rawStatus, rawPrio := ci.get(row, "Status"), ci.get(row, "Priority")
 	status, statusOK := mapJiraStatus(rawStatus)
 	prio, prioOK := mapJiraPriority(rawPrio)
+	// The two date columns a real export carries and this mapper read for six merges as if they
+	// were not there. Both are measured — column spelling and serialisation — in
+	// jira_csv_dates.go; both REPORT a value they cannot place rather than nil'ing it.
+	due, dueNotes := jiraCSVDueDate(ci.get(row, jiraCSVDueDateColumn))
+	completed, completedNotes := jiraCSVResolved(ci.get(row, jiraCSVResolvedColumn), status)
 	return mappedIssue{
 		issue: model.Issue{
 			Title:       title,
@@ -412,8 +417,11 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Status:      status,
 			Priority:    prio,
 			Labels:      splitLabels(ci.get(row, "Labels")),
+			DueDate:     due,
+			CompletedAt: completed,
 		},
-		notes: collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
+		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
+			append(dueNotes, completedNotes...)...),
 	}, nil
 }
 
