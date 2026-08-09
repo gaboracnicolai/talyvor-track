@@ -112,6 +112,19 @@ curl -X POST "http://localhost:3000/v1/import/jira?workspace_id=WS&team_id=TEAM"
 
 Priority mapping: `Highest → urgent`, `High/Major → high`, `Medium → medium`, `Low → low`, `Lowest/Trivial → low`. Status mapping collapses `Done`, `Closed`, and `Resolved` onto Track's `done`.
 
+⚠ **A `Closed` issue is not necessarily finished work, and the CSV says which.** On a real Jira the
+status of abandoned work is also `Closed` — what distinguishes it is the `Resolution` column. So the
+CSV import reads it, and it can do exactly one thing: move a row that mapped to `done` to
+`cancelled`, when the resolution is a word Track's own status vocabulary already reads that way
+(`Won't Fix`, `Won't Do`). Such a row records no completion time, because Track records one only on
+`done` — and analytics' cycle-time and throughput select on `completed_at IS NOT NULL` with no
+status predicate, so an abandoned issue carrying one is counted as delivered.
+
+Every other resolution **changes nothing and is reported in `warnings`** with the number of issues
+that carried it — `Duplicate`, `Timed out`, `Obsolete` and the rest plainly describe abandoned work
+too, and deciding which of them Track should treat as cancelled is a product judgement, not
+something the importer should guess. The first import tells you which ones your instance uses.
+
 Both endpoints return `{"imported": N, "skipped": N, "refused": N, "errors": [...], "warnings": [...]}` so you
 can see exactly which rows didn't make it, and why they didn't:
 
