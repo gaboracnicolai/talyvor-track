@@ -222,18 +222,37 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 	issue.Number = nextNumber
 	issue.Identifier = fmt.Sprintf("%s-%d", teamIdentifier, nextNumber)
 
+	// COMPLETION TIME AT CREATION — the second copy of a seam #74 fixed once.
+	//
+	// This INSERT named due_date and did NOT name completed_at at all, so a caller-supplied
+	// CompletedAt was discarded in silence. That is the same defect #74 found in the importer's
+	// UPSERT and fixed there; Create is the OTHER write path, and it is the one every CSV import row
+	// takes (a CSV row carries no provider identifier, so run() never reaches the upsert).
+	//
+	// ⚠ IT IS GATED, NOT SIMPLY ADDED. handler.Create decodes the whole model.Issue off the request
+	// body, so naming the column with no rule would newly let any client file BACKLOG work carrying a
+	// completion time — a row no Track path can produce (Update stamps completed_at only on a
+	// transition ONTO done and CLEARS it on any transition away) and one that analytics' resolution
+	// stats count as delivered, because that query selects on `completed_at IS NOT NULL` with no
+	// status predicate. So the invariant Update maintains is stated once more here, at the other
+	// door: a completion time is recorded only on a row that is done.
+	completedAt := issue.CompletedAt
+	if issue.Status != model.StatusDone {
+		completedAt = nil
+	}
+
 	const insertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
          assignee_id, creator_id, cycle_id, parent_id,
-         due_date, lens_feature, labels, sort_order)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         due_date, completed_at, lens_feature, labels, sort_order)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     RETURNING ` + issueColumns
 	return scanIssue(s.pool.QueryRow(ctx, insertSQL,
 		issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier,
 		issue.Title, issue.Description, string(issue.Status), int(issue.Priority),
 		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID,
-		issue.DueDate, issue.LensFeature, issue.Labels, issue.SortOrder,
+		issue.DueDate, completedAt, issue.LensFeature, issue.Labels, issue.SortOrder,
 	))
 }
 
