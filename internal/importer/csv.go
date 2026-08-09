@@ -97,6 +97,12 @@ const (
 	viaCategory   = "statusCategory"
 	viaNoCategory = "no-statusCategory"
 
+	// Linear's twin of the two above. They are SEPARATE constants rather than one shared pair
+	// because the rendered line names the provider's own field, and a warning that told a Linear
+	// operator to go look at a "statusCategory" would send them to a field their API does not have.
+	viaStateType   = "state.type"
+	viaNoStateType = "no-state.type"
+
 	// The two ways a DATE the provider sent does not reach its column. Both are deliberate and both
 	// are reported, for the reason the Via fields exist at all: a value that arrived and vanished
 	// must not look like a value that never arrived.
@@ -135,6 +141,12 @@ func (n FieldNote) render(count int) string {
 		return fmt.Sprintf("%s — statusCategory %q carries no Track status, imported as %q", subject, n.ViaValue, n.Mapped)
 	case n.Via == viaNoCategory:
 		return fmt.Sprintf("%s — no statusCategory present, imported as %q", subject, n.Mapped)
+	case n.Via == viaStateType && n.ViaResolved:
+		return fmt.Sprintf("%s — resolved via state.type %q as %q", subject, n.ViaValue, n.Mapped)
+	case n.Via == viaStateType:
+		return fmt.Sprintf("%s — state.type %q carries no Track status, imported as %q", subject, n.ViaValue, n.Mapped)
+	case n.Via == viaNoStateType:
+		return fmt.Sprintf("%s — no state.type present, imported as %q", subject, n.Mapped)
 	default:
 		return fmt.Sprintf("%s — imported as %q", subject, n.Mapped)
 	}
@@ -274,6 +286,61 @@ func mapLinearStatus(s string) (model.IssueStatus, bool) {
 		return model.StatusDone, true
 	case "cancelled", "canceled":
 		return model.StatusCancelled, true
+	default:
+		return model.StatusBacklog, false
+	}
+}
+
+// mapLinearStateType places Linear's CANONICAL state category — WorkflowState.type, the value a team
+// cannot rename however it renames the state. It is the second chance an unrecognised state NAME gets,
+// and only the Linear API transport can offer it (a CSV export carries no such column).
+//
+// ⚠ THIS FIELD WAS DEFERRED FOR FOUR MERGES ON A PREMISE THAT TURNED OUT TO BE FALSE. W3.4 recorded,
+// repeatedly, that reading it "needs a GraphQL query change that 400s the WHOLE query if wrong, and
+// the test fake accepts any query, so no CI test in this repo can catch it — it needs one real call
+// against a real tenant". Measured 2026-08-09 against api.linear.app/graphql, negative-controlled
+// first (fabricated host ⇒ curl exit 6; fabricated path on the real host ⇒ 404):
+//
+//	an invalid field ⇒ HTTP 400 GRAPHQL_VALIDATION_FAILED
+//	this query       ⇒ HTTP 401 AUTHENTICATION_ERROR
+//
+// Linear validates the DOCUMENT BEFORE it authenticates, so a malformed query and a well-formed one
+// are distinguishable with no credentials at all. scripts/w34-linear-schema-probe.py re-runs it.
+//
+// ⚠ THE VOCABULARY IS NOT AN ENUM, unlike Jira's four-value /rest/api/2/statuscategory. Linear models
+// this as `String!`; measured across 1,132 schema types and 115 enums, NOT ONE carries the issue-state
+// vocabulary. It comes from the field's own description, read by unauthenticated introspection:
+//
+//	One of "triage", "backlog", "unstarted", "started", "completed", "canceled", "duplicate".
+//
+// That is SEVEN. Linear's public docs list six — `duplicate` is the one an implementation written
+// from memory drops.
+//
+// ⚠ `triage` AND `duplicate` ARE NOT RESOLUTIONS, and that is #73's `undefined` rule, not timidity.
+// Triage is Linear's pre-workflow inbox and Track has no such state; duplicate is close to cancelled
+// and is not the same claim. Both fall through and are REPORTED as arrived-and-unusable, which is a
+// distinct line from "no type present" — so a first real import says out loud whether this code ran.
+//
+// ⚠ `started` IS COARSER THAN THE NAME MAPPING AND THAT IS ON THE REPORT, NOT HIDDEN: Linear files
+// both "In Progress" and "In Review" under `started`, so a custom review state whose NAME the mapper
+// does not know resolves to in_progress, not in_review. This is where Linear differs from #73's Jira
+// measurement, which found the name mapping and the category disagreeing zero times — and it is
+// exactly why the name still goes first. Nothing that already imported correctly can change.
+func mapLinearStateType(t string) (model.IssueStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "backlog":
+		return model.StatusBacklog, true
+	case "unstarted":
+		return model.StatusTodo, true
+	case "started":
+		return model.StatusInProgress, true
+	case "completed":
+		return model.StatusDone, true
+	case "canceled":
+		return model.StatusCancelled, true
+	case "triage", "duplicate":
+		// Measured, named, and deliberately not answered — see the header above.
+		return model.StatusBacklog, false
 	default:
 		return model.StatusBacklog, false
 	}
