@@ -151,6 +151,14 @@ func (n FieldNote) render(count int) string {
 		// column of nulls that reads as "we have no due dates".
 		return fmt.Sprintf("%s %q on %d issue(s) is not a date shape this importer recognises — not recorded",
 			n.Field, n.Value, count)
+	case n.Via == viaNoCreatedColumn:
+		// The structural-zero line for a field whose failure is otherwise invisible: created_at is
+		// never null, so without this an operator cannot tell "Track read your Created column" from
+		// "Track recorded every one of these as opened today".
+		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as created at import time, "+
+			"which makes their time-to-resolution meaningless", jiraCSVCreatedColumn, count)
+	case n.Via == viaNoCreatedValue:
+		return fmt.Sprintf("empty %s on %d issue(s) — recorded as created at import time", n.Field, count)
 	case n.Via == viaStatusNotDone:
 		return fmt.Sprintf("%s %q on %d issue(s) not recorded — the issue imported as %q, and Track records a completion time only on %q",
 			n.Field, n.Value, count, n.Mapped, model.StatusDone)
@@ -469,6 +477,11 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// jira_csv_dates.go; both REPORT a value they cannot place rather than nil'ing it.
 	due, dueNotes := jiraCSVDueDate(ci.get(row, jiraCSVDueDateColumn))
 	completed, completedNotes := jiraCSVResolved(ci.get(row, jiraCSVResolvedColumn), status)
+	// WHEN THE ISSUE WAS OPENED. Unlike the two above, a miss here is not an empty column anybody
+	// can see — issues.created_at DEFAULTs to NOW(), so an unread Created makes every imported issue
+	// read as opened at import time and turns the time-to-resolution report NEGATIVE. See
+	// jira_csv_created.go for the measurement and for why the two absent-cases are reported apart.
+	created, createdNotes := jiraCSVCreated(ci, row)
 	return mappedIssue{
 		issue: model.Issue{
 			Title:       title,
@@ -478,9 +491,10 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Labels:      splitLabelColumns(ci.getAll(row, "Labels")),
 			DueDate:     due,
 			CompletedAt: completed,
+			CreatedAt:   created,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			concatNotes(resolutionNotes, dueNotes, completedNotes)...),
+			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes)...),
 	}, nil
 }
 

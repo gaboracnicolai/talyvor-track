@@ -76,8 +76,8 @@ func TestJiraCSVMapper_CapturesTheDueDateColumn(t *testing.T) {
 	// The header spellings are HARDCODED here, never read from a constant the mapper also reads.
 	// #75's C6: a guard that compares the constant to itself passes for every possible value.
 	got := mapOneJiraCSVRow(t,
-		[]string{"Summary", "Status", "Priority", "Due Date"},
-		[]string{"Ship it", "To Do", "High", realJiraCSVDueDate})
+		[]string{"Summary", "Status", "Priority", "Due Date", "Created"},
+		[]string{"Ship it", "To Do", "High", realJiraCSVDueDate, "23/Jul/2026 7:36 PM"})
 
 	if got.issue.DueDate == nil {
 		t.Fatalf("DueDate is nil; the export column %q held %q", "Due Date", realJiraCSVDueDate)
@@ -161,8 +161,11 @@ func TestJiraCSVMapper_ReportsADateShapeItCannotParse(t *testing.T) {
 func TestJiraCSVMapper_AbsentDatesAreSilentAndNil(t *testing.T) {
 	t.Run("column missing entirely", func(t *testing.T) {
 		got := mapOneJiraCSVRow(t,
-			[]string{"Summary", "Status", "Priority"},
-			[]string{"Ship it", "To Do", "High"})
+			// ⚠ Created is supplied because "absent column, no loss" does NOT hold for it: see the
+			// note on TestJobRow_JiraCSV_NoDateColumnsIsCleanAndSilent. This subtest is about the
+			// two columns #78 shipped.
+			[]string{"Summary", "Status", "Priority", "Created"},
+			[]string{"Ship it", "To Do", "High", "23/Jul/2026 7:36 PM"})
 		if got.issue.DueDate != nil || got.issue.CompletedAt != nil {
 			t.Errorf("dates = {%v %v}, want both nil", got.issue.DueDate, got.issue.CompletedAt)
 		}
@@ -172,8 +175,8 @@ func TestJiraCSVMapper_AbsentDatesAreSilentAndNil(t *testing.T) {
 	})
 	t.Run("column present and empty", func(t *testing.T) {
 		got := mapOneJiraCSVRow(t,
-			[]string{"Summary", "Status", "Priority", "Due Date", "Resolved"},
-			[]string{"Ship it", "Closed", "High", "", ""})
+			[]string{"Summary", "Status", "Priority", "Due Date", "Resolved", "Created"},
+			[]string{"Ship it", "Closed", "High", "", "", "23/Jul/2026 7:36 PM"})
 		if got.issue.DueDate != nil || got.issue.CompletedAt != nil {
 			t.Errorf("dates = {%v %v}, want both nil", got.issue.DueDate, got.issue.CompletedAt)
 		}

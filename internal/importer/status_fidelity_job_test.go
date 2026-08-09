@@ -71,8 +71,11 @@ func TestJobRow_CleanImportStoresEmptyWarnings(t *testing.T) {
 	js := importer.NewJobStore(d.Pool)
 	runner := importer.NewRunner(js, importer.New(issue.NewStore(d.Pool)))
 
-	clean := "Summary,Description,Status,Priority,Labels\n" +
-		"One,d,To Do,Highest,bug\nTwo,d,Resolved,Low,bug\n"
+	// `Created` is present because a real export always carries it; without it the import is
+	// legitimately warned about (jira_csv_created.go) and this assertion would have had to be
+	// weakened rather than the fixture made realistic.
+	clean := "Summary,Description,Status,Priority,Labels,Created\n" +
+		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM\nTwo,d,Resolved,Low,bug,23/Jul/2026 7:36 PM\n"
 	jobID, err := js.Create(ctx, ws.ID, team.ID, "jira_csv", []byte(clean))
 	if err != nil {
 		t.Fatal(err)

@@ -120,6 +120,15 @@ CSV import reads it, and it can do exactly one thing: move a row that mapped to 
 `done` — and analytics' cycle-time and throughput select on `completed_at IS NOT NULL` with no
 status predicate, so an abandoned issue carrying one is counted as delivered.
 
+⚠ **Export the `Created` column, or every cycle-time number you get back is wrong.** Track stores an
+issue's creation time in a column the database defaults to "now", so an import that cannot read
+`Created` records every issue as opened at import time — and time to resolution is computed as
+`completed_at − created_at`, which then comes out NEGATIVE. Measured on a real export: issues a
+median of 332 days old, a true median cycle time of 687 hours, and Track computing −6,543. The CSV
+import reads the column and, if it is missing or in a date format Track does not recognise, **says
+so in `warnings`** rather than quietly recording today's date. (`Export → CSV (All fields)` always
+carries it; a narrowed export may not.)
+
 Every other resolution **changes nothing and is reported in `warnings`** with the number of issues
 that carried it — `Duplicate`, `Timed out`, `Obsolete` and the rest plainly describe abandoned work
 too, and deciding which of them Track should treat as cancelled is a product judgement, not
