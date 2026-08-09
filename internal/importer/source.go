@@ -91,16 +91,14 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 	return out, nil
 }
 
-// renderWarnings turns the tally into one sorted, self-describing line per distinct (field, value).
+// renderWarnings turns the tally into one sorted, self-describing line per distinct note. The note
+// keys on the PATH as well as the value (FieldNote.Via), so a tenant whose categories resolved some
+// rows and were absent on others gets both truths in one report instead of one averaged sentence.
 // Sorted because an unordered report cannot be diffed between two runs of the same import.
 func renderWarnings(degraded map[FieldNote]int) []string {
 	out := make([]string, 0, len(degraded))
 	for n, count := range degraded {
-		if n.Value == "" {
-			out = append(out, fmt.Sprintf("no %s value on %d issue(s) — imported as %q", n.Field, count, n.Mapped))
-			continue
-		}
-		out = append(out, fmt.Sprintf("unrecognised %s %q on %d issue(s) — imported as %q", n.Field, n.Value, count, n.Mapped))
+		out = append(out, n.render(count))
 	}
 	sort.Strings(out)
 	return out
