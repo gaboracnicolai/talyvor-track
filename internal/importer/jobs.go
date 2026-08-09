@@ -30,18 +30,22 @@ const (
 // Job is a durable import-job record. WorkspaceID/TeamID drive the runner's writes — read from this row,
 // never from a param/header/source-row.
 type Job struct {
-	ID           string     `json:"id"`
-	WorkspaceID  string     `json:"workspace_id"`
-	TeamID       string     `json:"team_id"`
-	SourceType   string     `json:"source_type"`
-	Status       string     `json:"status"`
-	Imported     int        `json:"imported"`
-	Skipped      int        `json:"skipped"`
-	Failed       int        `json:"failed"`
-	ErrorSummary string     `json:"error_summary,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	TeamID       string `json:"team_id"`
+	SourceType   string `json:"source_type"`
+	Status       string `json:"status"`
+	Imported     int    `json:"imported"`
+	Skipped      int    `json:"skipped"`
+	Failed       int    `json:"failed"`
+	ErrorSummary string `json:"error_summary,omitempty"`
+	// Warnings are rows that DID import with a field the mapper could not place (an unrecognised
+	// provider status/priority). Distinct from failed/error_summary, which describe rows that
+	// never landed — see migration 0026.
+	Warnings   []string   `json:"warnings"`
+	CreatedAt  time.Time  `json:"created_at"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
 // JobStore is the persistence for import jobs. Real *pgxpool.Pool in prod and tests.
@@ -150,12 +154,15 @@ func (s *JobStore) LoadPayload(ctx context.Context, jobID string) ([]byte, error
 }
 
 // Finish records the terminal status + counts.
-func (s *JobStore) Finish(ctx context.Context, jobID, workspaceID, status string, imported, skipped, failed int, errSummary string) error {
+func (s *JobStore) Finish(ctx context.Context, jobID, workspaceID, status string, imported, skipped, failed int, errSummary string, warnings []string) error {
+	if warnings == nil {
+		warnings = []string{} // a TEXT[] column is NOT NULL; nil would write NULL, not '{}'
+	}
 	// SEC-5: workspace-scoped (workspaceID is the runner's own job.WorkspaceID) so the class-guard enforces here.
 	_, err := s.pool.Exec(ctx,
 		`UPDATE import_jobs SET status=$2, imported=$3, skipped=$4, failed=$5,
-		        error_summary=NULLIF($6,''), finished_at=NOW() WHERE id=$1 AND workspace_id=$7`,
-		jobID, status, imported, skipped, failed, errSummary, workspaceID)
+		        error_summary=NULLIF($6,''), warnings=$8, finished_at=NOW() WHERE id=$1 AND workspace_id=$7`,
+		jobID, status, imported, skipped, failed, errSummary, workspaceID, warnings)
 	if err != nil {
 		return fmt.Errorf("importer: finish job: %w", err)
 	}
@@ -169,10 +176,10 @@ func (s *JobStore) Get(ctx context.Context, jobID string) (*Job, error) {
 	var errSummary *string
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, workspace_id, team_id, source_type, status, imported, skipped, failed,
-		        error_summary, created_at, started_at, finished_at
+		        error_summary, warnings, created_at, started_at, finished_at
 		 FROM import_jobs WHERE id=$1`, jobID).
 		Scan(&j.ID, &j.WorkspaceID, &j.TeamID, &j.SourceType, &j.Status, &j.Imported, &j.Skipped, &j.Failed,
-			&errSummary, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
+			&errSummary, &j.Warnings, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
