@@ -52,9 +52,12 @@ func TestCreate_InsertsWithAutoNumberAndIdentifier(t *testing.T) {
 		WithArgs("team-1", "ws-1").
 		WillReturnRows(pgxmock.NewRows([]string{"identifier"}).AddRow("ENG"))
 
-	// 2) Pick the next number for this team — current max is 41.
-	pool.ExpectQuery(`COALESCE\(MAX\(number\), 0\) \+ 1 FROM issues WHERE team_id`).
-		WithArgs("team-1").
+	// 2) Pick the next number for this team — current max is 41. The allocator also skips any number whose
+	//    DERIVED identifier ("ENG-N") is already taken by an imported provider key, so it carries the
+	//    workspace and the team prefix too; the skipping itself is proved against real Postgres in
+	//    internal/importer/identifier_collision_test.go, not here.
+	pool.ExpectQuery(`COALESCE\(MAX\(number\), 0\) \+ 1 AS n FROM issues WHERE team_id`).
+		WithArgs("team-1", "ws-1", "ENG", identifierScanBound).
 		WillReturnRows(pgxmock.NewRows([]string{"next"}).AddRow(42))
 
 	// 3) Insert and return the materialised row. The INSERT takes 17
