@@ -114,6 +114,10 @@ const (
 const (
 	fieldDueDate        = "due date"
 	fieldResolutionDate = "resolution date"
+	// Linear names this field `completedAt`, not `resolutiondate`. Separate for the same reason
+	// viaStateType is separate from viaCategory: a warning must name the provider's own field, or it
+	// sends the operator to look for something their API does not have.
+	fieldCompletionTime = "completion time"
 )
 
 // render turns one note and its count into a single self-describing line. The three Via shapes are

@@ -25,10 +25,91 @@ const linearIssuesQuery = `query($teamId: String!, $after: String) {
   team(id: $teamId) {
     issues(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { identifier title description state { name type } priority labels { nodes { name } } }
+      nodes { identifier title description state { name type } priority labels { nodes { name } } dueDate completedAt }
     }
   }
 }`
+
+// linearTimeLayouts are pinned BY HAND, in the order tried.
+//
+// ⚠ THE PROVENANCE IS WEAKER THAN jiraTimeLayouts' AND IS NOT DRESSED UP AS EQUAL. #74 pinned Jira's
+// layouts from the BYTES a real Jira sent. What this environment can measure for Linear is the
+// DECLARED SCALAR TYPE, by unauthenticated introspection:
+//
+//	Issue.dueDate     : TimelessDate  "The date at which the issue is due."
+//	Issue.completedAt : DateTime      "The time at which the issue was moved into completed state."
+//
+// Both scalars' descriptions then describe what the API ACCEPTS, not what it EMITS ("Accepts
+// shortcuts like `2021` ... Also accepts ISO 8601 durations"), and a coercion probe confirms that
+// input space is permissive enough to say nothing about the output: `2026-08-09` and
+// `2026-08-09T00:00:00Z` are BOTH accepted for a TimelessDate. So the OUTPUT SERIALISATION IS NOT
+// MEASURABLE FROM HERE without a tenant.
+//
+// ⚠ WHICH IS WHY THE REFUSAL IS THE LOAD-BEARING PART, NOT THE LIST. A value no layout accepts is
+// REPORTED, never nil'd — so a tenant whose serialisation differs from both shapes below learns it
+// on its first import instead of receiving a column of nulls that reads as "we have no due dates".
+// This is deliberately NOT shared with parseJiraTime: sharing would lend Jira's observed-bytes
+// provenance to a field nobody here has ever seen serialised, the overclaim #75 caught in this
+// package once already.
+var linearTimeLayouts = []string{
+	time.RFC3339, // DateTime — ISO 8601 date-time, with or without fractional seconds, Z or offset
+	"2006-01-02", // TimelessDate — ISO 8601 date only; time.RFC3339 REFUSES this shape
+}
+
+// parseLinearTime returns the instant and true, or false if no pinned layout accepts the value. The
+// caller REPORTS a false — it never silently nils, which is what keeps the hand-pinned list honest.
+func parseLinearTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range linearTimeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+// linearDueDate maps `dueDate`. Absent is not a loss and is not reported; a value in a shape no
+// pinned layout accepts IS a loss, and is.
+func linearDueDate(raw string) (*time.Time, []FieldNote) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	t, ok := parseLinearTime(raw)
+	if !ok {
+		return nil, []FieldNote{{Field: fieldDueDate, Value: raw, Via: viaUnparseableDate}}
+	}
+	return &t, nil
+}
+
+// linearCompletedAt maps `completedAt` and refuses it unless the issue imported as done — #74's
+// decision, inherited rather than re-litigated: Track's issue.Store.Update stamps completed_at only
+// on a transition ONTO done and clears it on any transition away, and analytics' resolution-stats
+// query selects on `completed_at IS NOT NULL` with no status predicate, so an abandoned issue
+// carrying one counts as delivered work.
+//
+// ⚠ THE RULE FITS LINEAR BETTER THAN IT FITS JIRA, which is worth stating rather than assuming:
+// Linear's schema says completedAt is "the time at which the issue was moved into completed state"
+// and gives cancellation its OWN field, `canceledAt` — unlike Jira, which resolves "Won't Do" and so
+// stamps resolutiondate on cancelled work. Linear should therefore rarely send this on a non-done
+// issue. "Rarely" is not "never", and the states this importer REFUSES to classify (`triage`,
+// `duplicate`, and any unknown name with no type) all import as backlog — so the refusal still has
+// to exist, and it is still reported rather than silent.
+func linearCompletedAt(raw string, status model.IssueStatus) (*time.Time, []FieldNote) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	t, ok := parseLinearTime(raw)
+	if !ok {
+		return nil, []FieldNote{{Field: fieldCompletionTime, Value: raw, Via: viaUnparseableDate}}
+	}
+	if status != model.StatusDone {
+		return nil, []FieldNote{{Field: fieldCompletionTime, Value: raw, Mapped: string(status), Via: viaStatusNotDone}}
+	}
+	return &t, nil
+}
 
 type linearClient struct {
 	http  *http.Client
@@ -73,6 +154,13 @@ type linearNode struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"labels"`
+
+	// DueDate is a TimelessDate and CompletedAt a DateTime (measured from the schema — see
+	// linearTimeLayouts). Both decode as strings so an unrecognised shape can be REPORTED rather
+	// than becoming a decode error that fails the whole page, and `null` decodes to "" which is the
+	// absent case.
+	DueDate     string `json:"dueDate"`
+	CompletedAt string `json:"completedAt"`
 }
 
 type linearResp struct {
@@ -186,6 +274,8 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 			status, fallback = resolveLinearStateType(n.State.Type, status)
 		}
 		prio, prioOK := linearPriorityFromInt(n.Priority)
+		due, dueNotes := linearDueDate(n.DueDate)
+		completed, completedNotes := linearCompletedAt(n.CompletedAt, status)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  n.Identifier, // the provider-key (ENG-123) — what C.2's upsert + PR #30 resolve on
@@ -194,8 +284,11 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 				Status:      status,
 				Priority:    prio,
 				Labels:      labels,
+				DueDate:     due,
+				CompletedAt: completed,
 			},
-			notes: collectNotes(n.State.Name, status, statusOK, fallback, strconv.Itoa(n.Priority), prio, prioOK),
+			notes: append(collectNotes(n.State.Name, status, statusOK, fallback, strconv.Itoa(n.Priority), prio, prioOK),
+				append(dueNotes, completedNotes...)...),
 		})
 	}
 	return out
