@@ -184,7 +184,7 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 				Priority:    prio,
 				Labels:      labels,
 			},
-			notes: collectNotes(n.State.Name, status, statusOK, strconv.Itoa(n.Priority), prio, prioOK),
+			notes: collectNotes(n.State.Name, status, statusOK, statusFallback{}, strconv.Itoa(n.Priority), prio, prioOK),
 		})
 	}
 	return out

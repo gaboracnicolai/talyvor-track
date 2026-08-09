@@ -51,6 +51,13 @@ type jiraIssue struct {
 		Description json.RawMessage `json:"description"` // ADF document
 		Status      struct {
 			Name string `json:"name"`
+			// The canonical, non-renameable state category. It is NESTED INSIDE the `status` field
+			// jiraFields already requests, so it costs no query change and a Jira that omits it
+			// simply decodes to the zero value — see resolveJiraStatusCategory.
+			StatusCategory struct {
+				Key  string `json:"key"`  // undefined | new | indeterminate | done
+				Name string `json:"name"` // the display name, e.g. "To Do" — not mapped, only reported
+			} `json:"statusCategory"`
 		} `json:"status"`
 		Priority struct {
 			Name string `json:"name"`
@@ -131,6 +138,10 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 			labels = []string{}
 		}
 		status, statusOK := mapJiraStatus(it.Fields.Status.Name)
+		var fallback statusFallback
+		if !statusOK {
+			status, fallback = resolveJiraStatusCategory(it.Fields.Status.StatusCategory.Key, status)
+		}
 		prio, prioOK := mapJiraPriority(it.Fields.Priority.Name)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
@@ -141,10 +152,27 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 				Priority:    prio,
 				Labels:      labels,
 			},
-			notes: collectNotes(it.Fields.Status.Name, status, statusOK, it.Fields.Priority.Name, prio, prioOK),
+			notes: collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
 		})
 	}
 	return out
+}
+
+// resolveJiraStatusCategory is the second chance an unrecognised Jira status NAME gets. It never
+// runs for a name mapJiraStatus knows, so a recognised import is byte-for-byte what it was.
+//
+// It returns the status to use plus the note material describing WHICH of the three things happened,
+// because a category that never arrives must not be reportable as one that arrived and resolved —
+// that is the only way a real tenant's first import can tell anyone whether this code executed.
+func resolveJiraStatusCategory(key string, unresolved model.IssueStatus) (model.IssueStatus, statusFallback) {
+	if strings.TrimSpace(key) == "" {
+		return unresolved, statusFallback{via: viaNoCategory}
+	}
+	mapped, ok := mapJiraStatusCategory(key)
+	if !ok {
+		return unresolved, statusFallback{via: viaCategory, value: key}
+	}
+	return mapped, statusFallback{via: viaCategory, value: key, resolved: true}
 }
 
 // ── ADF → plain text ──────────────────────────────────────────────────────────────────────────────────────

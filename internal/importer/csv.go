@@ -11,6 +11,7 @@ package importer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -70,6 +71,55 @@ type FieldNote struct {
 	Field  string // "status" | "priority"
 	Value  string // the provider's value, verbatim — "" means the source supplied none
 	Mapped string // the Track value it was given instead, so the warning is self-describing
+
+	// Via / ViaValue / ViaResolved record HOW Mapped was reached once the provider's NAME turned
+	// out to be unrecognised. They are not decoration and they are not for debugging: a Jira tenant
+	// that never sends a statusCategory and a Jira tenant whose categories resolved every row would
+	// otherwise produce the IDENTICAL warning, and nobody could ever tell from a production import
+	// whether the category read runs at all. That is the structural-zero class, one field down.
+	//
+	//	Via         "" (no fallback exists for this transport — every CSV path)
+	//	            | viaCategory        — a statusCategory arrived; ViaValue is its key, verbatim
+	//	            | viaNoCategory      — none arrived
+	//	ViaResolved true iff ViaValue is what produced Mapped
+	Via         string
+	ViaValue    string
+	ViaResolved bool
+}
+
+const (
+	viaCategory   = "statusCategory"
+	viaNoCategory = "no-statusCategory"
+)
+
+// render turns one note and its count into a single self-describing line. The three Via shapes are
+// three DIFFERENT sentences on purpose — see FieldNote.
+func (n FieldNote) render(count int) string {
+	subject := fmt.Sprintf("unrecognised %s %q on %d issue(s)", n.Field, n.Value, count)
+	if n.Value == "" {
+		// An absent value is a different report from an unknown one: it usually means we looked in
+		// the wrong place (a CSV status column named "State"), not that the provider is exotic.
+		subject = fmt.Sprintf("no %s value on %d issue(s)", n.Field, count)
+	}
+	switch {
+	case n.Via == viaCategory && n.ViaResolved:
+		return fmt.Sprintf("%s — resolved via statusCategory %q as %q", subject, n.ViaValue, n.Mapped)
+	case n.Via == viaCategory:
+		return fmt.Sprintf("%s — statusCategory %q carries no Track status, imported as %q", subject, n.ViaValue, n.Mapped)
+	case n.Via == viaNoCategory:
+		return fmt.Sprintf("%s — no statusCategory present, imported as %q", subject, n.Mapped)
+	default:
+		return fmt.Sprintf("%s — imported as %q", subject, n.Mapped)
+	}
+}
+
+// statusFallback describes the second chance a transport gave an unrecognised status NAME. Its zero
+// value means "this transport has none", which is every CSV path — a Jira CSV export carries no
+// category column, so those warnings keep their existing wording exactly.
+type statusFallback struct {
+	via      string
+	value    string
+	resolved bool
 }
 
 // mappedIssue pairs a mapped issue with the notes its mapping produced. The API sources map a
@@ -154,16 +204,18 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Priority:    prio,
 			Labels:      splitLabels(ci.get(row, "Labels")),
 		},
-		notes: collectNotes(rawStatus, status, statusOK, rawPrio, prio, prioOK),
+		notes: collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
 	}, nil
 }
 
 // collectNotes is the one place a (value, recognised) pair becomes a reportable note, so the two
 // providers and the two transports cannot drift on what counts as degraded.
-func collectNotes(rawStatus string, status model.IssueStatus, statusOK bool, rawPrio string, prio model.IssuePriority, prioOK bool) []FieldNote {
+func collectNotes(rawStatus string, status model.IssueStatus, statusOK bool, fb statusFallback, rawPrio string, prio model.IssuePriority, prioOK bool) []FieldNote {
 	var notes []FieldNote
 	if !statusOK {
-		notes = append(notes, statusNote(rawStatus, status))
+		n := statusNote(rawStatus, status)
+		n.Via, n.ViaValue, n.ViaResolved = fb.via, fb.value, fb.resolved
+		notes = append(notes, n)
 	}
 	if !prioOK {
 		notes = append(notes, priorityNote(rawPrio, prio))
@@ -263,7 +315,7 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Priority:    prio,
 			Labels:      splitLabels(ci.get(row, "Labels")),
 		},
-		notes: collectNotes(rawStatus, status, statusOK, rawPrio, prio, prioOK),
+		notes: collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
 	}, nil
 }
 
@@ -281,6 +333,41 @@ func mapJiraStatus(s string) (model.IssueStatus, bool) {
 		return model.StatusDone, true
 	case "cancelled", "canceled", "won't do", "won't fix":
 		return model.StatusCancelled, true
+	default:
+		return model.StatusBacklog, false
+	}
+}
+
+// mapJiraStatusCategory places Jira's CANONICAL, non-renameable state category. It is the second
+// chance an unrecognised status NAME gets, and only the Jira API transport can offer it.
+//
+// MEASURED against a real Jira (jira.atlassian.com, anonymous REST, 2026-08-09), controlled first
+// against a fabricated host that answered 404:
+//
+//	GET /rest/api/2/statuscategory ⇒ EXACTLY FOUR, which is the whole vocabulary below:
+//	  id=1 key="undefined" (No Category) · id=2 "new" · id=4 "indeterminate" · id=3 "done"
+//	GET /rest/api/2/search?fields=status ⇒ the category is NESTED INSIDE the status object, so it
+//	  arrives with the field jiraFields already asks for: no query change, nothing that can 400.
+//
+// That instance defines 46 statuses; mapJiraStatus knows 9. The other 37 all import as `backlog`
+// today — 13 in `indeterminate` (in flight) and 4 in `done` (finished). This resolves 37 of 37, and
+// disagrees with the 9 known names ZERO times, which is why the name mapping still runs first.
+//
+// ⚠ `undefined` IS NOT A RESOLUTION. It is Jira's literal "No Category" — Jira saying it does not
+// know either. Giving it a Track status would invent precisely the meaning this whole change exists
+// to stop inventing, so it falls through and is REPORTED as arrived-and-unusable.
+//
+// ⚠ `done` IS COARSER THAN THE NAME MAPPING AND THAT IS NOT HIDDEN: Jira files "Won't Do" under
+// `done` too, so an unknown cancellation-shaped name resolves to done, not cancelled. Every
+// resolution carries a warning naming the category it came from, so the coarsening is on the report.
+func mapJiraStatusCategory(key string) (model.IssueStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "new":
+		return model.StatusTodo, true
+	case "indeterminate":
+		return model.StatusInProgress, true
+	case "done":
+		return model.StatusDone, true
 	default:
 		return model.StatusBacklog, false
 	}
