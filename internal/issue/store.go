@@ -345,14 +345,20 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
          assignee_id, creator_id, cycle_id, parent_id,
-         due_date, lens_feature, labels, sort_order)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         due_date, completed_at, lens_feature, labels, sort_order)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     ON CONFLICT (workspace_id, identifier) DO UPDATE SET
         title       = EXCLUDED.title,        -- CLOBBER: provider is source of truth
         description = EXCLUDED.description,   -- CLOBBER
         labels      = EXCLUDED.labels,       -- CLOBBER
         updated_at  = NOW()
-        -- OMITTED (PRESERVE local workflow):        status, priority
+        -- OMITTED (PRESERVE local workflow):        status, priority, completed_at, due_date
+        --   completed_at travels WITH status and cannot be split from it: status is preserved here
+        --   so local workflow wins, and clobbering completed_at alone could leave a locally-done
+        --   issue with status "done" and no completion time — the invariant Update maintains, broken
+        --   by a re-import. due_date is preserved for the same reason it is not in the CLOBBER list
+        --   above: whether a provider's plan should overwrite a local one is a decision, not a
+        --   default, and it is stated in the queue rather than made here. Both land on INSERT.
         -- OMITTED (NEVER TOUCH money + attribution): ai_cost_usd, ai_tokens, lens_feature
       WHERE issues.creator_id = '` + model.ImporterCreatorID + `'
         -- ^ "provider is source of truth" is true of the rows the PROVIDER put here, and of no
@@ -364,7 +370,7 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 
 	var inserted bool
 	out, err := scanIssue(insertedScanner{
-		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.LensFeature, issue.Labels, issue.SortOrder),
+		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder),
 		inserted: &inserted,
 	})
 	if err != nil {

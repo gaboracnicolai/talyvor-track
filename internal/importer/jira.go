@@ -22,7 +22,41 @@ import (
 
 const jiraSearchPath = "/rest/api/3/search/jql"
 
-var jiraFields = []string{"summary", "description", "status", "priority", "labels"}
+// jiraFields is the `fields` list every search asks for. duedate and resolutiondate are plain
+// scalars nested nowhere, so — like statusCategory before them — they are free: absent ⇒ the zero
+// value ⇒ exactly today's nil. Narrowing this list takes them away silently, which is why
+// TestJiraRequest_AsksForTheDateFields asserts it at the WIRE, not at the fixture.
+var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate"}
+
+// jiraTimeLayouts are pinned BY HAND from what a real Jira actually sends, in the order tried.
+//
+// ⚠ NOT time.RFC3339, AND THAT IS THE POINT. Measured against jira.atlassian.com (anonymous REST,
+// negative-controlled first): duedate arrives as "2027-12-31" — a bare date, no time, no offset —
+// and resolutiondate as "2026-08-06T20:06:39.000+0000", whose offset is `+0000`, not `+00:00`.
+// time.Parse with time.RFC3339 REFUSES BOTH. Reaching for the obvious constant would have written
+// nil into every row of both columns and reported {imported:N, warnings:[]}, while every fabricated
+// RFC3339 fixture in the test package passed. RFC3339 is kept in the list anyway, because a shape
+// this environment cannot prove absent is not a shape to refuse.
+var jiraTimeLayouts = []string{
+	"2006-01-02T15:04:05.000-0700", // measured: resolutiondate
+	time.RFC3339,                   // tolerated: the same instant with a colon in the offset, or Z
+	"2006-01-02",                   // measured: duedate
+}
+
+// parseJiraTime returns the instant and true, or false if no pinned layout accepts the value. The
+// caller REPORTS a false — it never silently nils, which is what keeps the hand-pinned list honest.
+func parseJiraTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range jiraTimeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
 
 type jiraClient struct {
 	http    *http.Client
@@ -63,6 +97,11 @@ type jiraIssue struct {
 			Name string `json:"name"`
 		} `json:"priority"`
 		Labels []string `json:"labels"`
+
+		// Both plain scalars, both absent-safe: a Jira that sends neither decodes to "" and imports
+		// exactly as it did before this merge. See jiraTimeLayouts for the shapes they arrive in.
+		DueDate        string `json:"duedate"`
+		ResolutionDate string `json:"resolutiondate"`
 	} `json:"fields"`
 }
 
@@ -143,6 +182,8 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 			status, fallback = resolveJiraStatusCategory(it.Fields.Status.StatusCategory.Key, status)
 		}
 		prio, prioOK := mapJiraPriority(it.Fields.Priority.Name)
+		due, dueNotes := jiraDueDate(it.Fields.DueDate)
+		completed, completedNotes := jiraCompletedAt(it.Fields.ResolutionDate, status)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  it.Key, // provider-key (PROJ-123)
@@ -151,11 +192,57 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 				Status:      status,
 				Priority:    prio,
 				Labels:      labels,
+				DueDate:     due,
+				CompletedAt: completed,
 			},
-			notes: collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
+			notes: append(collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
+				append(dueNotes, completedNotes...)...),
 		})
 	}
 	return out
+}
+
+// jiraDueDate maps Jira's `duedate`. Absent is not a loss and is not reported; a value in a shape no
+// pinned layout accepts IS a loss, and is.
+func jiraDueDate(raw string) (*time.Time, []FieldNote) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	t, ok := parseJiraTime(raw)
+	if !ok {
+		return nil, []FieldNote{{Field: fieldDueDate, Value: raw, Via: viaUnparseableDate}}
+	}
+	return &t, nil
+}
+
+// jiraCompletedAt maps Jira's `resolutiondate` — and refuses it unless the issue imported as done.
+//
+// ⚠ THE DECISION THIS MERGE OWED, DERIVED FROM SHIPPED MECHANICS RATHER THAN TASTE. Jira resolves
+// "Won't Do" as well as "Done", so a CANCELLED issue carries a resolutiondate. Track's own rule is
+// issue.Store.Update: a status transition onto "done" stamps completed_at and any transition away
+// CLEARS it. So completed_at on a non-done row is a state no Track path can produce, and the first
+// status edit through the API would erase it without a word. It is not free either — analytics'
+// resolution-stats query selects on `completed_at IS NOT NULL` with NO status predicate, so an
+// abandoned issue carrying one is counted as delivered work in cycle time and throughput.
+// The refusal is REPORTED, because a deliberate drop nobody is told about is indistinguishable from
+// the silent ones #71, #72 and #73 each found one field over.
+//
+// ⚠ THE COARSENESS INHERITED FROM #73 IS ON THE REPORT, NOT HIDDEN: a cancellation-shaped name the
+// mapper does not know resolves via statusCategory `done` to Track "done", so it DOES get a
+// completion time. That is #73's stated trade (Jira files "Won't Do" under the `done` category), and
+// the status warning names the path that decided it.
+func jiraCompletedAt(raw string, status model.IssueStatus) (*time.Time, []FieldNote) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	t, ok := parseJiraTime(raw)
+	if !ok {
+		return nil, []FieldNote{{Field: fieldResolutionDate, Value: raw, Via: viaUnparseableDate}}
+	}
+	if status != model.StatusDone {
+		return nil, []FieldNote{{Field: fieldResolutionDate, Value: raw, Mapped: string(status), Via: viaStatusNotDone}}
+	}
+	return &t, nil
 }
 
 // resolveJiraStatusCategory is the second chance an unrecognised Jira status NAME gets. It never
