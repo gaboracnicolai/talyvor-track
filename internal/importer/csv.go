@@ -154,6 +154,14 @@ func (n FieldNote) render(count int) string {
 	case n.Via == viaStatusNotDone:
 		return fmt.Sprintf("%s %q on %d issue(s) not recorded — the issue imported as %q, and Track records a completion time only on %q",
 			n.Field, n.Value, count, n.Mapped, model.StatusDone)
+	case n.Via == viaResolutionCancelled:
+		// The one line in this file that reports a mapping being OVERTURNED rather than a value
+		// being dropped, so it names both the old answer and the new one.
+		return fmt.Sprintf("%s %q on %d issue(s) — Track reads that word as %q, so the issue imported as %q rather than %q and carries no completion time",
+			n.Field, n.Value, count, n.Mapped, n.Mapped, model.StatusDone)
+	case n.Via == viaResolutionUnreadable:
+		return fmt.Sprintf("%s %q on %d issue(s) — Track cannot read that word as finished-or-abandoned, so the issue imported as %q unchanged",
+			n.Field, n.Value, count, n.Mapped)
 	case n.Via == viaCategory && n.ViaResolved:
 		return fmt.Sprintf("%s — resolved via statusCategory %q as %q", subject, n.ViaValue, n.Mapped)
 	case n.Via == viaCategory:
@@ -451,6 +459,11 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	rawStatus, rawPrio := ci.get(row, "Status"), ci.get(row, "Priority")
 	status, statusOK := mapJiraStatus(rawStatus)
 	prio, prioOK := mapJiraPriority(rawPrio)
+	// The Resolution column says whether resolved work was FINISHED or ABANDONED, and it runs
+	// BEFORE the date mapping below because that mapping gates on the status this line can change.
+	// It can only ever move done → cancelled, and it invents no vocabulary — see
+	// jira_csv_resolution.go for the measurement and the refusal.
+	status, resolutionNotes := applyJiraCSVResolution(ci.get(row, jiraCSVResolutionColumn), status)
 	// The two date columns a real export carries and this mapper read for six merges as if they
 	// were not there. Both are measured — column spelling and serialisation — in
 	// jira_csv_dates.go; both REPORT a value they cannot place rather than nil'ing it.
@@ -467,8 +480,19 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			CompletedAt: completed,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			append(dueNotes, completedNotes...)...),
+			concatNotes(resolutionNotes, dueNotes, completedNotes)...),
 	}, nil
+}
+
+// concatNotes joins the per-field note lists into one. It exists because the nested `append(a,
+// append(b, c...)...)` this replaced APPENDS INTO ITS FIRST ARGUMENT'S BACKING ARRAY, and with a
+// third list to join that is a real aliasing hazard rather than a style preference.
+func concatNotes(lists ...[]FieldNote) []FieldNote {
+	var out []FieldNote
+	for _, l := range lists {
+		out = append(out, l...)
+	}
+	return out
 }
 
 func mapJiraStatus(s string) (model.IssueStatus, bool) {
