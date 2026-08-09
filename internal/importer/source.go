@@ -58,7 +58,7 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		issueModel := row.Issue
 		issueModel.WorkspaceID = workspaceID
 		issueModel.TeamID = teamID
-		issueModel.CreatorID = "importer"
+		issueModel.CreatorID = model.ImporterCreatorID // the ONLY provenance a re-import can key on — see the const
 
 		// An issue carrying an Identifier came from an API provider (C.3) → route through C.2's re-import
 		// upsert (land on the provider-key, INSERT-or-UPDATE). CSV rows carry no Identifier → Create, as

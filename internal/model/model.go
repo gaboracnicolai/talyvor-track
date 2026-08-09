@@ -62,6 +62,13 @@ const (
 	StatusCancelled  IssueStatus = "cancelled"
 )
 
+// ImporterCreatorID is the creator_id the import pipeline stamps on every row it writes
+// (importer.run). It is the ONLY provenance Track has for "this issue came from a provider
+// import", and issue.Store.UpsertByIdentifier keys its re-import policy on it: a provider may
+// update the rows the importer created and may not overwrite one a user created. Both halves
+// must agree on this exact string, which is why it lives here rather than as two literals.
+const ImporterCreatorID = "importer"
+
 type IssuePriority int
 
 const (

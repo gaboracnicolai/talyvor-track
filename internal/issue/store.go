@@ -215,7 +215,7 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 		}
 	}
 
-	nextNumber, err := s.nextIssueNumber(ctx, issue.TeamID)
+	nextNumber, err := s.nextIssueNumber(ctx, issue.TeamID, issue.WorkspaceID, teamIdentifier)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +237,44 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 	))
 }
 
-// nextIssueNumber computes the next per-team issue number (COALESCE(MAX(number),0)+1). Shared by Create and
-// UpsertByIdentifier so both allocate numbers identically. The (team_id, number) UNIQUE constraint catches
-// the race between two concurrent allocators picking the same number — callers retry.
-func (s *Store) nextIssueNumber(ctx context.Context, teamID string) (int, error) {
+// identifierScanBound caps how far past MAX(number)+1 the allocator will look for a number whose derived
+// identifier is free. Only imported provider keys can occupy those identifiers, so the gap is the size of
+// the imported key range that overlaps this team's numbering — large in theory, bounded here so a pathological
+// import can never turn issue creation into an unbounded scan. Exceeding it is a loud error, not a wedge.
+const identifierScanBound = 10000
+
+// nextIssueNumber computes the next per-team issue number: COALESCE(MAX(number),0)+1, advanced past any
+// number whose DERIVED identifier ("<teamIdentifier>-<number>") is already taken in the workspace. Shared by
+// Create and UpsertByIdentifier so both allocate numbers identically. The (team_id, number) UNIQUE constraint
+// catches the race between two concurrent allocators picking the same number — callers retry.
+//
+// WHY THE IDENTIFIER CHECK EXISTS. MAX(number)+1 alone is only safe while every identifier in the workspace
+// was derived from a number. An API import breaks that: the row keeps the PROVIDER's key (ENG-3) but takes a
+// Track-allocated number (1), so the two disagree, and the allocator — which counts numbers and never looks
+// at identifiers — walks straight into the provider's key and violates UNIQUE (workspace_id, identifier).
+// MEASURED before this guard existed: import ENG-3 into a team called ENG, and the SECOND native issue
+// creation fails; because a failed INSERT does not advance MAX(number), the same number is retried forever
+// and the team can never create another issue. Advancing past taken identifiers costs one index probe in the
+// normal case (the first candidate is free) and makes that state unreachable.
+func (s *Store) nextIssueNumber(ctx context.Context, teamID, workspaceID, teamIdentifier string) (int, error) {
+	const nextNumberSQL = `
+        WITH start AS (
+            SELECT COALESCE(MAX(number), 0) + 1 AS n FROM issues WHERE team_id = $1
+        )
+        SELECT g FROM start, generate_series(start.n, start.n + $4::int) AS g
+         WHERE NOT EXISTS (
+               SELECT 1 FROM issues
+                WHERE workspace_id = $2 AND identifier = $3 || '-' || g
+         )
+         ORDER BY g
+         LIMIT 1`
 	var n int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`, teamID,
-	).Scan(&n); err != nil {
+	err := s.pool.QueryRow(ctx, nextNumberSQL, teamID, workspaceID, teamIdentifier, identifierScanBound).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("issue: no free identifier for team %q within %d numbers of the next issue number "+
+			"(imported provider keys occupy the whole range)", teamIdentifier, identifierScanBound)
+	}
+	if err != nil {
 		return 0, fmt.Errorf("issue: compute next number: %w", err)
 	}
 	return n, nil
@@ -305,7 +335,7 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 
 	// A number for the INSERT branch (shared with Create). On CONFLICT this value is discarded — the existing
 	// row keeps its number.
-	nextNumber, err := s.nextIssueNumber(ctx, issue.TeamID)
+	nextNumber, err := s.nextIssueNumber(ctx, issue.TeamID, issue.WorkspaceID, teamIdentifier)
 	if err != nil {
 		return nil, false, err
 	}
@@ -324,6 +354,12 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
         updated_at  = NOW()
         -- OMITTED (PRESERVE local workflow):        status, priority
         -- OMITTED (NEVER TOUCH money + attribution): ai_cost_usd, ai_tokens, lens_feature
+      WHERE issues.creator_id = '` + model.ImporterCreatorID + `'
+        -- ^ "provider is source of truth" is true of the rows the PROVIDER put here, and of no
+        --   others. Track derives a native issue's key itself (Create: "<team>-<number>") and both
+        --   providers emit that same shape — Linear ENG-123, Jira PROJ-123 — so a team called ENG
+        --   in Track and a team called ENG in Linear collide in this one un-namespaced column.
+        --   Without this predicate the import UPDATEs a user's issue and reports it as Imported.
     RETURNING (xmax = 0) AS inserted, ` + issueColumns
 
 	var inserted bool
@@ -332,10 +368,23 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 		inserted: &inserted,
 	})
 	if err != nil {
+		// The conflicting row exists but is not the importer's: the DO UPDATE ... WHERE matched nothing, so
+		// RETURNING produced no row. Say exactly that — the caller (importer.run) tallies it as Skipped with
+		// this message, which is the difference between "we did not import one issue" and a silent overwrite.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, fmt.Errorf(
+				"issue: %q already exists in this workspace and was not created by an import; refusing to overwrite it: %w",
+				issue.Identifier, ErrIdentifierNotImportOwned)
+		}
 		return nil, false, err
 	}
 	return out, inserted, nil
 }
+
+// ErrIdentifierNotImportOwned is returned by UpsertByIdentifier when the provider key collides with an issue
+// this workspace created itself. Exported so a caller can distinguish "this one row could not land" from a
+// transport or tenancy failure; importer.run reports it per-row and continues, as it does any row error.
+var ErrIdentifierNotImportOwned = errors.New("identifier not owned by an import")
 
 // insertedScanner adapts a row whose projection is `(xmax=0) AS inserted, ` + issueColumns so scanIssue (which
 // scans exactly issueColumns) can be reused unchanged: it prepends &inserted to the scan destinations.
