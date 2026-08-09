@@ -5,7 +5,10 @@
 // pointers so a missing value distinguishes from a zero value.
 package model
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Workspace is the top-level tenant. Every team, project, issue,
 // member, and cycle belongs to exactly one workspace.
@@ -68,6 +71,22 @@ const (
 // update the rows the importer created and may not overwrite one a user created. Both halves
 // must agree on this exact string, which is why it lives here rather than as two literals.
 const ImporterCreatorID = "importer"
+
+// ErrIdentifierNotImportOwned is the outcome of the refusal ImporterCreatorID exists to make: a
+// provider key collided with an issue a HUMAN created, so UpsertByIdentifier declined to overwrite
+// it. issue.Store returns it (wrapped); importer.run tests for it with errors.Is.
+//
+// It lives here for the same reason ImporterCreatorID does — both halves must agree on ONE value,
+// and here the agreement is load-bearing in a way a string is not: errors.Is compares IDENTITY, so
+// two packages each declaring their own "identifier not owned by an import" would compare unequal
+// and the importer would silently classify every refusal as a failure. That is precisely the state
+// this constant was introduced to end, so it may not be reachable by re-declaration.
+//
+// ⚠ WHY THE IMPORTER MUST DISTINGUISH IT AT ALL, measured at dcfbaa3 and stated where the next
+// reader looks: a refused row is not a failed row. It is the system working exactly as designed —
+// #71 built the refusal so an import cannot overwrite a human's issue — and before this was wired
+// up an import that protected three human-written issues reported {status:"failed", failed:3}.
+var ErrIdentifierNotImportOwned = errors.New("identifier not owned by an import")
 
 type IssuePriority int
 
