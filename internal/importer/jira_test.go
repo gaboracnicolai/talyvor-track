@@ -64,15 +64,21 @@ func TestADFToText(t *testing.T) {
 		{"type":"paragraph","content":[{"type":"text","text":"Hello "},{"type":"text","text":"world"}]},
 		{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"item"}]}]}]}
 	]}`
-	if got := adfToText(json.RawMessage(multi)); got != "Hello world\nitem" {
-		t.Fatalf("adf multi = %q, want \"Hello world\\nitem\"", got)
+	// adfToText grew a second return in the ADF-attrs merge (see adf_attrs.go). These three call
+	// sites are updated for the signature ONLY — every existing assertion is unchanged, and the new
+	// value is asserted to be EMPTY on all three, which is what says this merge added no warning to
+	// a document that loses nothing.
+	if got, notes := adfToText(json.RawMessage(multi)); got != "Hello world\nitem" || len(notes) != 0 {
+		t.Fatalf("adf multi = %q notes=%#v, want \"Hello world\\nitem\" and no notes", got, notes)
 	}
 	// must not crash on any shape
 	for _, weird := range []string{``, `null`, `{}`, `{"type":"doc"}`, `{"type":"doc","content":[{"type":"rule"}]}`, `[]`, `123`} {
-		_ = adfToText(json.RawMessage(weird))
+		if _, notes := adfToText(json.RawMessage(weird)); len(notes) != 0 {
+			t.Fatalf("shape %s produced notes %#v — none of these loses content", weird, notes)
+		}
 	}
-	if got := adfToText(json.RawMessage(`"plain description"`)); got != "plain description" {
-		t.Fatalf("plain-string description = %q, want passthrough", got)
+	if got, notes := adfToText(json.RawMessage(`"plain description"`)); got != "plain description" || len(notes) != 0 {
+		t.Fatalf("plain-string description = %q notes=%#v, want passthrough and no notes", got, notes)
 	}
 }
 
