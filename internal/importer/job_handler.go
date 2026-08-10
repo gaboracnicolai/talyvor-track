@@ -69,10 +69,24 @@ func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
 		h.createAPI(w, r)
 		return
 	}
-	if err := r.ParseMultipartForm(jobMaxUploadBytes); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())
-		return
-	}
+	// WHO MAY IMPORT is decided before WHAT IS BEING IMPORTED is read — the same ordering
+	// `6d5824b` (#90) established on the SYNC routes, which left this handler, the other and
+	// only other multipart call site in the repo, untouched.
+	//
+	// ⚠ THE PARSE USED TO RUN HERE, SEVENTEEN LINES ABOVE THE MEMBERSHIP CHECK, AND THAT COST
+	// A 403'd CALLER'S WHOLE UPLOAD. MEASURED on 6d5824b against real Postgres on the
+	// production middleware stack: a caller with a valid gateway identity and NO membership in
+	// the target workspace POSTed 4 MiB to /v1/import/jobs and the server read all 4,194,830
+	// bytes of it before answering "not a member of this workspace". This is the ASYNC surface
+	// — the one built so a bulk import can outlive the inline 30s timeout, i.e. the one the
+	// large uploads are meant to use, bounded only by httpx.ImportMaxBody (96 MiB).
+	//
+	// Nothing moved above the parse reads the body: workspace_id/team_id/source_type come from
+	// r.URL.Query() (NOT r.FormValue, so no parse dependency) and the memberships were already
+	// resolved into the request context by the T10 middleware. Held by
+	// TestJobHandler_NonMemberUploadIsNotRead, which asserts the non-member's read is ZERO and
+	// requires a byte-identical member upload to be read in full and persist its payload row,
+	// so the zero cannot come from an empty fixture.
 	workspaceID := r.URL.Query().Get("workspace_id")
 	teamID := r.URL.Query().Get("team_id")
 	sourceType := r.URL.Query().Get("source_type")
@@ -89,6 +103,10 @@ func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
 	m, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID)
 	if !ok {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	if err := r.ParseMultipartForm(jobMaxUploadBytes); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())
 		return
 	}
 	file, _, err := r.FormFile("file")
