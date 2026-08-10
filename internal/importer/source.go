@@ -228,13 +228,67 @@ func (s *csvSource) Next() (SourceRow, bool) {
 	if err != nil {
 		return SourceRow{RowNum: s.rowNum, Err: fmt.Errorf("row %d: %v", s.rowNum, err)}, true
 	}
-	// Catch raggedly-short rows that csv.Read tolerates because of FieldsPerRecord=-1.
+	// A raggedly-short row that csv.Read tolerates because of FieldsPerRecord=-1 is REPORTED and
+	// mapped, not refused.
+	//
+	// ⚠ THIS USED TO BE A REFUSAL AND THE REFUSAL WAS THE DEFECT. It read:
+	//
+	//	if len(row) < s.expectedCols { return ...Err: "row N: expected X columns, got Y" }, true
+	//
+	// which put a whole-header width test in front of a mapper that reads twelve columns, all of
+	// them in the first two thirds of every measured header. Two things make that wrong rather than
+	// strict, and both are measured:
+	//
+	//  · columnIndex.get and getAll are ALREADY bounds-safe and say so — get's doc comment reads
+	//    "Returns "" if the column doesn't exist OR THE ROW IS TOO SHORT — that lets row-level
+	//    validation focus on what's required (title) rather than how the export was shaped". Since
+	//    every index comes from the header (so is < expectedCols) and no narrower row could reach a
+	//    mapper, the bounds guard in BOTH accessors was structurally unreachable. The package
+	//    documented the tolerant behaviour and three lines of this function prevented it.
+	//
+	//  · scripts/w34-linear-csv-short-row-probe.py, whole-population over the same corpus of REAL
+	//    Linear exports #99/#100/#101 used: 45 files · 3,099 data rows · 73 rows (2.4%) narrower
+	//    than their header, from TWO UNRELATED OWNERS, every one short by EXACTLY ONE column, and in
+	//    all 73 the missing header is `Roadmaps` — the last column of the 30-wide shape, empty in
+	//    every file that does emit it. In BOTH files that carry them the short rows are 100% of the
+	//    data, so those two exports imported NOTHING and were reported to the operator as
+	//    {status:"failed", imported:0, failed:N}.
+	//
+	// ⚠ ALIGNMENT WAS THE THING THAT HAD TO BE MEASURED, because importing a MISALIGNED row would
+	// write garbage and refusing it would be right. For all 73, at their header index: ID matches
+	// ^PREFIX-<int>$ 73/73 · Title non-empty 73/73 · Status in mapLinearStatus 73/73 · Priority in
+	// mapLinearPriority 73/73 · Created DATE-SHAPED at its index 73/73.
+	//
+	// ⚠ THAT LAST ONE IS THE ALIGNMENT QUESTION AND NOT THE PARSING ONE, and the two are worth
+	// keeping apart because the answers differ: `Created` PARSES under a pinned layout on 0 of the
+	// 73. All 73 carry JavaScript's Date.toString — the shape #101 measured at 25.3% of real
+	// `Updated` cells and deliberately did NOT add to linearCSVTimeLayouts. So every one of these
+	// rows now imports AND reports an unpinned date, which is two true sentences where there used
+	// to be one false one ("row 2: expected 30 columns, got 29"). An earlier draft of the probe
+	// measured date-SHAPEDNESS and wrote the number down under the parsing predicate's name; the
+	// two are separate lines in scripts/w34-linear-csv-short-row-probe.py for that reason.
+	//
+	// ⚠ THE REFUSAL IS NARROWED, NOT DELETED, and the narrowing is the mapper's own required-field
+	// check: a row cut back past `Title` still does not land, refused by errEmptyTitle. That case is
+	// pinned by TestLinearCSV_ARowTruncatedPastTheTitleIsStillRefused, which asserts the ERROR
+	// MESSAGE rather than the skip count — both this code and the old code skip that row, and only
+	// the message says which one did it.
+	//
+	// ⚠ AND IT IS NEVER SILENT. The row carries a note, so an export whose truncation DID reach a
+	// column the mapper reads says so, once, with a count, instead of the caller seeing a column of
+	// empties that looks exactly like a column the provider left blank. That also moves this class
+	// out of the UNBOUNDED ImportResult.Errors and into the bounded Warnings #80 built.
+	var notes []FieldNote
 	if len(row) < s.expectedCols {
-		return SourceRow{RowNum: s.rowNum, Err: fmt.Errorf("row %d: expected %d columns, got %d", s.rowNum, s.expectedCols, len(row))}, true
+		notes = append(notes, FieldNote{
+			Field: fieldRowWidth,
+			Value: fmt.Sprintf("%d of %d columns", len(row), s.expectedCols),
+			Via:   viaShortRow,
+		})
 	}
 	mapped, err := s.mapper(s.ci, row)
 	if err != nil {
 		return SourceRow{RowNum: s.rowNum, Err: fmt.Errorf("row %d: %v", s.rowNum, err)}, true
 	}
-	return SourceRow{Issue: mapped.issue, RowNum: s.rowNum, Notes: mapped.notes}, true
+	return SourceRow{Issue: mapped.issue, RowNum: s.rowNum, Notes: concatNotes(notes, mapped.notes)}, true
 }
