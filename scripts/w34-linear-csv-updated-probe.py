@@ -27,10 +27,16 @@ search that returns a clean answer:
   N3  a fabricated path in a real repository       must refuse
 A run where any of these SUCCEEDS is a broken instrument and prints INSTRUMENT FAILED.
 
-It writes every distinct raw date cell it saw to /tmp/w34-linear-csv-date-cells.txt so that the
-GO side (TestRealLinearExportDateCellsParse) can apply the REAL parseLinearCSVTime to them rather
-than a Python re-implementation of it — a re-implementation would be a guard referencing its own
-idea of the constant instead of the product's.
+It also measures the `Status` column against mapLinearStatus's vocabulary. That section reports a
+CLEAN result and is kept so nobody re-derives it: 2,985 of 3,026 real cells (98.6%) are recognised.
+The worry it was written to test — that Linear teams rename workflow states freely, so a CSV import
+would classify a large fraction as backlog — is NOT supported by this corpus. The 41 that miss are
+`Duplicate` (27, four unrelated owners — Linear's own `duplicate` state, which mapLinearStateType
+deliberately refuses to classify and reports), a header row leaked into the data (6), `Blocked` (6),
+`QA` (1) and `Pending Release` (1). A measured zero is worth as much as a measured defect when the
+alternative is a fifth session re-deriving it.
+
+It writes every distinct raw date cell it saw to /tmp/w34-linear-csv-date-cells.txt.
 
 Requires `gh` authenticated. Read-only: GET only, no writes to any repository.
 """
@@ -126,6 +132,8 @@ def main():
     shape_widths = {c: {} for c in DATE_COLUMNS}
     samples = {c: [] for c in DATE_COLUMNS}
     all_cells = set()
+    status_counts = {}
+    status_owners = {}
 
     for line in items:
         repo, path = line.split("\t", 1)
@@ -145,10 +153,16 @@ def main():
             if c in hdr:
                 col_in_header[c] += 1
                 idx[c] = hdr.index(c)
+        i_status = hdr.index("Status") if "Status" in hdr else None
         for row in rdr:
             if not row or len(row) != len(hdr):
                 continue
             rows_total += 1
+            if i_status is not None:
+                sv = row[i_status].strip()
+                if sv:
+                    status_counts[sv] = status_counts.get(sv, 0) + 1
+                    status_owners.setdefault(sv, set()).add(repo.split("/")[0])
             for c, i in idx.items():
                 v = row[i].strip()
                 if not v:
@@ -191,6 +205,24 @@ def main():
             print(f"    {shapes[c][s]:>6}  {s}")
             print(f"            owners={len(owners)} {owners}")
             print(f"            header widths={widths}")
+
+    # ── the Status column, against the vocabulary the mapper actually knows ──
+    #
+    # mapLinearStatus's case literals, TRANSCRIBED BY HAND from internal/importer/csv.go rather
+    # than parsed out of it: a classifier that derives its vocabulary from the code it is judging
+    # agrees with that code for every possible value. Anything outside this set imports as
+    # model.StatusBacklog and is REPORTED — the question this section answers is HOW OFTEN.
+    KNOWN = {"backlog", "todo", "to do", "in progress", "in_progress", "in review", "in_review",
+             "done", "completed", "cancelled", "canceled"}
+    print("\n== THE `Status` COLUMN vs mapLinearStatus's VOCABULARY ==")
+    known_n = sum(n for s, n in status_counts.items() if s.strip().lower() in KNOWN)
+    unknown = {s: n for s, n in status_counts.items() if s.strip().lower() not in KNOWN}
+    total_s = sum(status_counts.values())
+    print(f"  {total_s} non-empty Status cells · recognised {known_n} · UNRECOGNISED {sum(unknown.values())}")
+    if total_s:
+        print(f"  unrecognised share: {100.0 * sum(unknown.values()) / total_s:.1f}%")
+    for s, n in sorted(unknown.items(), key=lambda kv: -kv[1])[:15]:
+        print(f"    {n:>5}  {s!r}   owners={sorted(status_owners[s])}")
 
     with open(CELLS_OUT, "w") as fh:
         for v in sorted(all_cells):
