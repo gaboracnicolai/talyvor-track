@@ -40,6 +40,18 @@ import (
 //     measurement; TestJiraCSVTime_TheLayoutListIsExactlyWhatWasMeasured fails on a layout added
 //     without bytes behind it.
 //
+//     ⚠⚠ THAT PARAGRAPH WAS A STATED LIMIT, NOT A MEASUREMENT, AND WHEN IT WAS FINALLY MEASURED
+//     THE ONE-ENTRY LIST TURNED OUT TO REFUSE 91.9% OF THE POPULATION. "another tenant's export
+//     may not be this shape at all" was written as a caveat and read for four merges as a
+//     residual risk; the corpus that would have answered it was ALREADY CACHED for this
+//     package's status-category and priority censuses. Applying THE SHIPPED parseJiraCSVTime to
+//     every cell of the four date columns of 301 real exports: 3,268 accepted, 37,255 REFUSED,
+//     and 298 of 301 files carry at least one refused cell. Per column — Created 90.4% refused
+//     (296 of 299 files lose EVERY cell), Updated 89.4% (290 of 293), Due Date 100.0% (119 of
+//     119), Resolved 100.0% (178 of 178). See jira_csv_two_digit_year.go for the shape census,
+//     for what is still refused and why it is NOT guessed at, and for the compound silence the
+//     two losses produce together.
+//
 //  2. THE EXPORT CARRIES NO TIMEZONE. "25/Mar/2025 10:03 AM" is rendered in the EXPORTING USER's
 //     timezone and the offset is nowhere in the file, so the instant below is that wall-clock time
 //     read as UTC and may be up to ±14h from the true instant. Nothing in the CSV can close this —
@@ -47,8 +59,18 @@ import (
 //     instant. For `Due Date`, which Jira always renders at midnight, the DATE is the meaningful
 //     part and survives; for `Resolved` it is a real approximation and is recorded here rather than
 //     discovered later in a cycle-time chart.
+//
+// Each entry carries the number of cells IN THE CORPUS that it is the first to accept, so no line
+// here is a guess. Three further shapes were evaluated and DROPPED for scoring zero — an entry with
+// no bytes behind it is exactly what limit (1) above forbids.
 var jiraCSVTimeLayouts = []string{
-	"2/Jan/2006 3:04 PM", // every value measured above; `2` and `3` also tolerate a padded day/hour
+	"2/Jan/2006 3:04 PM",  //  3,268 — the original probe's shape; `2` and `3` also tolerate a padded day/hour
+	"2/Jan/06 3:04 PM",    // 27,147 — the same shape with a two-digit year, and the single commonest in the corpus
+	"2/Jan/06 15:04",      //  2,133 — two-digit year, 24-hour clock
+	"2006-01-02 15:04",    //  1,228 — ISO-ish, space-separated
+	"2006-01-02 15:04:05", //    360 — the same with seconds
+	"Jan/2/06 3:04 PM",    //    212 — month-first, two-digit year
+	"2/Jan/06",            //     10 — date only; Jira renders Due Date at midnight, so some instances drop the time
 }
 
 // parseJiraCSVTime returns the instant and true, or false if no pinned layout accepts the value. A
