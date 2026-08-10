@@ -301,24 +301,41 @@ func TestJiraCSVColumns_ANeighbouringDateColumnIsNotRead(t *testing.T) {
 	}
 }
 
-// ⚠ THE LINEAR CSV HALF IS DELIBERATELY UNTOUCHED, AND THIS TEST IS WHY IT CANNOT DRIFT SHUT
-// QUIETLY. Linear's CSV export is produced in-app behind authentication; nothing in this
-// environment can fetch one, so its column spellings and its date serialisation are UNMEASURED.
-// #75 caught this exact package lending one provider's provenance to another once already, and
-// guessing "Due Date"/"Completed" for Linear would be the same move. linearRowMapper therefore still
-// maps five fields, and this pins that as a KNOWN GAP rather than an oversight — whoever gets a real
-// Linear export deletes this test and does the #74 merge on the other transport.
-func TestLinearCSVMapper_StillReadsNoDates_AKnownUnmeasuredGap(t *testing.T) {
-	ci := buildIndex([]string{"Title", "Status", "Priority", "Due Date", "Completed"})
-	got, err := linearRowMapper(ci, []string{"Ship it", "Done", "High", "2025-01-19", "2025-03-25"})
+// ⚠ THIS TEST'S PREDECESSOR PINNED THE WHOLE LINEAR CSV DATE GAP AS UNMEASURED, AND EXACTLY HALF OF
+// ITS REASON SURVIVED BEING CHECKED. It read:
+//
+//	"Linear's CSV export is produced in-app behind authentication; nothing in this environment can
+//	 fetch one, so its column spellings AND its date serialisation are UNMEASURED … guessing
+//	 'Due Date'/'Completed' for Linear would be the same move [as #75]."
+//
+// The SERIALISATION half is still true and is now stated where it binds, on linearCSVTimeLayouts,
+// with the refusal that makes it honest. The SPELLING half is not: Linear's own importer
+// documentation names the header its Export CSV produces — Title · Description · Priority · Status
+// · Assignee · Created · Completed · Labels · Estimate — and this package's fixtures have carried
+// that exact header since csv_test.go was written. `Created` and `Completed` are therefore read.
+//
+// ⚠ AND THE PREDECESSOR'S OWN FIXTURE IS THE EVIDENCE THAT THE SPELLINGS MATTERED: it guessed a
+// "Due Date" column for Linear, and the documented export HAS NO DUE-DATE COLUMN AT ALL. So the gap
+// this now pins is the one that is still real — a due date read out of some neighbouring column
+// would be invented, which is the Linear twin of the "Custom field (Target Release Date)" trap the
+// test above guards on the Jira side. Whoever gets a real Linear export re-measures the layouts;
+// nobody should make this mapper grow a due date without one.
+func TestLinearCSVMapper_ReadsTheDocumentedDatesAndInventsNoOthers(t *testing.T) {
+	ci := buildIndex([]string{"Title", "Status", "Priority", "Due Date", "Completed", "Created"})
+	got, err := linearRowMapper(ci, []string{"Ship it", "Done", "High", "2025-01-19", "2025-03-25", "2025-01-02"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.issue.DueDate != nil || got.issue.CompletedAt != nil {
-		t.Fatalf("linearRowMapper now reads dates (due=%v completed=%v) — if that was deliberate, this "+
-			"test should have been deleted along with the reason above, and the column spellings and "+
-			"date shape need a measurement behind them",
-			got.issue.DueDate, got.issue.CompletedAt)
+	if got.issue.DueDate != nil {
+		t.Errorf("DueDate = %v — Linear's documented export carries no due-date column, so this was "+
+			"read out of a column whose meaning is unmeasured", got.issue.DueDate)
+	}
+	if got.issue.CompletedAt == nil {
+		t.Errorf("CompletedAt = nil for a Done row whose %q column said 2025-03-25", linearCSVCompletedColumn)
+	}
+	if got.issue.CreatedAt.IsZero() {
+		t.Errorf("CreatedAt is zero for a row whose %q column said 2025-01-02 — it will take the "+
+			"created_at DEFAULT NOW() and read as opened at import time", linearCSVCreatedColumn)
 	}
 }
 
