@@ -327,7 +327,7 @@ func TestRun_AbsentStatusColumnIsReported(t *testing.T) {
 
 func TestJiraSource_CarriesTheNote(t *testing.T) {
 	page := `{"issues":[{"key":"PROJ-7","fields":{"summary":"Ship it","description":null,` +
-		`"status":{"name":"Deployed"},"priority":{"name":"P1"},"labels":[],"created":"` + fixtureJiraCreated + `"}}],"isLast":true}`
+		`"status":{"name":"Deployed"},"priority":{"name":"P1"},"labels":[],"created":"` + fixtureJiraCreated + `","updated":"` + fixtureJiraUpdated + `"}}],"isLast":true}`
 	srv := httptest.NewServer(cannedPages([]string{page}, `{"issues":[],"isLast":true}`))
 	defer srv.Close()
 	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
@@ -348,7 +348,7 @@ func TestJiraSource_CarriesTheNote(t *testing.T) {
 func TestLinearSource_CarriesTheNote(t *testing.T) {
 	page := `{"data":{"team":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":""},` +
 		`"nodes":[{"identifier":"ENG-7","title":"Dup","description":"","state":{"name":"Duplicate"},` +
-		`"priority":9,"labels":{"nodes":[]},"createdAt":"` + fixtureLinearCreated + `"}]}}}}`
+		`"priority":9,"labels":{"nodes":[]},"createdAt":"` + fixtureLinearCreated + `","updatedAt":"` + fixtureLinearUpdated + `"}]}}}}`
 	srv := httptest.NewServer(cannedPages([]string{page}, `{"data":{"team":{"issues":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}`))
 	defer srv.Close()
 	src := newLinearSource("tok", "TEAM", srv.URL, srv.Client())

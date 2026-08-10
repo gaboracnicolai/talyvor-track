@@ -23,8 +23,8 @@ func jiraIssueJSON(key, summary, adf, status, prio string) string {
 	if desc == "" {
 		desc = "null"
 	}
-	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":%s,"status":{"name":%q},"priority":{"name":%q},"labels":["x"],"created":%q}}`,
-		key, summary, desc, status, prio, fixtureJiraCreated)
+	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":%s,"status":{"name":%q},"priority":{"name":%q},"labels":["x"],"created":%q,"updated":%q}}`,
+		key, summary, desc, status, prio, fixtureJiraCreated, fixtureJiraUpdated)
 }
 
 // (c) JIRA PAGINATION: nextPageToken then isLast=true → all issues yielded, Identifier=issue.key.

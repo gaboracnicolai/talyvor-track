@@ -275,3 +275,47 @@ func TestUpsertByIdentifier_IgnoresACreatedAtFromANonImporter(t *testing.T) {
 			out.CreatedAt.UTC().Format(time.RFC3339))
 	}
 }
+
+func TestUpsertByIdentifier_LandsTheProvidersLastTouchedTime(t *testing.T) {
+	d := testutil.New(t)
+	ws := d.Workspace(t)
+	team := d.Team(t, ws.ID)
+	s := issue.NewStore(d.Pool)
+
+	touched := time.Now().UTC().Add(-200 * 24 * time.Hour).Truncate(time.Second)
+	iss := baseImport(ws.ID, team.ID)
+	iss.UpdatedAt = touched
+	out, _ := mustUpsert(t, s, iss)
+
+	if delta := out.UpdatedAt.UTC().Sub(touched); delta > time.Minute || delta < -time.Minute {
+		t.Errorf("updated_at = %s, want %s — off by %s. The column is DEFAULT NOW() and this "+
+			"statement named it only in the conflict arm, so an INSERTed row carried the import "+
+			"instant: the issue list (ORDER BY updated_at DESC) put a years-stale import above "+
+			"today's work and rendered it as 'updated just now'.",
+			out.UpdatedAt.UTC().Format(time.RFC3339), touched.Format(time.RFC3339), delta)
+	}
+}
+
+// TestUpsertByIdentifier_IgnoresAnUpdatedAtFromANonImporter is the gate, and the SAME CAVEAT its
+// created_at twin states applies verbatim: no shipped caller can reach this state today, because
+// importer.run stamps CreatorID = ImporterCreatorID unconditionally before every call. The rule is
+// asserted here anyway, for the same reason — the method is EXPORTED, and updated_at is what the
+// product orders its main screen by, so a caller who can choose it can pin its own row to the top
+// of every list in the workspace forever.
+func TestUpsertByIdentifier_IgnoresAnUpdatedAtFromANonImporter(t *testing.T) {
+	d := testutil.New(t)
+	ws := d.Workspace(t)
+	team := d.Team(t, ws.ID)
+	s := issue.NewStore(d.Pool)
+
+	before := time.Now().UTC().Add(-time.Minute)
+	iss := baseImport(ws.ID, team.ID)
+	iss.CreatorID = "some-real-user-id" // NOT the importer
+	iss.UpdatedAt = time.Now().UTC().Add(-400 * 24 * time.Hour)
+	out, _ := mustUpsert(t, s, iss)
+
+	if out.UpdatedAt.UTC().Before(before) {
+		t.Errorf("updated_at = %s — a non-importer caller supplied its own last-touched instant and "+
+			"it was honoured.", out.UpdatedAt.UTC().Format(time.RFC3339))
+	}
+}
