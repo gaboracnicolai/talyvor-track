@@ -247,9 +247,27 @@ func TestImporter_HeaderOnlyReturnsZeroImported(t *testing.T) {
 	}
 }
 
-func TestImporter_InvalidRowIsSkippedAndLogged(t *testing.T) {
+// TestImporter_ShortRowImportsAndIsReported — WAS TestImporter_InvalidRowIsSkippedAndLogged, and the
+// rename is the honest half of this merge rather than tidying.
+//
+// This test asserted the OLD contract: a mid-stream row with too few columns is SKIPPED. That
+// contract was wrong on real data — 73 of 3,099 rows across 45 real Linear CSV exports are narrower
+// than their header, all by exactly one trailing field, and in the two files that carry them they
+// are 100% of the data, so those exports imported nothing and reported themselves failed. A row
+// narrower than its header is now mapped and REPORTED. See source.go's Next for the measurement and
+// linear_csv_short_row_test.go for the alignment controls.
+//
+// ⚠ THE NAME HAD TO MOVE BECAUSE THE NAME WAS THE ASSERTION. Leaving
+// "InvalidRowIsSkippedAndLogged" on a test that now proves the row is KEPT would leave a sentence
+// in the suite that says the opposite of what the suite checks, and the next person to grep for the
+// old behaviour would find it and believe it.
+//
+// What has NOT changed, and is still asserted here: one bad row never aborts the import, and it is
+// never silent. The row that genuinely cannot be written — no title — is still skipped, by
+// TestImporter_RowsWithEmptyTitleAreSkipped directly below.
+func TestImporter_ShortRowImportsAndIsReported(t *testing.T) {
 	imp, store := newTestImporter()
-	// Mid-stream malformed row: second row has too few columns.
+	// Mid-stream short row: the second row supplies 2 of the header's 9 columns.
 	csv := `ID,Title,Description,Status,Priority,Assignee,Labels,Created,Completed
 A,Good row,d,Backlog,No priority,,,2026-01-01,
 B,bad
@@ -259,17 +277,29 @@ C,Another good,d,Backlog,No priority,,,2026-01-02,
 	if err != nil {
 		t.Fatalf("ImportLinearCSV should not error on a single bad row: %v", err)
 	}
-	if out.Imported != 2 {
-		t.Errorf("Imported = %d, want 2", out.Imported)
+	if out.Imported != 3 {
+		t.Errorf("Imported = %d, want 3 — the short row supplies a Title, which is the only column "+
+			"this importer requires", out.Imported)
 	}
-	if out.Skipped != 1 {
-		t.Errorf("Skipped = %d, want 1", out.Skipped)
+	if out.Skipped != 0 {
+		t.Errorf("Skipped = %d, want 0", out.Skipped)
 	}
-	if len(out.Errors) != 1 {
-		t.Errorf("Errors = %v, want one entry", out.Errors)
+	if len(out.Errors) != 0 {
+		t.Errorf("Errors = %v, want none", out.Errors)
 	}
-	if len(store.created) != 2 {
-		t.Errorf("store got %d, want 2", len(store.created))
+	if len(store.created) != 3 {
+		t.Errorf("store got %d, want 3", len(store.created))
+	}
+	// ⚠ THE LOUDNESS IS THE POINT AND IT IS ASSERTED, not assumed. This row lost seven columns, six
+	// of which this importer reads. Importing it quietly would be strictly worse than the refusal it
+	// replaces; the whole justification for keeping it is that the operator is told.
+	joined := strings.Join(out.Warnings, "\n")
+	if !strings.Contains(joined, "narrower than the header") {
+		t.Errorf("warnings = %v, want a narrow-row line naming the widths", out.Warnings)
+	}
+	if !strings.Contains(joined, "2 of 9 columns") {
+		t.Errorf("warnings = %v, want the two widths — 29 of 30 lost a trailing field nothing reads, "+
+			"2 of 9 lost most of the export, and only the numbers tell them apart", out.Warnings)
 	}
 }
 

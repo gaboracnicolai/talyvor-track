@@ -219,9 +219,20 @@ func TestRun_UpsertErrorClassification(t *testing.T) {
 }
 
 // TestJobRow_GenuineFailureStaysInFailed — the isolation direction, and the reason the two counters
-// are worth separating at all. A raggedly-short CSV row is a REAL failure: it must stay in `failed`
-// and must NOT be laundered into `skipped`. This passes before the change as well as after, so it is
-// positive-controlled rather than trusted (see scripts/w34-refused-rows-controls.py, C5/C6).
+// are worth separating at all. A row this importer cannot write is a REAL failure: it must stay in
+// `failed` and must NOT be laundered into `skipped`. This passes before the change as well as
+// after, so it is positive-controlled rather than trusted (see
+// scripts/w34-refused-rows-controls.py, C5/C6).
+//
+// ⚠ THE FIXTURE WAS RETARGETED AND THE SUBJECT WAS NOT. It used to be a raggedly-short row
+// ("bad-short-row" against a five-column header), on the premise that a short row is a genuine
+// failure. That premise stopped being true: a row narrower than its header is now imported and
+// REPORTED rather than refused, because 73 of 3,099 rows across 45 real Linear exports are in that
+// state with every column this importer reads present and well-formed (see source.go's Next and
+// linear_csv_short_row_test.go). What this test is ABOUT — that a genuine per-row failure lands in
+// `failed` and never in `refused` — is unchanged, so the fixture moved to a row that still genuinely
+// fails: an empty title, refused by the mapper's own errEmptyTitle. Nothing here was relaxed; the
+// example was swapped for one that is still an example.
 func TestJobRow_GenuineFailureStaysInFailed(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
@@ -231,7 +242,7 @@ func TestJobRow_GenuineFailureStaysInFailed(t *testing.T) {
 	jobs := NewJobStore(d.Pool)
 	mixed := "Title,Description,Status,Priority,Labels\n" +
 		"Good A,d,Todo,High,bug\n" +
-		"bad-short-row\n" +
+		",d,Todo,High,bug\n" + // empty TITLE — the genuine per-row failure this test is about
 		"Good B,d,Done,Low,ui\n"
 	jobID, err := jobs.Create(ctx, ws.ID, tm.ID, "jira_csv", []byte(mixed))
 	if err != nil {

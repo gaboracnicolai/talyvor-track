@@ -193,10 +193,15 @@ func TestRunner_PartialImport_Observable(t *testing.T) {
 	team := d.Team(t, ws.ID)
 	jobs, runner := newSpine(d)
 
-	// 2 good rows + 1 raggedly-short row (fails per-row, not the batch).
+	// 2 good rows + 1 row with an empty TITLE (fails per-row, not the batch).
+	// ⚠ THIS FIXTURE WAS RETARGETED, THE SUBJECT WAS NOT. It used to be a raggedly-short row; a row
+	// narrower than its header is now imported and reported rather than refused (source.go Next,
+	// measured on 45 real Linear exports). What this test asserts — that a per-row failure makes the
+	// JOB partial with accurate counts rather than failing the batch — is unchanged, so the example
+	// moved to a row that still fails per-row.
 	mixed := "Title,Description,Status,Priority,Labels\n" +
 		"Good A,d,Todo,High,bug\n" +
-		"bad-short-row\n" +
+		",d,Todo,High,bug\n" +
 		"Good B,d,Done,Low,ui\n"
 	jobID, _ := jobs.Create(ctx, ws.ID, team.ID, "linear_csv", []byte(mixed))
 	if _, err := runner.RunOnce(ctx); err != nil {

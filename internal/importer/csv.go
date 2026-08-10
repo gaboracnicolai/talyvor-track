@@ -123,6 +123,12 @@ const (
 	// must not look like a value that never arrived.
 	viaUnparseableDate = "unparseable-date" // no pinned layout accepts the shape
 	viaStatusNotDone   = "status-not-done"  // a resolution date on an issue that did not import as done
+
+	// The one note in this package that is about a ROW rather than about a field's value. A CSV row
+	// narrower than its header supplies nothing for the columns past its end, and columnIndex.get
+	// reads those as "" — which is indistinguishable from a column the export left blank. This says
+	// which it was. See csvSource.Next for the measurement that made the refusal it replaces wrong.
+	viaShortRow = "short-row"
 )
 
 // The date fields a note can be about. Named so the rendered line reads as a sentence.
@@ -133,6 +139,10 @@ const (
 	// viaStateType is separate from viaCategory: a warning must name the provider's own field, or it
 	// sends the operator to look for something their API does not have.
 	fieldCompletionTime = "completion time"
+
+	// Not a provider field at all — the shape of the row itself. Named here so the one note about a
+	// row lives beside the notes about values rather than as a literal in source.go.
+	fieldRowWidth = "row width"
 )
 
 // render turns one note and its count into a single self-describing line. The three Via shapes are
@@ -145,6 +155,14 @@ func (n FieldNote) render(count int) string {
 		subject = fmt.Sprintf("no %s value on %d issue(s)", n.Field, count)
 	}
 	switch {
+	case n.Via == viaShortRow:
+		// The only line here about the row rather than about a value, so it is deliberately NOT
+		// phrased as "unrecognised <field>". It names the two numbers because they are the only
+		// thing that tells a harmless truncation from a harmful one: 29 of 30 lost a trailing
+		// column nothing reads, 4 of 30 lost most of the export. MEASURED on 45 real Linear
+		// exports: 73 rows short, all of them by exactly one, all missing only `Roadmaps`.
+		return fmt.Sprintf("%d issue(s) arrived on a row narrower than the header (%s supplied) — "+
+			"every column past the last one supplied read as empty", count, n.Value)
 	case n.Via == viaUnparseableDate:
 		// The layouts are pinned by hand from a real Jira's responses. A tenant whose serialisation
 		// differs from all of them learns it here, on its first import, instead of receiving a
