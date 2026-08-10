@@ -26,7 +26,7 @@ const jiraSearchPath = "/rest/api/3/search/jql"
 // scalars nested nowhere, so — like statusCategory before them — they are free: absent ⇒ the zero
 // value ⇒ exactly today's nil. Narrowing this list takes them away silently, which is why
 // TestJiraRequest_AsksForTheDateFields asserts it at the WIRE, not at the fixture.
-var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate", jiraAPICreatedField}
+var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate", jiraAPICreatedField, jiraAPIUpdatedField}
 
 // jiraTimeLayouts are pinned BY HAND from what a real Jira actually sends, in the order tried.
 //
@@ -108,6 +108,13 @@ type jiraIssue struct {
 		// lands in `created_at`, which is DEFAULT NOW() — an absent value is not an empty column, it
 		// is a WRONG one that looks right. So "" is REPORTED here (viaNoCreatedField), never shrugged off.
 		Created string `json:"created"`
+
+		// ⚠ THE SAME DEFAULTED-COLUMN TRAP AS `Created`, on the column the product SORTS BY.
+		// `updated_at` is DEFAULT NOW() too, so an absent value is a wrong one that looks right —
+		// and unlike created_at, whose loss shows up as a number on an analytics page, this one
+		// reorders the issue list and prints "updated just now" on every imported row. Reported as
+		// viaNoUpdatedField, never shrugged off.
+		Updated string `json:"updated"`
 	} `json:"fields"`
 }
 
@@ -191,6 +198,7 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 		due, dueNotes := jiraDueDate(it.Fields.DueDate)
 		completed, completedNotes := jiraCompletedAt(it.Fields.ResolutionDate, status)
 		created, createdNotes := jiraAPICreated(it.Fields.Created)
+		updated, updatedNotes := jiraAPIUpdated(it.Fields.Updated)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  it.Key, // provider-key (PROJ-123)
@@ -202,9 +210,10 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 				DueDate:     due,
 				CompletedAt: completed,
 				CreatedAt:   created,
+				UpdatedAt:   updated,
 			},
 			notes: append(collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
-				append(dueNotes, append(completedNotes, createdNotes...)...)...),
+				append(dueNotes, append(completedNotes, append(createdNotes, updatedNotes...)...)...)...),
 		})
 	}
 	return out

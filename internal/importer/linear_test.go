@@ -31,6 +31,21 @@ const (
 	fixtureLinearCreated = "2026-01-15T09:30:00.000Z"
 )
 
+// fixtureJiraUpdated / fixtureLinearUpdated are the LAST-TOUCHED instants every fixture carries,
+// for exactly the reason stated below about the opening times — and the cost was measured, not
+// guessed: adding the `updated`/`updatedAt` note kind reddened SIX tests in this package that are
+// about something else entirely, the same way `created` reddened 13. The fixtures were wrong, not
+// the guard: a real Jira Cloud returns `updated` on every issue whenever the fields list asks for
+// it, and Linear declares Issue.updatedAt NON_NULL, so a fixture WITHOUT one was never a shape
+// either provider can send.
+//
+// ⚠ LATER THAN THE OPENING TIME, DELIBERATELY. Created <= Updated holds for every real issue, and a
+// fixture that inverted them would be asserting against a provider state that cannot exist.
+const (
+	fixtureJiraUpdated   = "2026-02-20T09:30:00.000-0700"
+	fixtureLinearUpdated = "2026-02-20T09:30:00.000Z"
+)
+
 // ⚠ THESE FIXTURES CARRY AN OPENING TIME BECAUSE A REAL RESPONSE ALWAYS DOES. When `created` /
 // `createdAt` joined the mappers, the new "no opening time" warning fired on every minimal fixture
 // in this package and reddened 13 tests that are about something else entirely. The choice was to

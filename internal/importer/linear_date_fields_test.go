@@ -79,6 +79,10 @@ func linNodeDated(id, stateName, stateType, due, completed string, prio int) str
 	// The opening time every real node carries — see the banner in linear_test.go. linNodeCreated
 	// REPLACES this value (or nulls it) when a case is specifically about createdAt.
 	fields += fmt.Sprintf(`,"createdAt":%q`, fixtureLinearCreated)
+	// The last-touched instant every real node carries — see fixtureLinearUpdated. linNodeUpdatedAt
+	// PREPENDS its own when a case is specifically about updatedAt, so this default is what every
+	// other fixture in the package gets.
+	fields += fmt.Sprintf(`,"updatedAt":%q`, fixtureLinearUpdated)
 	return "{" + fields + "}"
 }
 

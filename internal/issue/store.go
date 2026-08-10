@@ -427,24 +427,42 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 		t := issue.CreatedAt
 		createdAt = &t
 	}
-	// ⚠ updated_at IS DELIBERATELY NOT SUPPLIED HERE, AND THE ABSENCE IS THE DECISION. Create's
-	// INSERT now carries the provider's last-updated instant (see the comment there and
-	// importer/jira_csv_updated.go for the measurement). This statement serves the API transports,
-	// whose mappers do not read `updated`/`updatedAt` YET — adding the column here first would ship
-	// exactly what #74's C9 taught and #83 wrote down: an un-fed column is untestable and rots.
-	// Mapper and statement land together, in the merge that takes the API half.
-	// ⚠ AND THE CONFLICT ARM BELOW IS ITS OWN QUESTION, not an oversight: a local edit bumps
-	// updated_at to NOW(), so clobbering with the provider's older instant would move the column
-	// BACKWARDS past a human's edit and hide it from the recency sort — this defect's mirror image.
-	// GREATEST(issues.updated_at, EXCLUDED.updated_at) is the obvious third option and is still a
-	// rule nobody has decided, so it is NOT invented here. Stated in the queue with numbers.
+	// updated_at: THE PROVIDER'S LAST-TOUCHED INSTANT, on the SAME import-owned gate as created_at.
+	// This is the FIFTH copy of the seam this package has paid for and the SECOND column to cross
+	// it: #74 completed_at in this UPSERT, #78 completed_at in Create's INSERT, #83 created_at in
+	// Create, #84 created_at HERE, and now updated_at here. #85 landed this column on Create and
+	// DELIBERATELY left this statement alone because no mapper fed it ("an un-fed column is
+	// untestable and rots"); importer/api_updated.go feeds it now, so it lands.
+	//
+	// ⚠ THE LOSS IS NOT A NUMBER ON A REPORT, IT IS THE ORDER OF THE MAIN SCREEN. #83 scoped this
+	// column out with "nothing in Track reads updated_at for a report" and #84 repeated it; #85
+	// measured it FALSE by enumerating READS — five consumers in two languages, the largest being
+	// the issue list itself (frontend IssueList.tsx sorts by updated_at DESC, IssueRow.tsx prints
+	// "updated <n> ago" on every row, Search below is ORDER BY updated_at DESC). MEASURED through
+	// the async runner on real Postgres for an issue the provider last touched 200 days ago: off by
+	// 4800h on BOTH jira_api and linear_api, and the stale row OUTRANKED work edited during the test
+	// in the very query the product lists by. A column assertion alone cannot see it — updated_at is
+	// TIMESTAMPTZ DEFAULT NOW(), so the wrong value has the same shape as the right one.
+	//
+	// ⚠ IT IS ON THE INSERT BRANCH ONLY, AND THE CONFLICT ARM BELOW REMAINS AN OPEN QUESTION rather
+	// than an oversight — UNCHANGED BY THIS MERGE AND DELIBERATELY SO. A local edit bumps updated_at
+	// to NOW(), so `updated_at = EXCLUDED.updated_at` would move the column BACKWARDS past a human's
+	// edit and hide it from the recency sort: this defect's mirror image.
+	// GREATEST(issues.updated_at, EXCLUDED.updated_at) is the obvious third option and is STILL a
+	// rule nobody has decided, so it is NOT invented here. THE RESIDUAL IS REAL AND IS STATED: a
+	// RE-import still stamps NOW() on every row it touches. Left in the queue with numbers.
+	var updatedAt *time.Time
+	if !issue.UpdatedAt.IsZero() && issue.CreatorID == model.ImporterCreatorID {
+		t := issue.UpdatedAt
+		updatedAt = &t
+	}
 	const upsertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
          assignee_id, creator_id, cycle_id, parent_id,
-         due_date, completed_at, lens_feature, labels, sort_order, created_at)
+         due_date, completed_at, lens_feature, labels, sort_order, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-            COALESCE($19::timestamptz, NOW()))
+            COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()))
     ON CONFLICT (workspace_id, identifier) DO UPDATE SET
         title       = EXCLUDED.title,        -- CLOBBER: provider is source of truth
         description = EXCLUDED.description,   -- CLOBBER
@@ -468,7 +486,7 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 
 	var inserted bool
 	out, err := scanIssue(insertedScanner{
-		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt),
+		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt, updatedAt),
 		inserted: &inserted,
 	})
 	if err != nil {

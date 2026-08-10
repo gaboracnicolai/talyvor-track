@@ -25,7 +25,7 @@ const linearIssuesQuery = `query($teamId: String!, $after: String) {
   team(id: $teamId) {
     issues(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { identifier title description state { name type } priority labels { nodes { name } } dueDate completedAt createdAt }
+      nodes { identifier title description state { name type } priority labels { nodes { name } } dueDate completedAt createdAt updatedAt }
     }
   }
 }`
@@ -167,6 +167,12 @@ type linearNode struct {
 	// no opening time", which is a state Linear cannot produce; it is "the response did not come from
 	// the schema this importer was written against". Reported as that, via viaNullCreatedAt.
 	CreatedAt string `json:"createdAt"`
+
+	// ⚠ ALSO `DateTime!` — NON_NULL — so "" here is not "never touched", a state Linear cannot
+	// produce; it is "the response did not come from the schema this importer was written
+	// against". Reported via viaNullUpdatedAt. Lands in `updated_at`, DEFAULT NOW(), which is the
+	// column issue.Store.Search orders the product's main screen by.
+	UpdatedAt string `json:"updatedAt"`
 }
 
 type linearResp struct {
@@ -283,6 +289,7 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 		due, dueNotes := linearDueDate(n.DueDate)
 		completed, completedNotes := linearCompletedAt(n.CompletedAt, status)
 		created, createdNotes := linearAPICreated(n.CreatedAt)
+		updated, updatedNotes := linearAPIUpdated(n.UpdatedAt)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  n.Identifier, // the provider-key (ENG-123) — what C.2's upsert + PR #30 resolve on
@@ -294,9 +301,10 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 				DueDate:     due,
 				CompletedAt: completed,
 				CreatedAt:   created,
+				UpdatedAt:   updated,
 			},
 			notes: append(collectNotes(n.State.Name, status, statusOK, fallback, strconv.Itoa(n.Priority), prio, prioOK),
-				append(dueNotes, append(completedNotes, createdNotes...)...)...),
+				append(dueNotes, append(completedNotes, append(createdNotes, updatedNotes...)...)...)...),
 		})
 	}
 	return out
