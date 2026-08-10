@@ -195,7 +195,13 @@ type csvSource struct {
 // newCSVSource reads the header (fatal errors surface here, matching the old run: EOF header ⇒ an empty
 // source that yields nothing; a non-EOF read error ⇒ returned as an error).
 func newCSVSource(r io.Reader, mapper rowMapper) (*csvSource, error) {
-	rd := csv.NewReader(r)
+	// A leading UTF-8 BOM is consumed HERE, at the one seam both CSV transports pass through, and
+	// not in either mapper. Neither csv.Reader nor strings.TrimSpace removes it, so without this the
+	// three bytes stay glued to the first header cell and buildIndex files that column under a name
+	// no lookup can spell — which on a Jira export is `Summary`, so every row is refused for having
+	// no title and the whole file imports nothing. MEASURED at 66 of 304 real Jira exports; see
+	// csv_bom.go for the population and for why the strip is the file prefix only.
+	rd := csv.NewReader(skipUTF8BOM(r))
 	rd.FieldsPerRecord = -1
 	rd.TrimLeadingSpace = true
 
