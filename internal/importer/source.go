@@ -32,6 +32,12 @@ type SourceRow struct {
 	RowNum int
 	Err    error
 	Notes  []FieldNote
+
+	// NotesIfUpdated are reported ONLY IF the write turned out to overwrite an issue that already
+	// existed. A source knows what its input said; only run() knows whether the row INSERTed or
+	// UPDATEd, and the difference decides whether a note is a true sentence or a false alarm. Empty
+	// for every API source: both request the fields they map, so no column can be absent.
+	NotesIfUpdated []FieldNote
 }
 
 // IssueSource is the extracted seam. Next returns the next row and ok=false when the source is exhausted.
@@ -83,8 +89,16 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		// ⚠ WHAT REMAINS KEYLESS IS A ROW, NOT A TRANSPORT: an export filtered down past its key
 		// column yields "" and still takes Create. That is the fail-safe both column constants are
 		// written around, not an oversight.
+		//
+		// overwroteExisting is the second return of UpsertByIdentifier, inverted. It has been
+		// computed by the statement itself (`RETURNING (xmax = 0) AS inserted`) since #71 and thrown
+		// away here ever since — and it is the ONLY thing that can tell a report about a deleted
+		// value from a false alarm on a first import. See row.NotesIfUpdated.
+		overwroteExisting := false
 		if issueModel.Identifier != "" && imp.upserter != nil {
-			if _, _, err := imp.upserter.UpsertByIdentifier(ctx, issueModel); err != nil {
+			_, inserted, err := imp.upserter.UpsertByIdentifier(ctx, issueModel)
+			overwroteExisting = !inserted
+			if err != nil {
 				// A REFUSAL IS NOT A FAILURE. #71's upsert predicate declines to overwrite an issue a
 				// human created; the row not landing is the policy working. It is counted apart so the
 				// job row can say which of the two happened — issue.Store exported the sentinel for
@@ -104,7 +118,14 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		}
 		// Tallied only AFTER the write succeeded — a row that never landed is a Skipped row,
 		// not a degraded one, and counting it in both places would double-report one failure.
-		for _, n := range row.Notes {
+		//
+		// ⚠ concatNotes, NOT append: appending into row.Notes writes through the mapper's own
+		// backing array, which is the aliasing hazard that function was extracted for.
+		notes := row.Notes
+		if overwroteExisting {
+			notes = concatNotes(row.Notes, row.NotesIfUpdated)
+		}
+		for _, n := range notes {
 			degraded[n]++
 		}
 		out.Imported++
@@ -296,5 +317,12 @@ func (s *csvSource) Next() (SourceRow, bool) {
 	if err != nil {
 		return SourceRow{RowNum: s.rowNum, Err: fmt.Errorf("row %d: %v", s.rowNum, err)}, true
 	}
-	return SourceRow{Issue: mapped.issue, RowNum: s.rowNum, Notes: concatNotes(notes, mapped.notes)}, true
+	return SourceRow{
+		Issue:  mapped.issue,
+		RowNum: s.rowNum,
+		Notes:  concatNotes(notes, mapped.notes),
+		// Only the pipeline can decide whether these apply — they are true of a row that OVERWROTE
+		// an existing issue and of no other. See csv_clobbered_columns.go.
+		NotesIfUpdated: mapped.onUpdate,
+	}, true
 }
