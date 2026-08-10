@@ -182,6 +182,28 @@ func (n FieldNote) render(count int) string {
 		// jiraCSVCreatedColumn is one rename away from being sent to the wrong column entirely.
 		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as created at import time, "+
 			"which makes their time-to-resolution meaningless", linearCSVCreatedColumn, count)
+	case n.Via == viaNoDescriptionColumn:
+		// The absent-column line for a column whose absence DESTROYS rather than defaults. Every
+		// viaNo*Column sentence above is about a value the import failed to record; this one is
+		// about a value the import DELETED, so it names the write rather than the reading.
+		//
+		// ⚠ IT CLAIMS THE OVERWRITE AND NOT THE LOSS, deliberately. The UPDATE certainly ran and
+		// certainly set the column to "" — but whether anything was lost depends on what the row
+		// held before, which this import never read. Saying "N descriptions were deleted" would
+		// over-claim on every issue that had none.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) already in Track were "+
+			"re-imported and had their description overwritten with an empty value; a re-import "+
+			"takes that column from the export, so a narrower export empties it",
+			clobberedDescriptionColumn, count)
+	case n.Via == viaNoLabelsColumn:
+		// The twin of the line above. A SEPARATE branch rather than one parameterised sentence,
+		// for the reason viaNoLinearCreatedColumn is separate from viaNoCreatedColumn: the noun
+		// and the emptied shape differ ("an empty value" vs "an empty list"), and a shared sentence
+		// is one edit away from telling an operator the wrong thing about one of the two.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) already in Track were "+
+			"re-imported and had their labels overwritten with an empty list; a re-import "+
+			"takes that column from the export, so a narrower export empties it",
+			clobberedLabelsColumn, count)
 	case n.Via == viaNoCreatedValue:
 		return fmt.Sprintf("empty %s on %d issue(s) — recorded as created at import time", n.Field, count)
 	case n.Via == viaNoUpdatedColumn:
@@ -278,6 +300,13 @@ type statusFallback struct {
 type mappedIssue struct {
 	issue model.Issue
 	notes []FieldNote
+
+	// onUpdate holds notes that are TRUE ONLY IF THIS ROW OVERWROTE AN ISSUE THAT ALREADY EXISTED.
+	// They are kept apart from `notes` rather than merged into them because the pipeline, not the
+	// mapper, is the only thing that knows which of the two branches the row took — a mapper reads a
+	// header and cannot know whether the write will INSERT or UPDATE. run() folds these in for a row
+	// whose upsert reported inserted=false and drops them otherwise.
+	onUpdate []FieldNote
 }
 
 // statusNote / priorityNote build the note for a value a mapper rejected. Kept next to
@@ -330,6 +359,14 @@ func (ci columnIndex) get(row []string, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(row[idxs[0]])
+}
+
+// has answers whether the export CARRIES this column at all — the one question `get` cannot be
+// asked, because it answers "" for an absent column and for an empty cell alike (its own doc
+// comment above says so, and that tolerance is deliberate). Every caller that must tell those two
+// states apart goes through here: see csv_clobbered_columns.go and the viaNo*Column notes.
+func (ci columnIndex) has(key string) bool {
+	return len(ci[strings.ToLower(key)]) > 0
 }
 
 // getAll fetches EVERY column of that name, in header order, dropping the empties an export pads
@@ -420,6 +457,8 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
 			concatNotes(createdNotes, completedNotes, updatedNotes)...),
+		// Same two columns, same spellings, same report — see the jira twin above.
+		onUpdate: csvClobberedColumnNotes(ci),
 	}, nil
 }
 
@@ -634,6 +673,9 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFB, rawPrio, prio, prioOK),
 			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes)...),
+		// The columns this export does not carry that a RE-import would empty. Reported only if
+		// this row overwrote an issue that already existed — see csv_clobbered_columns.go.
+		onUpdate: csvClobberedColumnNotes(ci),
 	}, nil
 }
 
