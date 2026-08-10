@@ -66,9 +66,22 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		issueModel.TeamID = teamID
 		issueModel.CreatorID = model.ImporterCreatorID // the ONLY provenance a re-import can key on — see the const
 
-		// An issue carrying an Identifier came from an API provider (C.3) → route through C.2's re-import
-		// upsert (land on the provider-key, INSERT-or-UPDATE). CSV rows carry no Identifier → Create, as
-		// before. The upserter is nil for CSV-only backing stores, so that branch is never taken there.
+		// An issue carrying an Identifier came from a provider that names its issues → route through
+		// C.2's re-import upsert (land on the provider-key, INSERT-or-UPDATE). No Identifier → Create,
+		// which DERIVES `<team>-<n>`. The upserter is nil for CSV-only backing stores, so that branch
+		// is never taken there.
+		//
+		// ⚠ "CSV rows carry no Identifier" WAS TRUE OF EVERY CSV TRANSPORT AND IS NO LONGER TRUE OF
+		// jira_csv. A Jira CSV export's `Issue key` column names the issue, jiraRowMapper reads it, and
+		// a jira_csv job therefore takes the SAME branch as jira_api. Before that, re-importing
+		// byte-identical export bytes wrote a second copy of every row and reported the job
+		// `succeeded imported=N skipped=0 failed=0` — measured through this pipeline on real Postgres,
+		// 2 issues to 4. See internal/importer/jira_csv_issue_key_job_test.go.
+		//
+		// ⚠ linear_csv IS STILL KEYLESS AND STILL DUPLICATES ON RE-IMPORT. Linear's export header
+		// cannot be measured from this environment (no tenant, no anonymous export view), and lending
+		// Jira's observed-bytes provenance to an unmeasured Linear column is the overclaim #75 caught
+		// in this package once already. Left in the queue with the measurement beside it.
 		if issueModel.Identifier != "" && imp.upserter != nil {
 			if _, _, err := imp.upserter.UpsertByIdentifier(ctx, issueModel); err != nil {
 				// A REFUSAL IS NOT A FAILURE. #71's upsert predicate declines to overwrite an issue a
