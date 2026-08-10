@@ -16,10 +16,16 @@ import (
 //
 // ⚠ THIS IS NOT THE UNIT TEST TWICE, AND ON THIS TRANSPORT THAT IS NOT A GENERALITY. #74 found the
 // importer's UPSERT naming `due_date` and not naming `completed_at` at all, so a perfectly mapped
-// CompletedAt was thrown away by the SQL — and it fixed that ONE statement. The CSV path does not go
-// through the upsert: a CSV row carries no provider identifier, so run() writes it with
-// issue.Store.Create, which is a DIFFERENT INSERT — and measured on ba5d90a that statement names
-// `due_date` and DOES NOT NAME `completed_at` EITHER. The same seam, its second copy, still open.
+// CompletedAt was thrown away by the SQL — and it fixed that ONE statement. When this file was
+// written the CSV path did NOT go through the upsert (a CSV row carried no provider identifier, so
+// run() wrote it with issue.Store.Create, a DIFFERENT INSERT) — and measured on ba5d90a that
+// statement names `due_date` and DID NOT NAME `completed_at` EITHER. The same seam, its second copy.
+//
+// ⚠ THE ROUTING SENTENCE ABOVE IS NOW HISTORY, NOT A FACT ABOUT THIS FIXTURE, AND THAT IS WHY IT IS
+// LEFT VISIBLE. jiraRowMapper reads the export's `Issue key` column, so a jira_csv job whose fixture
+// CARRIES that column now takes the upsert. THIS file's fixture does not carry it, so these rows
+// still take Create and this file still measures the statement it was written for — deliberately
+// unchanged, so the second copy of the seam keeps its own guard.
 // Every source-level assertion in jira_csv_dates_test.go can be green while this file is red.
 
 // A four-row export in exactly the shape measured off a real Jira CSV (see the probe script), one

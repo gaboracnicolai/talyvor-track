@@ -547,6 +547,19 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	updated, updatedNotes := jiraCSVUpdated(ci, row)
 	return mappedIssue{
 		issue: model.Issue{
+			// THE NAME THE PROVIDER GAVE THE ISSUE, and the ROUTING KEY of source.go's write
+			// pipeline — a row carrying one takes issue.Store.UpsertByIdentifier, a row without one
+			// takes Create and gets a DERIVED `<team>-<n>`. Reading it is what makes a jira_csv
+			// re-import land on the row it already wrote instead of writing a second copy of it.
+			// MEASURED before this line existed, through the async runner on real Postgres: two jobs
+			// carrying BYTE-IDENTICAL two-row bytes left FOUR issues, and both reported
+			// `succeeded imported=2 skipped=0 failed=0`. See jira_csv_issue_key.go for the column's
+			// provenance and jira_csv_issue_key_job_test.go for the measurement.
+			//
+			// ⚠ ABSENT ⇒ "" ⇒ EXACTLY TODAY'S BEHAVIOUR. An export filtered down to a few columns
+			// carries no key, and inventing one would land a row on a fabricated provider identifier
+			// — worse than the loss this fixes.
+			Identifier:  ci.get(row, jiraCSVIssueKeyColumn),
 			Title:       title,
 			Description: ci.get(row, "Description"),
 			Status:      status,
