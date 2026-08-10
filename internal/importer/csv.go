@@ -93,7 +93,8 @@ type FieldNote struct {
 	// otherwise produce the IDENTICAL warning, and nobody could ever tell from a production import
 	// whether the category read runs at all. That is the structural-zero class, one field down.
 	//
-	//	Via         "" (no fallback exists for this transport — every CSV path)
+	//	Via         "" (no fallback exists for this row — a Linear CSV row, or a Jira CSV export
+	//	            with no "Status Category" column at all: 76 of 304 measured exports)
 	//	            | viaCategory        — a statusCategory arrived; ViaValue is its key, verbatim
 	//	            | viaNoCategory      — none arrived
 	//	            | viaUnparseableDate — a date arrived in a shape no pinned layout accepts
@@ -258,8 +259,13 @@ func (n FieldNote) render(count int) string {
 }
 
 // statusFallback describes the second chance a transport gave an unrecognised status NAME. Its zero
-// value means "this transport has none", which is every CSV path — a Jira CSV export carries no
-// category column, so those warnings keep their existing wording exactly.
+// value means "none was available here".
+//
+// ⚠ IT USED TO SAY "which is every CSV path — a Jira CSV export carries no category column", and
+// that was measured false: 228 of 304 real Jira CSV exports carry `Status Category`, and 1,424
+// rows in that corpus were imported as backlog with the answer sitting in the same row. The zero
+// value now means the Linear CSV path, and a Jira CSV export that really has no such column.
+// See jira_csv_status_category.go.
 type statusFallback struct {
 	via      string
 	value    string
@@ -570,6 +576,15 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	}
 	rawStatus, rawPrio := ci.get(row, "Status"), ci.get(row, "Priority")
 	status, statusOK := mapJiraStatus(rawStatus)
+	// THE SECOND CHANCE AN UNRECOGNISED NAME GETS ON THIS TRANSPORT — the export's own
+	// `Status Category` column, present in 228 of 304 real exports and read by nothing until now.
+	// It runs HERE for the two reasons jira.go's twin does: AFTER the name (which is never
+	// overruled) and BEFORE the resolution and date mappings below, both of which gate on the
+	// status these two lines can change. See jira_csv_status_category.go.
+	var statusFB statusFallback
+	if !statusOK {
+		status, statusFB = jiraCSVStatusCategory(ci, row, status)
+	}
 	prio, prioOK := mapJiraPriority(rawPrio)
 	// The Resolution column says whether resolved work was FINISHED or ABANDONED, and it runs
 	// BEFORE the date mapping below because that mapping gates on the status this line can change.
@@ -617,7 +632,7 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			CreatedAt:   created,
 			UpdatedAt:   updated,
 		},
-		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
+		notes: append(collectNotes(rawStatus, status, statusOK, statusFB, rawPrio, prio, prioOK),
 			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes)...),
 	}, nil
 }
