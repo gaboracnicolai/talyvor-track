@@ -189,6 +189,15 @@ func (n FieldNote) render(count int) string {
 		// being dropped, so it names both the old answer and the new one.
 		return fmt.Sprintf("%s %q on %d issue(s) — Track reads that word as %q, so the issue imported as %q rather than %q and carries no completion time",
 			n.Field, n.Value, count, n.Mapped, n.Mapped, model.StatusDone)
+	case n.Via == viaNoResolutionField:
+		// The API twin of "no Resolution column", and a SEPARATE sentence because it points
+		// somewhere else: there is no export to go and re-make, so it names the `fields` list the
+		// client sends. ⚠ IT IS REACHABLE: a real Jira Cloud answers HTTP 200 and omits a field the
+		// request did not ask for or misspelled, so a rename or a typo in jiraFields lands here and
+		// nowhere else — and the rows it describes are byte-identical to correctly-imported ones.
+		return fmt.Sprintf("the provider response carried no %q field — %d issue(s) closed in Jira were "+
+			"imported as delivered work without checking whether they were finished or abandoned",
+			jiraAPIResolutionField, count)
 	case n.Via == viaResolutionUnreadable:
 		return fmt.Sprintf("%s %q on %d issue(s) — Track cannot read that word as finished-or-abandoned, so the issue imported as %q unchanged",
 			n.Field, n.Value, count, n.Mapped)
@@ -493,7 +502,7 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// BEFORE the date mapping below because that mapping gates on the status this line can change.
 	// It can only ever move done → cancelled, and it invents no vocabulary — see
 	// jira_csv_resolution.go for the measurement and the refusal.
-	status, resolutionNotes := applyJiraCSVResolution(ci.get(row, jiraCSVResolutionColumn), status)
+	status, resolutionNotes := applyJiraResolution(ci.get(row, jiraCSVResolutionColumn), status)
 	// The two date columns a real export carries and this mapper read for six merges as if they
 	// were not there. Both are measured — column spelling and serialisation — in
 	// jira_csv_dates.go; both REPORT a value they cannot place rather than nil'ing it.
