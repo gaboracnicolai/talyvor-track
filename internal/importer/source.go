@@ -71,17 +71,18 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		// which DERIVES `<team>-<n>`. The upserter is nil for CSV-only backing stores, so that branch
 		// is never taken there.
 		//
-		// ⚠ "CSV rows carry no Identifier" WAS TRUE OF EVERY CSV TRANSPORT AND IS NO LONGER TRUE OF
-		// jira_csv. A Jira CSV export's `Issue key` column names the issue, jiraRowMapper reads it, and
-		// a jira_csv job therefore takes the SAME branch as jira_api. Before that, re-importing
-		// byte-identical export bytes wrote a second copy of every row and reported the job
-		// `succeeded imported=N skipped=0 failed=0` — measured through this pipeline on real Postgres,
-		// 2 issues to 4. See internal/importer/jira_csv_issue_key_job_test.go.
+		// ⚠ "CSV rows carry no Identifier" WAS TRUE OF EVERY CSV TRANSPORT AND IS NOW TRUE OF NONE OF
+		// THEM. A Jira CSV export's `Issue key` column names the issue and jiraRowMapper reads it
+		// (#98); a Linear CSV export's `ID` column names the issue and linearRowMapper reads it. Both
+		// CSV transports therefore take the SAME branch as their API twin. Before each of those, a
+		// re-import of byte-identical export bytes wrote a second copy of every row and reported the
+		// job `succeeded imported=N skipped=0 failed=0` — measured through THIS pipeline on real
+		// Postgres, 2 issues to 4, on both transports. See jira_csv_issue_key_job_test.go and
+		// linear_csv_issue_id_job_test.go.
 		//
-		// ⚠ linear_csv IS STILL KEYLESS AND STILL DUPLICATES ON RE-IMPORT. Linear's export header
-		// cannot be measured from this environment (no tenant, no anonymous export view), and lending
-		// Jira's observed-bytes provenance to an unmeasured Linear column is the overclaim #75 caught
-		// in this package once already. Left in the queue with the measurement beside it.
+		// ⚠ WHAT REMAINS KEYLESS IS A ROW, NOT A TRANSPORT: an export filtered down past its key
+		// column yields "" and still takes Create. That is the fail-safe both column constants are
+		// written around, not an oversight.
 		if issueModel.Identifier != "" && imp.upserter != nil {
 			if _, _, err := imp.upserter.UpsertByIdentifier(ctx, issueModel); err != nil {
 				// A REFUSAL IS NOT A FAILURE. #71's upsert predicate declines to overwrite an issue a
