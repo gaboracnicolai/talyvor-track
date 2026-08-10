@@ -23,8 +23,26 @@ func noopSleep(time.Duration) {}
 // are opaque test JSON, not templated HTML — these are provider-API stubs, not a rendered web page.
 func writeRaw(w io.Writer, s string) { _, _ = io.WriteString(w, s) }
 
+// fixtureJiraCreated / fixtureLinearCreated are the opening times every fixture in this package
+// carries. Both are the MEASURED serialisations: Jira Cloud v3 sends the offset as `-0700`, Linear
+// sends the Z form. Hardcoded rather than derived from the parser's layout list — #75's C6.
+const (
+	fixtureJiraCreated   = "2026-01-15T09:30:00.000-0700"
+	fixtureLinearCreated = "2026-01-15T09:30:00.000Z"
+)
+
+// ⚠ THESE FIXTURES CARRY AN OPENING TIME BECAUSE A REAL RESPONSE ALWAYS DOES. When `created` /
+// `createdAt` joined the mappers, the new "no opening time" warning fired on every minimal fixture
+// in this package and reddened 13 tests that are about something else entirely. The choice was to
+// widen the fixtures or to quieten the guard, and it is the same choice #83 made one transport over:
+// MEASURED, a real Jira Cloud returns `created` on every issue whenever the fields list asks for it,
+// and Linear declares Issue.createdAt NON_NULL — so a fixture WITHOUT one was never a shape either
+// provider can send. The fixtures were wrong, not the guard. A test that wants the absent case says
+// so explicitly (jiraIssueAPICreatedJSON, linNodeCreated).
+
 func linNode(id, status string, prio int) string {
-	return fmt.Sprintf(`{"identifier":%q,"title":"T-%s","description":"d","state":{"name":%q},"priority":%d,"labels":{"nodes":[{"name":"bug"}]}}`, id, id, status, prio)
+	return fmt.Sprintf(`{"identifier":%q,"title":"T-%s","description":"d","state":{"name":%q},"priority":%d,"labels":{"nodes":[{"name":"bug"}]},"createdAt":%q}`,
+		id, id, status, prio, fixtureLinearCreated)
 }
 
 func linPage(hasNext bool, cursor string, nodes ...string) string {

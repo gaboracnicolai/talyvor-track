@@ -385,18 +385,49 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 	}
 	issue.Number = nextNumber
 
+	// created_at: THE PROVIDER'S OPENING TIME, AND ONLY THE PROVIDER'S — the FOURTH copy of the seam
+	// this package has now paid for. #74 found the importer's UPSERT omitting `completed_at`; #78
+	// found the second copy in Create's INSERT for the same column; #83 found the THIRD, `created_at`
+	// in Create's INSERT, and DELIBERATELY left this one alone because at that time no mapper fed it
+	// ("an un-fed column is untestable and rots"). Both API mappers feed it now, so it lands here.
+	//
+	// ⚠ THIS IS THE STATEMENT THE API TRANSPORTS ACTUALLY REACH. A mapper-only fix here is not merely
+	// inert, it is INVISIBLE: the column is TIMESTAMPTZ DEFAULT NOW(), so the row lands with a
+	// plausible timestamp and the loss surfaces only as a NEGATIVE time to resolution in analytics.
+	// MEASURED before this line existed, through the async runner on real Postgres, for an issue the
+	// provider opened 200 days ago and finished 100 days ago: median time to resolution = -2400.0
+	// hours on BOTH jira_api and linear_api. Against 100 real resolved Jira Cloud issues: 100 of 100
+	// negative, true median 88.7h against a computed median of -408.3h.
+	//
+	// ⚠ THE GATE IS COPIED FROM Create DELIBERATELY AND IS LOAD-BEARING RATHER THAN TIDY, for exactly
+	// the reason stated there: created_at is the WINDOW PREDICATE of every analytics report
+	// (`created_at > NOW() - INTERVAL '1 day' * $2`), and ImporterCreatorID is a value no HTTP caller
+	// can reach because handler.Create refuses a supplied creator_id outright (SEC-5). A zero
+	// CreatedAt means "nobody supplied one" and takes the DEFAULT.
+	//
+	// ⚠ AND IT IS ON THE INSERT BRANCH ONLY, WHICH IS A DECISION RATHER THAN AN OVERSIGHT. On the
+	// UPDATE branch created_at is OMITTED alongside status/priority/completed_at/due_date: a
+	// re-imported issue keeps its identity, and an opening time that moved between two imports of the
+	// same issue is a provider fact this package has no rule for. Stated in the queue, not invented here.
+	var createdAt *time.Time
+	if !issue.CreatedAt.IsZero() && issue.CreatorID == model.ImporterCreatorID {
+		t := issue.CreatedAt
+		createdAt = &t
+	}
+
 	const upsertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
          assignee_id, creator_id, cycle_id, parent_id,
-         due_date, completed_at, lens_feature, labels, sort_order)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+         due_date, completed_at, lens_feature, labels, sort_order, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+            COALESCE($19::timestamptz, NOW()))
     ON CONFLICT (workspace_id, identifier) DO UPDATE SET
         title       = EXCLUDED.title,        -- CLOBBER: provider is source of truth
         description = EXCLUDED.description,   -- CLOBBER
         labels      = EXCLUDED.labels,       -- CLOBBER
         updated_at  = NOW()
-        -- OMITTED (PRESERVE local workflow):        status, priority, completed_at, due_date
+        -- OMITTED (PRESERVE local workflow):        status, priority, completed_at, due_date, created_at
         --   completed_at travels WITH status and cannot be split from it: status is preserved here
         --   so local workflow wins, and clobbering completed_at alone could leave a locally-done
         --   issue with status "done" and no completion time — the invariant Update maintains, broken
@@ -414,7 +445,7 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 
 	var inserted bool
 	out, err := scanIssue(insertedScanner{
-		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder),
+		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt),
 		inserted: &inserted,
 	})
 	if err != nil {

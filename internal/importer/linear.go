@@ -25,7 +25,7 @@ const linearIssuesQuery = `query($teamId: String!, $after: String) {
   team(id: $teamId) {
     issues(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { identifier title description state { name type } priority labels { nodes { name } } dueDate completedAt }
+      nodes { identifier title description state { name type } priority labels { nodes { name } } dueDate completedAt createdAt }
     }
   }
 }`
@@ -161,6 +161,12 @@ type linearNode struct {
 	// absent case.
 	DueDate     string `json:"dueDate"`
 	CompletedAt string `json:"completedAt"`
+
+	// ⚠ DECLARED `DateTime!` — NON_NULL — where CompletedAt is nullable (measured by unauthenticated
+	// introspection; see scripts/w34-linear-api-created-probe.py). So "" here is not "this issue has
+	// no opening time", which is a state Linear cannot produce; it is "the response did not come from
+	// the schema this importer was written against". Reported as that, via viaNullCreatedAt.
+	CreatedAt string `json:"createdAt"`
 }
 
 type linearResp struct {
@@ -276,6 +282,7 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 		prio, prioOK := linearPriorityFromInt(n.Priority)
 		due, dueNotes := linearDueDate(n.DueDate)
 		completed, completedNotes := linearCompletedAt(n.CompletedAt, status)
+		created, createdNotes := linearAPICreated(n.CreatedAt)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  n.Identifier, // the provider-key (ENG-123) — what C.2's upsert + PR #30 resolve on
@@ -286,9 +293,10 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 				Labels:      labels,
 				DueDate:     due,
 				CompletedAt: completed,
+				CreatedAt:   created,
 			},
 			notes: append(collectNotes(n.State.Name, status, statusOK, fallback, strconv.Itoa(n.Priority), prio, prioOK),
-				append(dueNotes, completedNotes...)...),
+				append(dueNotes, append(completedNotes, createdNotes...)...)...),
 		})
 	}
 	return out

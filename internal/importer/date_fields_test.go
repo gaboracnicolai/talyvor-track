@@ -54,8 +54,8 @@ func jiraIssueWithDatesJSON(key, summary, status, due, resolution string) string
 		}
 		return fmt.Sprintf(`,%q:%q`, name, v)
 	}
-	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":{"name":%q},"priority":{"name":"Medium"},"labels":[]%s%s}}`,
-		key, summary, status, field("duedate", due), field("resolutiondate", resolution))
+	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":{"name":%q},"priority":{"name":"Medium"},"labels":[],"created":%q%s%s}}`,
+		key, summary, status, fixtureJiraCreated, field("duedate", due), field("resolutiondate", resolution))
 }
 
 // ── 1. THE FIELDS LAND ────────────────────────────────────────────────────────────────────────────
