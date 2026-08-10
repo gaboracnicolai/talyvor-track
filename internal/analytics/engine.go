@@ -291,6 +291,31 @@ func (e *Engine) scanDistribution(ctx context.Context, sql string, args ...any) 
 // ─────────────────────────────────────────────────────────
 
 type ResolutionStats struct {
+	// SampleSize is how many issues the four numbers below were computed over — the cohort, not
+	// the workspace. WITHOUT IT A ZERO IS UNREADABLE: every aggregate here is wrapped in
+	// COALESCE(..., 0), so an empty cohort renders as `0` in all four fields, which is exactly
+	// what a cohort whose issues really do resolve instantly renders as. Measured: a workspace
+	// holding a correctly-imported, resolved backlog whose issues are older than the window and a
+	// workspace holding NO ISSUES AT ALL produced byte-identical reports.
+	//
+	// ⚠ THAT IS NOT A HYPOTHETICAL, AND AN IMPORT IS WHAT REACHES IT. A native Track issue is
+	// created in Track and is therefore young by construction; only an import writes a created_at
+	// from years ago, and the window predicate below is on created_at, capped at maxWindowDays.
+	// Measured on a real Jira Cloud project (hibernate.atlassian.net/HHH, anonymous, whole-
+	// population counts — scripts/w34-analytics-window-probe.py): 18,267 resolved issues, of
+	// which 756 (4.1%) were created inside the 365-day cap. The other 17,511 import correctly,
+	// carry real completion times, and cannot appear here at any window a caller may ask for. A
+	// project that has been MIGRATED away from stops receiving new issues, so its visible share
+	// decays to zero and this report measures nothing while still answering with numbers.
+	//
+	// ⚠ WHAT THIS FIELD DOES NOT DO, STATED RATHER THAN IMPLIED: it does not distinguish "the
+	// cohort is empty because the workspace is empty" from "the cohort is empty because the
+	// window excluded everything". Both are sample_size 0. Whether the window should key on
+	// completed_at instead of created_at, and whether 365 days is the right cap for a workspace
+	// whose history was imported, are product decisions with the numbers above attached; they are
+	// written up in the queue and NOT made here. This field only stops a zero that was never
+	// measured from being served as one that was.
+	SampleSize  int                `json:"sample_size"`
 	AvgHours    float64            `json:"avg_hours"`
 	MedianHours float64            `json:"median_hours"`
 	P75Hours    float64            `json:"p75_hours"`
@@ -316,6 +341,7 @@ func (e *Engine) GetTimeToResolution(ctx context.Context, workspaceID, teamID st
 	var stats ResolutionStats
 	row := e.pool.QueryRow(ctx, fmt.Sprintf(`
         SELECT
+            COUNT(*),
             COALESCE(AVG(EXTRACT(EPOCH FROM completed_at - created_at)/3600), 0),
             COALESCE(PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM completed_at - created_at)/3600), 0),
             COALESCE(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM completed_at - created_at)/3600), 0),
@@ -325,7 +351,10 @@ func (e *Engine) GetTimeToResolution(ctx context.Context, workspaceID, teamID st
           AND completed_at IS NOT NULL
           AND created_at > NOW() - (INTERVAL '1 day' * $2::int)%s`, teamSQL),
 		args...)
-	if err := row.Scan(&stats.AvgHours, &stats.MedianHours, &stats.P75Hours, &stats.P95Hours); err != nil {
+	// COUNT(*) rides the SAME WHERE clause as the aggregates, so it is the cohort those four
+	// numbers were computed over rather than a second, separately-filtered census. completed_at is
+	// NOT NULL in that clause, so no row it counts is a row the percentiles skipped.
+	if err := row.Scan(&stats.SampleSize, &stats.AvgHours, &stats.MedianHours, &stats.P75Hours, &stats.P95Hours); err != nil {
 		return nil, fmt.Errorf("analytics: resolution stats: %w", err)
 	}
 
