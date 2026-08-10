@@ -227,9 +227,10 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 	// This INSERT named due_date and did NOT name completed_at at all, so a caller-supplied
 	// CompletedAt was discarded in silence. That is the same defect #74 found in the importer's
 	// UPSERT and fixed there; Create is the OTHER write path, and it is the one every CSV import row
-	// takes for every row that carries no provider identifier — a linear_csv row, and a jira_csv row
-	// from an export filtered down past its `Issue key` column. A keyed jira_csv row now reaches the
-	// upsert instead, so this statement is no longer EVERY import row's write path.
+	// takes for every row that carries no provider identifier — an export filtered down past its key
+	// column (`Issue key` for Jira, `ID` for Linear). Both CSV transports now read that column when
+	// the export carries it and reach the upsert instead, so this statement is no longer EVERY import
+	// row's write path; it is the path of a row whose export was filtered.
 	//
 	// ⚠ IT IS GATED, NOT SIMPLY ADDED. handler.Create decodes the whole model.Issue off the request
 	// body, so naming the column with no rule would newly let any client file BACKLOG work carrying a

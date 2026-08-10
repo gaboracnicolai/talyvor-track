@@ -24,11 +24,14 @@ package importer_test
 // clobber-a-human predicate, #81's refused-vs-failed counting) was already built and tested. The
 // CSV half simply never fed it.
 //
-// ⚠ THE LINEAR CSV HALF IS DELIBERATELY UNTOUCHED. Linear's export header cannot be measured from
-// this environment (no tenant, no anonymous export view), and #76/#77 already recorded that lending
-// Jira's observed-bytes provenance to an unmeasured Linear column is this package's most-repeated
-// mistake. linearRowMapper still supplies no Identifier and a linear_csv re-import still duplicates;
-// that is stated in the queue with this measurement beside it, not guessed at here.
+// ⚠ THE LINEAR CSV HALF WAS DELIBERATELY LEFT HERE AND HAS SINCE BEEN MEASURED AND FIXED. This
+// file's original note read "Linear's export header cannot be measured from this environment (no
+// tenant, no anonymous export view)" — a true statement about this machine's ACCESS and a false one
+// about the question. scripts/w34-linear-csv-export-probe.py reads 45 real Linear exports out of
+// public repositories and finds `ID` at column index 0 in 45 of 45 across six header shapes. The
+// refusal to GUESS was right; the conclusion that it could not be KNOWN was not. See
+// linear_csv_issue_id.go, whose header states plainly why that provenance is weaker than this
+// file's and is not dressed up as equal.
 
 import (
 	"context"

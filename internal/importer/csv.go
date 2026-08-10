@@ -357,6 +357,18 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	completed, completedNotes := linearCSVCompleted(ci.get(row, linearCSVCompletedColumn), status)
 	return mappedIssue{
 		issue: model.Issue{
+			// THE NAME LINEAR GAVE THE ISSUE, and the ROUTING KEY of source.go's write pipeline —
+			// a row carrying one takes issue.Store.UpsertByIdentifier, a row without one takes
+			// Create and gets a DERIVED `<team>-<n>`. Reading it is what makes a linear_csv
+			// re-import land on the row it already wrote instead of writing a second copy of it.
+			// MEASURED before this line existed, through the async runner on real Postgres: two
+			// jobs carrying BYTE-IDENTICAL two-row Linear export bytes left FOUR issues, and both
+			// reported `succeeded imported=2 skipped=0 failed=0`. See linear_csv_issue_id.go for
+			// the column's provenance and linear_csv_issue_id_job_test.go for the measurement.
+			//
+			// ⚠ ABSENT ⇒ "" ⇒ EXACTLY TODAY'S BEHAVIOUR. An export filtered down to a few columns
+			// carries no `ID`, keeps taking the Create branch, and is unaffected by this line.
+			Identifier:  ci.get(row, linearCSVIssueIDColumn),
 			Title:       title,
 			Description: ci.get(row, "Description"),
 			Status:      status,
