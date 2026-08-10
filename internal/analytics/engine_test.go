@@ -172,9 +172,13 @@ func TestGetAICostTrends_ReturnsDailyCostsAndProjection(t *testing.T) {
 			AddRow(now.AddDate(0, 0, -2), 1.50, 2).
 			AddRow(now.AddDate(0, 0, -1), 2.10, 3).
 			AddRow(now, 0.80, 1))
-	// 3. top issues
+	// 3. top issues — takes the window too, like the four sub-queries around it. This expectation
+	// is the reason the leaderboard cannot silently go back to being all-time: WithArgs is
+	// exact, so dropping the predicate turns the call back into a one-argument query and this
+	// mismatch surfaces (the caller checks the Query error). It cannot tell WHICH rows come
+	// back, though — aicost_window_test.go does that, on real Postgres.
 	pool.ExpectQuery(`ORDER BY ai_cost_usd DESC LIMIT 10`).
-		WithArgs("ws-1").
+		WithArgs("ws-1", 30).
 		WillReturnRows(pgxmock.NewRows([]string{"id", "identifier", "title", "cost", "tokens"}).
 			AddRow("i-1", "ENG-1", "expensive", 12.0, 8000))
 	// 4. by team
