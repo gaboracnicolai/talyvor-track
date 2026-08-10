@@ -107,15 +107,34 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 // header (there is none here — this is off-request), not the source rows (the CSV mapper maps no workspace).
 // So a job's writes land in exactly one workspace: the one persisted at creation under the authz gate.
 func (r *Runner) execute(ctx context.Context, job *Job) {
+	// THE TERMINAL WRITE RUNS ON A CONTEXT THAT CANNOT BE CANCELLED, AND THAT IS THE WHOLE OF
+	// THIS DETAIL. Start is launched as `go importRunner.Start(ctx, 0)` with the PROCESS
+	// lifecycle context, so on SIGTERM — a deploy, a scale-down, a restart — ctx is cancelled
+	// mid-job. Every Finish below used to run through that same ctx, which makes the UPDATE
+	// that records what happened the one write guaranteed to fail exactly when it is needed;
+	// its error was discarded, and ClaimNext selects `status = 'pending'` only. MEASURED on
+	// f0445e3 against real Postgres: the row stays `running` with started_at set and
+	// finished_at NULL, and a second drain claims nothing — for every reader the import is
+	// still in progress, forever. Held by
+	// TestRunner_ShutdownMidImport_DoesNotLeaveTheJobRunningForever.
+	//
+	// ⚠ ONLY THE RECORD IS DETACHED. r.imp.run below still takes the cancellable ctx: an import
+	// MUST stop when the process is going down, and letting it outlive shutdown would be a
+	// different and worse change.
+	//
+	// ⚠ NO DEADLINE IS INVENTED HERE. Whether this write should carry its own timeout (and what
+	// it should be) is an operational judgement with a number in it; pgx's own connect/statement
+	// settings still apply. Written up in the queue rather than guessed at.
+	finishCtx := context.WithoutCancel(ctx)
 	src, err := r.sourceFor(ctx, job)
 	if err != nil {
-		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
+		_ = r.jobs.Finish(finishCtx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
 	// workspace_id + team_id are read from the JOB ROW — the only workspace this job can write into.
 	out, err := r.imp.run(ctx, job.WorkspaceID, job.TeamID, src)
 	if err != nil {
-		_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
+		_ = r.jobs.Finish(finishCtx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
 	summary := summarise(out)
@@ -129,7 +148,7 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 	// out.Warnings = rows that DID import, degraded. They do NOT change terminalStatus: the import
 	// succeeded, and calling it partial would conflate "some rows were rejected" with "every row
 	// landed but some fields could not be mapped". The distinction is the point of the column.
-	_ = r.jobs.Finish(ctx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, out.Refused, out.Skipped, summary, out.Warnings)
+	_ = r.jobs.Finish(finishCtx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, out.Refused, out.Skipped, summary, out.Warnings)
 }
 
 // sourceFor dispatches on source_type → (IssueSource). A '*_csv' job reads its payload from the cold table
