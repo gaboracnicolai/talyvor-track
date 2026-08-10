@@ -84,8 +84,8 @@ func linNodeTyped(id, stateName, stateType string, prio int) string {
 	if stateType != "" {
 		st = fmt.Sprintf(`{"name":%q,"type":%q}`, stateName, stateType)
 	}
-	return fmt.Sprintf(`{"identifier":%q,"title":"T-%s","description":"d","state":%s,"priority":%d,"labels":{"nodes":[{"name":"bug"}]}}`,
-		id, id, st, prio)
+	return fmt.Sprintf(`{"identifier":%q,"title":"T-%s","description":"d","state":%s,"priority":%d,"labels":{"nodes":[{"name":"bug"}]},"createdAt":%q}`,
+		id, id, st, prio, fixtureLinearCreated)
 }
 
 // linearRowsFrom drains one canned page through newLinearSource — the real client, the real decoder,

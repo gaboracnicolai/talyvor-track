@@ -26,7 +26,7 @@ const jiraSearchPath = "/rest/api/3/search/jql"
 // scalars nested nowhere, so — like statusCategory before them — they are free: absent ⇒ the zero
 // value ⇒ exactly today's nil. Narrowing this list takes them away silently, which is why
 // TestJiraRequest_AsksForTheDateFields asserts it at the WIRE, not at the fixture.
-var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate"}
+var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate", jiraAPICreatedField}
 
 // jiraTimeLayouts are pinned BY HAND from what a real Jira actually sends, in the order tried.
 //
@@ -102,6 +102,12 @@ type jiraIssue struct {
 		// exactly as it did before this merge. See jiraTimeLayouts for the shapes they arrive in.
 		DueDate        string `json:"duedate"`
 		ResolutionDate string `json:"resolutiondate"`
+
+		// ⚠ NOT ABSENT-SAFE THE WAY THE TWO ABOVE ARE, AND THE DIFFERENCE IS THE WHOLE MERGE. Those
+		// two land in NULLABLE columns, so a Jira that sends neither leaves a truthful NULL. This one
+		// lands in `created_at`, which is DEFAULT NOW() — an absent value is not an empty column, it
+		// is a WRONG one that looks right. So "" is REPORTED here (viaNoCreatedField), never shrugged off.
+		Created string `json:"created"`
 	} `json:"fields"`
 }
 
@@ -184,6 +190,7 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 		prio, prioOK := mapJiraPriority(it.Fields.Priority.Name)
 		due, dueNotes := jiraDueDate(it.Fields.DueDate)
 		completed, completedNotes := jiraCompletedAt(it.Fields.ResolutionDate, status)
+		created, createdNotes := jiraAPICreated(it.Fields.Created)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  it.Key, // provider-key (PROJ-123)
@@ -194,9 +201,10 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 				Labels:      labels,
 				DueDate:     due,
 				CompletedAt: completed,
+				CreatedAt:   created,
 			},
 			notes: append(collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
-				append(dueNotes, completedNotes...)...),
+				append(dueNotes, append(completedNotes, createdNotes...)...)...),
 		})
 	}
 	return out

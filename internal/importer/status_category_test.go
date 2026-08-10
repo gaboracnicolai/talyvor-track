@@ -52,8 +52,8 @@ func jiraIssueWithCategoryJSON(key, summary, status, categoryKey, categoryName s
 		statusObj = fmt.Sprintf(`{"name":%q,"id":"11772","statusCategory":{"id":2,"key":%q,"colorName":"default","name":%q}}`,
 			status, categoryKey, categoryName)
 	}
-	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":%s,"priority":{"name":"Medium"},"labels":[]}}`,
-		key, summary, statusObj)
+	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":%s,"priority":{"name":"Medium"},"labels":[],"created":%q}}`,
+		key, summary, statusObj, fixtureJiraCreated)
 }
 
 // jiraRowsFrom drains a one-page canned Jira response through the real source.

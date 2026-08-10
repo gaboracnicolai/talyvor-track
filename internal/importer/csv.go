@@ -159,6 +159,19 @@ func (n FieldNote) render(count int) string {
 			"which makes their time-to-resolution meaningless", jiraCSVCreatedColumn, count)
 	case n.Via == viaNoCreatedValue:
 		return fmt.Sprintf("empty %s on %d issue(s) — recorded as created at import time", n.Field, count)
+	case n.Via == viaNoCreatedField:
+		// The API twin of viaNoCreatedColumn, and a SEPARATE sentence because it points somewhere
+		// else: there is no export to go and re-make, so it names the `fields` list the client sends.
+		// ⚠ IT IS REACHABLE: a real Jira Cloud IGNORES an unknown field name (HTTP 200, key absent),
+		// so a rename or a typo in jiraFields lands here and nowhere else.
+		return fmt.Sprintf("the provider response carried no %q field — %d issue(s) recorded as created "+
+			"at import time, which makes their time-to-resolution meaningless", jiraAPICreatedField, count)
+	case n.Via == viaNullCreatedAt:
+		// Linear declares this field NON_NULL, so a null is a statement about the RESPONSE rather than
+		// about the issue. Saying "this issue has no creation time" would be the wrong sentence.
+		return fmt.Sprintf("%s arrived null on %d issue(s) — Linear declares %s non-null, so the response "+
+			"does not match the schema this importer reads; recorded as created at import time",
+			linearAPICreatedField, count, linearAPICreatedField)
 	case n.Via == viaStatusNotDone:
 		return fmt.Sprintf("%s %q on %d issue(s) not recorded — the issue imported as %q, and Track records a completion time only on %q",
 			n.Field, n.Value, count, n.Mapped, model.StatusDone)

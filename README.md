@@ -129,6 +129,13 @@ import reads the column and, if it is missing or in a date format Track does not
 so in `warnings`** rather than quietly recording today's date. (`Export → CSV (All fields)` always
 carries it; a narrowed export may not.)
 
+The **API imports read the same thing** — Jira's `created` and Linear's `createdAt` — and report the
+same way. They needed a separate fix from the CSV one because they write through a different
+statement, and until they got it they had the identical defect: measured against 100 real resolved
+issues on a live Jira Cloud, a true median cycle time of 88.7 hours against Track computing −408.3,
+with **100 of 100 negative**. If a provider response arrives without the field, the job says so in
+`warnings`; the row still imports, and its opening time is the import instant.
+
 Every other resolution **changes nothing and is reported in `warnings`** with the number of issues
 that carried it — `Duplicate`, `Timed out`, `Obsolete` and the rest plainly describe abandoned work
 too, and deciding which of them Track should treat as cancelled is a product judgement, not

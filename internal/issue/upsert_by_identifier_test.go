@@ -3,6 +3,7 @@ package issue_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/model"
@@ -221,5 +222,56 @@ func TestUpsertByIdentifier_CrossWorkspaceTeam_Rejected(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("rejected upsert wrote %d issues into A", n)
+	}
+}
+
+// ── the provider's opening time, and the gate on it ───────────────────────────────────────────
+
+// TestUpsertByIdentifier_LandsTheProvidersOpeningTime is the store-level half of the fourth copy of
+// the completed_at/created_at seam. The importer's job tests prove the number the product SHOWS;
+// this proves the statement itself, so a future caller of this exported method inherits the rule.
+func TestUpsertByIdentifier_LandsTheProvidersOpeningTime(t *testing.T) {
+	d := testutil.New(t)
+	ws := d.Workspace(t)
+	team := d.Team(t, ws.ID)
+	s := issue.NewStore(d.Pool)
+
+	opened := time.Now().UTC().Add(-200 * 24 * time.Hour).Truncate(time.Second)
+	iss := baseImport(ws.ID, team.ID)
+	iss.CreatedAt = opened
+	out, _ := mustUpsert(t, s, iss)
+
+	if delta := out.CreatedAt.UTC().Sub(opened); delta > time.Minute || delta < -time.Minute {
+		t.Errorf("created_at = %s, want %s — off by %s. The column is DEFAULT NOW(), so an omitted "+
+			"created_at is not an empty column but a wrong one that looks right.",
+			out.CreatedAt.UTC().Format(time.RFC3339), opened.Format(time.RFC3339), delta)
+	}
+}
+
+// TestUpsertByIdentifier_IgnoresACreatedAtFromANonImporter is the gate.
+//
+// ⚠ SAID PLAINLY RATHER THAN DRESSED UP: NO SHIPPED CALLER CAN REACH THIS STATE TODAY.
+// importer.run stamps CreatorID = ImporterCreatorID unconditionally (source.go) before every call,
+// so through the import pipeline the gate's condition is always TRUE and blinding it catches
+// nothing. That is a fact about the caller, not a licence to leave the rule unstated: this method is
+// EXPORTED, created_at is the WINDOW PREDICATE of every analytics report
+// (`created_at > NOW() - INTERVAL '1 day' * $2`), and the next caller does not read source.go. So the
+// rule is asserted HERE, where it is reachable, instead of being a comment nothing can falsify.
+func TestUpsertByIdentifier_IgnoresACreatedAtFromANonImporter(t *testing.T) {
+	d := testutil.New(t)
+	ws := d.Workspace(t)
+	team := d.Team(t, ws.ID)
+	s := issue.NewStore(d.Pool)
+
+	before := time.Now().UTC().Add(-time.Minute)
+	iss := baseImport(ws.ID, team.ID)
+	iss.CreatorID = "some-real-user-id" // NOT the importer
+	iss.CreatedAt = time.Now().UTC().Add(-400 * 24 * time.Hour)
+	out, _ := mustUpsert(t, s, iss)
+
+	if out.CreatedAt.UTC().Before(before) {
+		t.Errorf("created_at = %s — a non-importer caller supplied its own opening time and it was "+
+			"honoured. A client that can choose created_at can file work no analytics window sees.",
+			out.CreatedAt.UTC().Format(time.RFC3339))
 	}
 }
