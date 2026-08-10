@@ -431,7 +431,29 @@ type AICostTrends struct {
 // feed the pie / bar charts.
 func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days int) (*AICostTrends, error) {
 	days = clampDays(days)
-	out := &AICostTrends{}
+	// EMPTY, NEVER NIL. Go marshals a nil slice as `null`, and all four of these are `append`-only
+	// below, so a sub-query that matches no rows left its field nil and the client received
+	// `"daily_costs": null`. frontend/src/api/types.ts declares every one of them as a
+	// NON-NULLABLE array and AICostChart.tsx does `trends.daily_costs.map(...)` unguarded, so that
+	// body throws `TypeError: Cannot read properties of null (reading 'map')` and takes the
+	// Analytics page with it — there is no ErrorBoundary in that app. Neither gate can see it:
+	// `npm run typecheck` believes the state is unreachable because the type says so, and on this
+	// side a decode into AICostTrends is blind because `null` and `[]` both land in a nil slice.
+	//
+	// ⚠ IT IS HERE RATHER THAN IN THE HANDLER, WHICH IS WHERE THE THREE SIBLINGS DO IT. Velocity,
+	// Distribution and Workload coerce a TOP-LEVEL slice in analytics/handler.go; these are nested
+	// fields, and there are TWO consumers — the HTTP handler and mcp.Server.toolGetAICosts, which
+	// already hand-rolls `make([]map[string]any, 0, len(top))` for top_cost_issues alone. One place
+	// that covers both callers and all four fields beats a second copy of a partial defence.
+	//
+	// ⚠ THE COHORT IS UNTOUCHED. This changes the SHAPE of an empty answer and nothing about which
+	// rows are in it; the window predicate and maxWindowDays are the product decisions #93 wrote up.
+	out := &AICostTrends{
+		DailyCosts:    []DailyCost{},
+		TopCostIssues: []IssueCost{},
+		CostByTeam:    []TeamCost{},
+		CostByLabel:   []LabelCost{},
+	}
 
 	// Totals + averages — one row scan.
 	var (
