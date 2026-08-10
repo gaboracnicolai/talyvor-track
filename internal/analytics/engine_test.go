@@ -128,8 +128,11 @@ func TestGetTimeToResolution_CalculatesMedianCorrectly(t *testing.T) {
 	// Global stats row.
 	pool.ExpectQuery(`PERCENTILE_CONT\(0\.5\).*PERCENTILE_CONT\(0\.75\).*PERCENTILE_CONT\(0\.95\)`).
 		WithArgs("ws-1", 30).
-		WillReturnRows(pgxmock.NewRows([]string{"avg", "p50", "p75", "p95"}).
-			AddRow(48.5, 24.0, 36.0, 96.0))
+		// `n` is the cohort COUNT(*) — the projection's first column since the empty-cohort fix.
+		// It is here because this mock pins the SHAPE of the query, and a shape that no longer
+		// matches the engine is how a mock keeps passing against code it no longer describes.
+		WillReturnRows(pgxmock.NewRows([]string{"n", "avg", "p50", "p75", "p95"}).
+			AddRow(7, 48.5, 24.0, 36.0, 96.0))
 	// Per-priority breakdown.
 	pool.ExpectQuery(`GROUP BY priority`).
 		WithArgs("ws-1", 30).
@@ -143,6 +146,9 @@ func TestGetTimeToResolution_CalculatesMedianCorrectly(t *testing.T) {
 	}
 	if out.MedianHours != 24.0 {
 		t.Errorf("Median = %v, want 24.0", out.MedianHours)
+	}
+	if out.SampleSize != 7 {
+		t.Errorf("SampleSize = %v, want 7 — the cohort the four numbers were computed over", out.SampleSize)
 	}
 	if out.P95Hours != 96.0 {
 		t.Errorf("P95 = %v, want 96.0", out.P95Hours)
