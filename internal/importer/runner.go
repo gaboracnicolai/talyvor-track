@@ -217,10 +217,23 @@ func summarise(out *ImportResult) string {
 	if out.Skipped > 0 {
 		parts = append(parts, fmt.Sprintf("%d row(s) failed", out.Skipped))
 	}
-	if out.Refused > 0 {
+	// THE TWO REFUSALS ARE NAMED APART. Both are the policy working and both go in the same
+	// counter; they send an operator to two different places. "was not created by an import" is a
+	// true sentence about a human's issue and a FALSE one about a row the operator's own earlier
+	// import created in another team, where the thing to act on is the team, not the duplicate.
+	//
+	// ⚠ BYTE-IDENTICAL WHEN NO ROW HIT THE SECOND CASE — the arithmetic is written so the
+	// native-only wording renders exactly as it did before the split, which is what keeps
+	// TestJobRow_AllRowsRefused and TestRunner_PartialImport_Observable pinning what they pinned.
+	if native := out.Refused - out.refusedOtherTeam; native > 0 {
 		parts = append(parts, fmt.Sprintf(
 			"%d row(s) refused: an issue with that identifier already exists and was not created by an import",
-			out.Refused))
+			native))
+	}
+	if out.refusedOtherTeam > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"%d row(s) refused: that identifier is already imported into another team of this workspace",
+			out.refusedOtherTeam))
 	}
 	return strings.Join(parts, "; ") + "; first: " + out.Errors[0]
 }

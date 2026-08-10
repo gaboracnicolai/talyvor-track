@@ -77,6 +77,15 @@ type ImportResult struct {
 	Refused  int      `json:"refused"`
 	Errors   []string `json:"errors"`
 	Warnings []string `json:"warnings"`
+
+	// refusedOtherTeam is the subset of Refused whose key resolved to an issue an EARLIER IMPORT
+	// put in a DIFFERENT TEAM of this workspace, rather than to an issue a human created. It is
+	// UNEXPORTED ON PURPOSE: the two refusals are one outcome to a caller counting rows (both are
+	// Refused, neither is Skipped) and two different sentences to a human reading the job row, and
+	// only summarise needs the split. Exporting it would add a key to the JSON shape this struct's
+	// own comment above says may not change without a coordinated client change — for a number
+	// whose only reader is one line of runner.go.
+	refusedOtherTeam int
 }
 
 // FieldNote records ONE provider value a mapper could not place. The pipeline COUNTS these
