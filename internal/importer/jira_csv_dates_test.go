@@ -314,21 +314,38 @@ func TestJiraCSVColumns_ANeighbouringDateColumnIsNotRead(t *testing.T) {
 // · Assignee · Created · Completed · Labels · Estimate — and this package's fixtures have carried
 // that exact header since csv_test.go was written. `Created` and `Completed` are therefore read.
 //
-// ⚠ AND THE PREDECESSOR'S OWN FIXTURE IS THE EVIDENCE THAT THE SPELLINGS MATTERED: it guessed a
-// "Due Date" column for Linear, and the documented export HAS NO DUE-DATE COLUMN AT ALL. So the gap
-// this now pins is the one that is still real — a due date read out of some neighbouring column
-// would be invented, which is the Linear twin of the "Custom field (Target Release Date)" trap the
-// test above guards on the Jira side. Whoever gets a real Linear export re-measures the layouts;
-// nobody should make this mapper grow a due date without one.
+// ⚠ AND THE PREDECESSOR'S OWN FIXTURE WAS THE EVIDENCE THAT THE SPELLINGS MATTERED: it guessed a
+// "Due Date" column for Linear, and the DOCUMENTED export has no due-date column at all. This test
+// therefore pinned `DueDate == nil` and wrote down the condition under which that pin should go:
+// "Whoever gets a real Linear export re-measures the layouts; nobody should make this mapper grow a
+// due date without one."
+//
+// ⚠⚠ THAT CONDITION IS NOW MET AND THE PIN IS GONE — #109. The word carrying the whole reason was
+// "documented", and it meant Linear's IMPORT documentation (the nine columns listed above), not its
+// EXPORT header. Measured over 45 real exports from 17 unrelated owners by
+// scripts/w34-linear-csv-column-census-probe.py, negative-controlled four ways: `Due Date` is in
+// 45 of 45 real export headers, in all six header shapes, with 447 non-empty cells — and 441 of
+// them are in two shapes linearCSVTimeLayouts ALREADY accepted, so no layout was guessed to read
+// them. See linear_csv_due_date.go.
+//
+// The assertion below is INVERTED rather than deleted, because the row it maps is the same row
+// that proves Completed and Created still land: a mapper that started reading the wrong column
+// would fail here on all three. What this test can no longer do is guard the NEIGHBOURING-column
+// trap — that protection moved to
+// TestLinearCSVDueDate_ANeighbouringDateColumnIsNotRead (linear_csv_due_date_test.go), the Linear
+// twin of TestJiraCSVColumns_ANeighbouringDateColumnIsNotRead above. Flipping this assertion
+// without moving that guard would have quietly retired it.
 func TestLinearCSVMapper_ReadsTheDocumentedDatesAndInventsNoOthers(t *testing.T) {
 	ci := buildIndex([]string{"Title", "Status", "Priority", "Due Date", "Completed", "Created"})
 	got, err := linearRowMapper(ci, []string{"Ship it", "Done", "High", "2025-01-19", "2025-03-25", "2025-01-02"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.issue.DueDate != nil {
-		t.Errorf("DueDate = %v — Linear's documented export carries no due-date column, so this was "+
-			"read out of a column whose meaning is unmeasured", got.issue.DueDate)
+	if got.issue.DueDate == nil {
+		t.Errorf("DueDate = nil — %q is in 45 of 45 real Linear exports and this mapper is the only "+
+			"one of the four transports that ever dropped it", linearCSVDueDateColumn)
+	} else if want := time.Date(2025, 1, 19, 0, 0, 0, 0, time.UTC); !got.issue.DueDate.Equal(want) {
+		t.Errorf("DueDate = %v, want %v", got.issue.DueDate.UTC(), want)
 	}
 	if got.issue.CompletedAt == nil {
 		t.Errorf("CompletedAt = nil for a Done row whose %q column said 2025-03-25", linearCSVCompletedColumn)

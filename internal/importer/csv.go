@@ -441,6 +441,15 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// during the test. See linear_csv_updated.go for the column's provenance — 44 of 45 real
 	// exports, all six header shapes — and for why #89's census could not see it.
 	updated, updatedNotes := linearCSVUpdated(ci, row)
+	// WHEN LINEAR SAYS THE WORK IS DUE — the last column of the four-transport date matrix, and the
+	// one that was pinned SHUT by a test whose stated reason ("the documented export has no
+	// due-date column at all") turned out to be about Linear's IMPORT documentation rather than its
+	// EXPORT header. It is in 45 of 45 real exports, from all 17 owners. Unlike Created/Updated the
+	// loss here is a truthful NULL rather than a plausible-looking wrong value, so an absent column
+	// or empty cell is silent and only a REFUSED value is reported. See linear_csv_due_date.go for
+	// the census, the serialisation that needed no new layout, and for the assignee gap this does
+	// NOT close.
+	due, dueNotes := linearCSVDueDate(ci.get(row, linearCSVDueDateColumn))
 	return mappedIssue{
 		issue: model.Issue{
 			// THE NAME LINEAR GAVE THE ISSUE, and the ROUTING KEY of source.go's write pipeline —
@@ -460,12 +469,13 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Status:      status,
 			Priority:    prio,
 			Labels:      splitLabelColumns(ci.getAll(row, "Labels")),
+			DueDate:     due,
 			CompletedAt: completed,
 			CreatedAt:   created,
 			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			concatNotes(createdNotes, completedNotes, updatedNotes)...),
+			concatNotes(createdNotes, completedNotes, updatedNotes, dueNotes)...),
 		// Same two columns, same spellings, same report — see the jira twin above.
 		onUpdate: csvClobberedColumnNotes(ci),
 	}, nil
