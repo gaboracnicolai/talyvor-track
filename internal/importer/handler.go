@@ -14,14 +14,28 @@ import (
 // Handler exposes the importer over HTTP. It owns no state — every
 // import is processed inline against the Importer's issue store.
 //
-// The multipart upload is capped at maxUploadBytes; anything larger
-// is rejected before we start parsing. The cap is generous enough
-// for a real Linear/Jira export (tens of thousands of issues × ~1KB
-// each) without letting a single request consume unbounded memory.
+// ⚠ WHAT BOUNDS AN UPLOAD, MEASURED RATHER THAN ASSERTED. This comment used to read "the
+// multipart upload is capped at maxUploadBytes; anything larger is rejected before we start
+// parsing", and every clause of that was wrong:
+//
+//   - maxUploadBytes is ParseMultipartForm's maxMemory argument. It rejects NOTHING — it is
+//     the point at which file parts stop being held in RAM and start spilling to temp files
+//     on disk.
+//   - The size that does reject is httpx.ImportMaxBody (96 MiB), applied as router
+//     middleware in cmd/track/main.go. A different number, in a different package.
+//   - It is not rejected "before we start parsing" but DURING: the read fails partway
+//     through the body. MEASURED on the production stack — a 120 MiB upload is refused
+//     after 100,663,297 bytes (96.0 MiB) have crossed the wire.
+//   - The refusal surfaces as 400 BAD_UPLOAD carrying net/http's "request body too large",
+//     not the 413 BODY_TOO_LARGE every other route answers (httpx.DecodeJSON maps
+//     *http.MaxBytesError explicitly). Reported in the queue rather than changed here: it is
+//     a shipped status code on a public route.
 type Handler struct{ imp *Importer }
 
 func NewHandler(imp *Importer) *Handler { return &Handler{imp: imp} }
 
+// maxUploadBytes is how much of a multipart upload is buffered in MEMORY before the
+// remainder spills to a temp file — not a size limit. See the Handler doc above.
 const maxUploadBytes = 64 << 20 // 64 MiB
 
 func (h *Handler) Mount(r chi.Router) {
@@ -57,10 +71,20 @@ func (h *Handler) jira(w http.ResponseWriter, r *http.Request) {
 type importFn func(ctx context.Context, workspaceID, teamID string, r io.Reader) (*ImportResult, error)
 
 func (h *Handler) run(w http.ResponseWriter, r *http.Request, fn importFn) {
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())
-		return
-	}
+	// WHO MAY IMPORT is decided before WHAT IS BEING IMPORTED is read. Neither check below
+	// touches the body: workspace_id/team_id come from the URL query (r.URL.Query(), not
+	// r.FormValue, so no parse dependency) and the memberships were resolved into the
+	// request context by the T10 middleware.
+	//
+	// ⚠ THE PARSE USED TO RUN FIRST AND THAT COST A 403'd CALLER'S WHOLE UPLOAD. MEASURED on
+	// 666ce7a against real Postgres on the production middleware stack: a caller with a valid
+	// gateway identity and NO membership in the target workspace POSTed 40 MiB and the server
+	// read all 41,943,379 bytes — buffering up to maxUploadBytes of it in heap and spilling
+	// the rest to a temp file — before answering "not a member of this workspace". Every byte
+	// was spent on a request that was never authorized, and the type comment above claimed
+	// that could not happen. Held by TestImporter_NonMemberUploadIsNotRead, which asserts the
+	// non-member's read is ZERO and requires a byte-identical member upload to be read in full
+	// and land, so the zero cannot come from an empty fixture.
 	workspaceID := r.URL.Query().Get("workspace_id")
 	teamID := r.URL.Query().Get("team_id")
 	if workspaceID == "" || teamID == "" {
@@ -74,6 +98,10 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request, fn importFn) {
 	m, ok := authz.AuthorizeWorkspace(r.Context(), workspaceID)
 	if !ok {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
+		return
+	}
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())
 		return
 	}
 	file, _, err := r.FormFile("file")
