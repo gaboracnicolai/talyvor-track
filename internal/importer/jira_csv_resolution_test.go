@@ -239,18 +239,62 @@ func hasLineContaining(lines []string, want string) bool {
 // API transport started calling it, so this is the guard standing between BOTH importers and an
 // invented vocabulary — and the 7,214 issues on the measured Cloud instance whose resolutions Track
 // deliberately does not read are exactly the pressure that would make somebody add one.
+// ⚠⚠ THE SEAM MOVED AND THIS GUARD SPOKE, WHICH IS WHY IT IS EXTENDED RATHER THAN REPOINTED.
+// jira_resolution_delivered.go inserted mapJiraResolution between applyJiraResolution and
+// mapJiraStatus, and it DOES carry a vocabulary — one word, "fixed". Changing the call this guard
+// looks for from mapJiraStatus(raw) to mapJiraResolution(raw) and stopping there would have left the
+// vocabulary living somewhere nothing reads: a future `"duplicate": model.StatusCancelled,` added to
+// that table would answer the open question silently, which is the exact failure this rule was built
+// for. So the rule now holds THREE things, and the third is a PINNED LIST rather than a parse —
+// a source-derived absence cannot see a word being ADDED to a map it does not enumerate, and it
+// cannot see one being removed either.
 func TestSourceDerived_TheResolutionRuleOwnsNoVocabulary(t *testing.T) {
 	const file = "jira_csv_resolution.go"
 	lits := stringLiteralsIn(t, file, "applyJiraResolution")
 	if len(lits) != 0 {
 		t.Errorf("%s: applyJiraResolution carries its own word literals %q — the rule must classify "+
-			"only through mapJiraStatus, which is what makes this merge invent no vocabulary", file, lits)
+			"only through mapJiraResolution, which is what makes it invent no vocabulary inline", file, lits)
 	}
 	// ⚠ AND IT MUST NOT PASS BY THE FUNCTION HAVING NO SWITCH AT ALL: a rule that only ever asserts
 	// an ABSENCE is green on a deleted function. Assert the call it is supposed to be making.
-	if !sourceContains(t, file, "mapJiraStatus(raw)") {
-		t.Errorf("%s: applyJiraResolution no longer calls mapJiraStatus(raw) — rule 1 was asserting "+
+	if !sourceContains(t, file, "mapJiraResolution(raw)") {
+		t.Errorf("%s: applyJiraResolution no longer calls mapJiraResolution(raw) — rule 1 was asserting "+
 			"an absence and would have stayed green on a rewrite that hardcoded its own table", file)
+	}
+	// The new link in the chain: the classifier that owns the resolution-only table must itself hold
+	// no inline words, and must still fall back to the one table that defines cancellation, so
+	// "Won't Fix"/"Won't Do" cannot be forked into a second vocabulary that drifts.
+	const deliveredFile = "jira_resolution_delivered.go"
+	if lits := stringLiteralsIn(t, deliveredFile, "mapJiraResolution"); len(lits) != 0 {
+		t.Errorf("%s: mapJiraResolution carries inline word literals %q — the words belong in the "+
+			"pinned table below, where something reads them", deliveredFile, lits)
+	}
+	if !sourceContains(t, deliveredFile, "mapJiraStatus(raw)") {
+		t.Errorf("%s: mapJiraResolution no longer falls back to mapJiraStatus(raw) — the cancellation "+
+			"vocabulary would then have two homes, which is the drift this rule exists to prevent",
+			deliveredFile)
+	}
+	// ⚠ THE PINNED HALF. Every word here is one a session decided a real instance's provider calls
+	// DELIVERED. Adding one is answering #82's deferred decision; removing one puts 19,698 of 29,512
+	// measured issues (66.7%) back under "Track cannot read that word". Either way it must be a
+	// deliberate edit to this list and not a quiet edit to that map.
+	wantDelivered := map[string]model.IssueStatus{"fixed": model.StatusDone}
+	if len(jiraResolutionDelivered) != len(wantDelivered) {
+		t.Errorf("jiraResolutionDelivered = %v, want exactly %v — the resolution-only vocabulary "+
+			"changed size; that is #82's open decision being answered or unanswered, not a refactor",
+			jiraResolutionDelivered, wantDelivered)
+	}
+	for word, want := range wantDelivered {
+		if got, ok := jiraResolutionDelivered[word]; !ok || got != want {
+			t.Errorf("jiraResolutionDelivered[%q] = (%q, present=%v), want (%q, present=true)",
+				word, got, ok, want)
+		}
+	}
+	for word := range jiraResolutionDelivered {
+		if _, ok := wantDelivered[word]; !ok {
+			t.Errorf("jiraResolutionDelivered gained %q — a word this list has never measured; "+
+				"see jira_resolution_delivered.go for what a new entry has to be justified by", word)
+		}
 	}
 }
 
@@ -332,8 +376,16 @@ func TestPinned_TheMeasuredResolutionVocabularyStillClassifiesAsShipped(t *testi
 		"Won't Do":  {model.StatusCancelled, viaResolutionCancelled, 5373},
 		// agrees with the status — silent
 		"Done": {model.StatusDone, "", 274},
-		// refused and reported — the decision this merge deliberately did not make
-		"Fixed":              {model.StatusDone, viaResolutionUnreadable, 13411},
+		// ⚠ MOVED OUT OF THE "refused" CLASS BELOW, AND THE COUNT IS LEFT AS #82 MEASURED IT because
+		// it is a fact about a DIFFERENT instance (project JRASERVER) and is not this session's to
+		// restate. It was the largest row in this table and it was filed under "the decision this
+		// merge deliberately did not make" — but that decision is whether abandoned-SHAPED work
+		// should move done → cancelled, and "Fixed" cannot move anywhere: the provider's own
+		// description of it is "A fix for this issue is checked into the tree and tested", the row is
+		// already done, and reclassifying it was never on the table. Two questions, one class.
+		// See jira_resolution_delivered.go for the whole-population re-measurement on Jira Cloud.
+		"Fixed": {model.StatusDone, "", 13411},
+		// refused and reported — the decision #82 deliberately did not make, STILL NOT MADE
 		"Duplicate":          {model.StatusDone, viaResolutionUnreadable, 4938},
 		"Timed out":          {model.StatusDone, viaResolutionUnreadable, 3528},
 		"Answered":           {model.StatusDone, viaResolutionUnreadable, 1860},

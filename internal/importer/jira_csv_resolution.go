@@ -107,12 +107,18 @@ func applyJiraResolution(raw string, status model.IssueStatus) (model.IssueStatu
 	if raw == "" || status != model.StatusDone {
 		return status, nil
 	}
-	// Track's OWN word→status table, reused rather than duplicated. The `recognised` half is
-	// deliberately ignored: what matters is which Track status the word lands on, not whether
-	// mapJiraStatus considers it a status NAME. A word it does not know falls to StatusBacklog,
-	// which is neither done nor cancelled, so it takes the "cannot read it" branch below along
-	// with every recognised word that means neither (an "Open"-shaped resolution, say).
-	meaning, _ := mapJiraStatus(raw)
+	// Track's OWN word→status table, reused rather than duplicated — now reached through
+	// mapJiraResolution, which consults the RESOLUTION-only vocabulary first and falls back to it.
+	// A word neither table knows falls to StatusBacklog, which is neither done nor cancelled, so it
+	// takes the "cannot read it" branch below along with every recognised word that means neither
+	// (an "Open"-shaped resolution, say).
+	//
+	// ⚠ THE INDIRECTION IS THE FIX, NOT A TIDY-UP. Reusing the STATUS table alone made "Fixed" —
+	// 19,698 of 29,512 resolved issues (66.7%) on a real Cloud instance — fall to the branch that
+	// tells the operator Track could not tell whether delivered work was delivered. See
+	// jira_resolution_delivered.go for the whole-population measurement, for the provider's own
+	// description of each word, and for why exactly one word was added.
+	meaning := mapJiraResolution(raw)
 	switch meaning {
 	case model.StatusCancelled:
 		return model.StatusCancelled, []FieldNote{{
