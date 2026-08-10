@@ -157,6 +157,12 @@ func (n FieldNote) render(count int) string {
 		// "Track recorded every one of these as opened today".
 		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as created at import time, "+
 			"which makes their time-to-resolution meaningless", jiraCSVCreatedColumn, count)
+	case n.Via == viaNoLinearCreatedColumn:
+		// The Linear twin of the line above. It is a SEPARATE branch, not a shared one, because it
+		// names THIS provider's column constant: a Linear operator sent to a constant called
+		// jiraCSVCreatedColumn is one rename away from being sent to the wrong column entirely.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as created at import time, "+
+			"which makes their time-to-resolution meaningless", linearCSVCreatedColumn, count)
 	case n.Via == viaNoCreatedValue:
 		return fmt.Sprintf("empty %s on %d issue(s) — recorded as created at import time", n.Field, count)
 	case n.Via == viaNoUpdatedColumn:
@@ -340,6 +346,15 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	rawStatus, rawPrio := ci.get(row, "Status"), ci.get(row, "Priority")
 	status, statusOK := mapLinearStatus(rawStatus)
 	prio, prioOK := mapLinearPriority(rawPrio)
+	// The two date columns this mapper carried in its own fixtures for the whole life of the
+	// package and never read. WHEN THE ISSUE WAS OPENED is not an empty column anybody can see —
+	// issues.created_at DEFAULTs to NOW(), so an unread Created makes every imported issue read as
+	// opened at import time; WHEN IT WAS FINISHED is the column analytics selects on, so an unread
+	// Completed makes a whole imported history invisible to the resolution and throughput reports
+	// rather than wrong in them. See linear_csv_dates.go for both measurements and for the stop
+	// reason they overturn.
+	created, createdNotes := linearCSVCreated(ci, row)
+	completed, completedNotes := linearCSVCompleted(ci.get(row, linearCSVCompletedColumn), status)
 	return mappedIssue{
 		issue: model.Issue{
 			Title:       title,
@@ -347,8 +362,11 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Status:      status,
 			Priority:    prio,
 			Labels:      splitLabelColumns(ci.getAll(row, "Labels")),
+			CompletedAt: completed,
+			CreatedAt:   created,
 		},
-		notes: collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
+		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
+			concatNotes(createdNotes, completedNotes)...),
 	}, nil
 }
 
