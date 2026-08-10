@@ -85,15 +85,22 @@ const viaNoLinearUpdatedColumn = "no-Linear-Updated-column"
 // provider renders the same instant two completely different ways on its API and in its CSV), and
 // reusing the Jira parser here would lend a Linear export the evidence a Jira measurement gathered.
 //
-// ⚠ A VALUE THE PINNED LAYOUTS REFUSE IS REPORTED, NEVER SILENTLY DEFAULTED, and that refusal
-// carries real weight on this column: the probe above measured 746 of 2,947 real `Updated` cells
-// (25.3%, from six unrelated owners) in a shape neither pinned layout accepts —
-// `Sun May 11 2025 07:43:48 GMT+0000 (GMT)`, JavaScript's Date.toString. Whether that is Linear's
-// own export or a re-serialisation those repositories performed is NOT decidable from here, so the
-// layout list is left exactly as #89 pinned it and the fail-safe does the work instead: those rows
-// arrive as a warning naming the value, not as a column of import-instant timestamps that reads as
-// a working import. Widening a hand-pinned list on bytes whose provenance is unresolved is the
-// overclaim, not the caution.
+// ⚠ A VALUE THE PINNED LAYOUTS REFUSE IS REPORTED, NEVER SILENTLY DEFAULTED, and that fail-safe is
+// unchanged. What changed is WHICH values they refuse: the probe above measured 746 of 2,947 real
+// `Updated` cells (25.3%, from six unrelated owners) in `Sun May 11 2025 07:43:48 GMT+0000 (GMT)`,
+// JavaScript's Date.toString, and this comment used to end "whether that is Linear's own export or
+// a re-serialisation those repositories performed is NOT decidable from here".
+//
+// ⚠⚠ IT WAS DECIDABLE, AND THE INSTRUMENT WAS THE HEADER RATHER THAN THE DATE. A re-serialiser
+// would have had to reproduce Linear's export header byte for byte. Measured: gong8's toString
+// export and the ISO exports of amo-tech-ai, UIT6 and null-hype carry the SAME 34 columns in the
+// SAME order — down to `Project Milestone ID`, `SLA Status`, `UUID`, `Time in status (minutes)`,
+// `Related to`, `Blocked by`, `Duplicate of` — and wubin28's toString export is Linear's OTHER
+// published shape, the 30-column one ending in `Roadmaps`. One exporter, four unrelated tenants,
+// two date renderings. So the shape is Linear's, rendered through a JS `Date` in some tenants and
+// as ISO in others, and the caution that justified refusing it no longer applies. That is the
+// "better provenance" TestLinearCSVUpdated_Rule2 wrote down as its own condition for widening.
+// See linear_csv_tostring_dates.go for the parse and for what is still NOT claimed.
 func linearCSVUpdated(ci columnIndex, row []string) (time.Time, []FieldNote) {
 	if len(ci[strings.ToLower(linearCSVUpdatedColumn)]) == 0 {
 		return time.Time{}, []FieldNote{{Field: fieldUpdated, Via: viaNoLinearUpdatedColumn}}
