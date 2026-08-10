@@ -236,7 +236,19 @@ func TestJiraCSVTime_TheAPILayoutsRefuseEveryMeasuredCSVDate(t *testing.T) {
 // added without a measurement behind it fails here until somebody writes down where the bytes came
 // from, and a layout deleted fails as stale.
 func TestJiraCSVTime_TheLayoutListIsExactlyWhatWasMeasured(t *testing.T) {
-	want := []string{"2/Jan/2006 3:04 PM"}
+	// Six entries added by the corpus census in jira_csv_two_digit_year.go, each with the number of
+	// cells it is the first to accept written beside it there. Three further candidates
+	// (`2/Jan/2006 15:04`, `Jan/2/2006 3:04 PM`, `2/Jan/2006`) were evaluated and DROPPED for
+	// scoring zero cells — which is this test doing its job rather than being edited around.
+	want := []string{
+		"2/Jan/2006 3:04 PM",
+		"2/Jan/06 3:04 PM",
+		"2/Jan/06 15:04",
+		"2006-01-02 15:04",
+		"2006-01-02 15:04:05",
+		"Jan/2/06 3:04 PM",
+		"2/Jan/06",
+	}
 	if len(jiraCSVTimeLayouts) != len(want) {
 		t.Fatalf("jiraCSVTimeLayouts = %q, want %q — every entry needs measured bytes behind it "+
 			"(see scripts/w34-jira-csv-export-probe.py)", jiraCSVTimeLayouts, want)
