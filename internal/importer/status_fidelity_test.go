@@ -250,9 +250,9 @@ func TestRun_ReportsUnrecognisedStatus(t *testing.T) {
 // report is unreadable and the fix trades a silent failure for a useless one.
 func TestRun_WarningsAreCountedNotAccumulated(t *testing.T) {
 	var b strings.Builder
-	b.WriteString("Summary,Description,Status,Priority,Labels,Created\n")
+	b.WriteString("Summary,Description,Status,Priority,Labels,Created,Updated\n")
 	for i := 0; i < 500; i++ {
-		fmt.Fprintf(&b, "row %d,d,Deployed,High,bug,23/Jul/2026 7:36 PM\n", i)
+		fmt.Fprintf(&b, "row %d,d,Deployed,High,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n", i)
 	}
 	out, err := New(&fakeIssueStore{}).ImportJiraCSV(t.Context(), "ws1", "team1", strings.NewReader(b.String()))
 	if err != nil {
@@ -269,10 +269,10 @@ func TestRun_WarningsAreCountedNotAccumulated(t *testing.T) {
 // CANNOT PASS BY ABSENCE, and cannot pass by warning about everything: a wholly recognised import
 // must produce ZERO warnings. Paired with the test above, a mapper stuck on either answer fails.
 func TestRun_CleanImportProducesNoWarnings(t *testing.T) {
-	csv := "Summary,Description,Status,Priority,Labels,Created\n" +
-		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM\n" +
-		"Two,d,In Progress,Medium,bug,23/Jul/2026 7:36 PM\n" +
-		"Three,d,Resolved,Lowest,bug,23/Jul/2026 7:36 PM\n"
+	csv := "Summary,Description,Status,Priority,Labels,Created,Updated\n" +
+		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
+		"Two,d,In Progress,Medium,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
+		"Three,d,Resolved,Lowest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 	out, err := New(&fakeIssueStore{}).ImportJiraCSV(t.Context(), "ws1", "team1", strings.NewReader(csv))
 	if err != nil {
 		t.Fatal(err)

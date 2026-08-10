@@ -159,6 +159,15 @@ func (n FieldNote) render(count int) string {
 			"which makes their time-to-resolution meaningless", jiraCSVCreatedColumn, count)
 	case n.Via == viaNoCreatedValue:
 		return fmt.Sprintf("empty %s on %d issue(s) — recorded as created at import time", n.Field, count)
+	case n.Via == viaNoUpdatedColumn:
+		// The structural-zero line for Updated. It names a DIFFERENT consequence from the Created
+		// one on purpose: created_at corrupts a number on an analytics page, updated_at reorders
+		// the issue list and relabels every row, which is what an operator will actually see.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as last updated at "+
+			"import time, so they sort above current work and every one reads as just updated",
+			jiraCSVUpdatedColumn, count)
+	case n.Via == viaNoUpdatedValue:
+		return fmt.Sprintf("empty %s on %d issue(s) — recorded as last updated at import time", n.Field, count)
 	case n.Via == viaNoCreatedField:
 		// The API twin of viaNoCreatedColumn, and a SEPARATE sentence because it points somewhere
 		// else: there is no export to go and re-make, so it names the `fields` list the client sends.
@@ -495,6 +504,12 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// read as opened at import time and turns the time-to-resolution report NEGATIVE. See
 	// jira_csv_created.go for the measurement and for why the two absent-cases are reported apart.
 	created, createdNotes := jiraCSVCreated(ci, row)
+	// WHEN THE ISSUE WAS LAST TOUCHED. Same invisible-failure shape as Created — issues.updated_at
+	// DEFAULTs to NOW() too — but it surfaces on the product's MAIN SCREEN rather than on an
+	// analytics page: the issue list sorts by updated_at DESC and every row prints "updated <n>
+	// ago". An unread Updated puts a backlog measured in YEARS at the top of today's list. See
+	// jira_csv_updated.go for the measurement and for the stop reason it overturns.
+	updated, updatedNotes := jiraCSVUpdated(ci, row)
 	return mappedIssue{
 		issue: model.Issue{
 			Title:       title,
@@ -505,9 +520,10 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			DueDate:     due,
 			CompletedAt: completed,
 			CreatedAt:   created,
+			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes)...),
+			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes)...),
 	}, nil
 }
 

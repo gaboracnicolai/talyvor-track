@@ -24,13 +24,15 @@ import (
 
 func csvWithDistinctBadDates(n int) string {
 	var b strings.Builder
-	// `Created` is present so the ONLY unbounded note kind under test is the Due Date one.
-	b.WriteString("Summary,Description,Status,Priority,Due Date,Created\n")
+	// `Created` and `Updated` are present so the ONLY unbounded note kind under test is the Due
+	// Date one. Both are date columns whose absence is its own note kind; leaving either out would
+	// make this a test of how many KINDS the report holds rather than of the per-kind bound.
+	b.WriteString("Summary,Description,Status,Priority,Due Date,Created,Updated\n")
 	for i := 0; i < n; i++ {
 		// Unparseable by every pinned layout AND distinct per row. The first version of this
 		// generator used (i%28, i%24, i%60, i%60), whose period is 840 — the measurement saturated
 		// on the generator rather than on the product, and reported a bound that did not exist.
-		fmt.Fprintf(&b, "Issue %d,d,To Do,High,2025-01-01T00:00:00.%09dZ,23/Jul/2026 7:36 PM\n", i, i)
+		fmt.Fprintf(&b, "Issue %d,d,To Do,High,2025-01-01T00:00:00.%09dZ,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n", i, i)
 	}
 	return b.String()
 }
@@ -98,9 +100,11 @@ func TestJobRow_ARepeatedValueStillReportsItsFullCount(t *testing.T) {
 	runner := importer.NewRunner(js, importer.New(issue.NewStore(d.Pool)))
 
 	var b strings.Builder
-	b.WriteString("Summary,Description,Status,Priority,Created\n")
+	// Same reason as the bound fixture above: `Created` and `Updated` present so the status note
+	// is the only kind this test can see.
+	b.WriteString("Summary,Description,Status,Priority,Created,Updated\n")
 	for i := 0; i < rows; i++ {
-		fmt.Fprintf(&b, "Issue %d,d,Deployed,High,23/Jul/2026 7:36 PM\n", i)
+		fmt.Fprintf(&b, "Issue %d,d,Deployed,High,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n", i)
 	}
 	jobID, err := js.Create(ctx, ws.ID, team.ID, "jira_csv", []byte(b.String()))
 	if err != nil {
