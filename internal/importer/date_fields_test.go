@@ -54,8 +54,20 @@ func jiraIssueWithDatesJSON(key, summary, status, due, resolution string) string
 		}
 		return fmt.Sprintf(`,%q:%q`, name, v)
 	}
-	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":{"name":%q},"priority":{"name":"Medium"},"labels":[],"created":%q,"updated":%q%s%s}}`,
-		key, summary, status, fixtureJiraCreated, fixtureJiraUpdated, field("duedate", due), field("resolutiondate", resolution))
+	// ⚠ `resolution` IS PAIRED WITH `resolutiondate`, BECAUSE THE PROVIDER PAIRS THEM. Measured on
+	// the shipped endpoint: on the sampled instance `statusCategory = Done` and `resolution IS NOT
+	// EMPTY` return the SAME 18,267 issues, and an unresolved issue comes back `"resolution": null`
+	// with the key present. So a dated row carries a resolution object and an undated row carries
+	// null — a fixture with a resolutiondate and no resolution is a shape Jira does not send.
+	// The word is "Done" rather than the instance's more common "Fixed" so that it AGREES with the
+	// status this builder is given; a disagreeing word would inject an unrelated finding into a test
+	// about dates. See api_resolution.go.
+	res := `,"resolution":null`
+	if resolution != "" && resolution != "null" {
+		res = `,"resolution":{"id":"10","name":"Done"}`
+	}
+	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":{"name":%q},"priority":{"name":"Medium"},"labels":[],"created":%q,"updated":%q%s%s%s}}`,
+		key, summary, status, fixtureJiraCreated, fixtureJiraUpdated, field("duedate", due), field("resolutiondate", resolution), res)
 }
 
 // ── 1. THE FIELDS LAND ────────────────────────────────────────────────────────────────────────────

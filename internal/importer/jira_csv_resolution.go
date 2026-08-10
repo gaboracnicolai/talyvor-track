@@ -88,13 +88,21 @@ const (
 	viaResolutionUnreadable = "resolution-unreadable"
 )
 
-// applyJiraCSVResolution is the whole rule. It takes the status the NAME mapping produced and the
-// raw Resolution cell, and returns the status the row should import as plus whatever that decision
+// applyJiraResolution is the whole rule. It takes the status the NAME mapping produced and the
+// raw resolution word, and returns the status the row should import as plus whatever that decision
 // needs to say out loud.
+//
+// ⚠ IT IS SHARED WITH THE JIRA API TRANSPORT AND WAS RENAMED FOR IT (it was applyJiraCSVResolution
+// through #82). The rule is transport-neutral — it classifies a WORD through Track's own
+// mapJiraStatus and its two warning sentences name no column — so the API path CALLS it rather than
+// copying it: two copies would be two vocabularies that can drift, which is the one thing this rule
+// exists to prevent. What does NOT transfer is the measurement above: the API transport's evidence
+// was gathered separately, on a different Jira product through a different endpoint, and it lives
+// in api_resolution.go with the states only that transport has.
 //
 // Absent column or empty cell ⇒ (status, nil): an unresolved issue has no resolution, and a CSV
 // without the column must behave exactly as it did before this file existed.
-func applyJiraCSVResolution(raw string, status model.IssueStatus) (model.IssueStatus, []FieldNote) {
+func applyJiraResolution(raw string, status model.IssueStatus) (model.IssueStatus, []FieldNote) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || status != model.StatusDone {
 		return status, nil

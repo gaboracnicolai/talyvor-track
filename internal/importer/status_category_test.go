@@ -52,7 +52,12 @@ func jiraIssueWithCategoryJSON(key, summary, status, categoryKey, categoryName s
 		statusObj = fmt.Sprintf(`{"name":%q,"id":"11772","statusCategory":{"id":2,"key":%q,"colorName":"default","name":%q}}`,
 			status, categoryKey, categoryName)
 	}
-	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":%s,"priority":{"name":"Medium"},"labels":[],"created":%q,"updated":%q}}`,
+	// ⚠ `"resolution": null`, NOT AN ABSENT KEY, and that is the shape rather than a detail. These
+	// fixtures carry no resolutiondate, and the provider pairs the two: measured on the shipped
+	// endpoint, an unresolved issue comes back with the key PRESENT and null, while a key that is
+	// missing entirely means the `fields` list never asked — which api_resolution.go reports as a
+	// structural zero. A fixture that omitted it would be exercising that fault, not this one.
+	return fmt.Sprintf(`{"key":%q,"fields":{"summary":%q,"description":null,"status":%s,"priority":{"name":"Medium"},"labels":[],"created":%q,"updated":%q,"resolution":null}}`,
 		key, summary, statusObj, fixtureJiraCreated, fixtureJiraUpdated)
 }
 

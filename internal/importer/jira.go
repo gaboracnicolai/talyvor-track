@@ -26,7 +26,7 @@ const jiraSearchPath = "/rest/api/3/search/jql"
 // scalars nested nowhere, so — like statusCategory before them — they are free: absent ⇒ the zero
 // value ⇒ exactly today's nil. Narrowing this list takes them away silently, which is why
 // TestJiraRequest_AsksForTheDateFields asserts it at the WIRE, not at the fixture.
-var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate", jiraAPICreatedField, jiraAPIUpdatedField}
+var jiraFields = []string{"summary", "description", "status", "priority", "labels", "duedate", "resolutiondate", jiraAPICreatedField, jiraAPIUpdatedField, jiraAPIResolutionField}
 
 // jiraTimeLayouts are pinned BY HAND from what a real Jira actually sends, in the order tried.
 //
@@ -115,6 +115,13 @@ type jiraIssue struct {
 		// reorders the issue list and prints "updated just now" on every imported row. Reported as
 		// viaNoUpdatedField, never shrugged off.
 		Updated string `json:"updated"`
+
+		// ⚠ json.RawMessage RATHER THAN A DECODED STRUCT, AND THAT IS THE POINT. Jira sends
+		// `"resolution": null` for an unresolved issue and omits the key entirely when the `fields`
+		// list did not ask (both MEASURED on the shipped endpoint) — and a *struct is nil for both.
+		// Keeping the bytes is the only way jiraAPIResolution can tell "this issue is open" from
+		// "this request stopped asking", which are the same database row and opposite reports.
+		Resolution json.RawMessage `json:"resolution"`
 	} `json:"fields"`
 }
 
@@ -195,6 +202,15 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 			status, fallback = resolveJiraStatusCategory(it.Fields.Status.StatusCategory.Key, status)
 		}
 		prio, prioOK := mapJiraPriority(it.Fields.Priority.Name)
+		// `resolution` says whether closed work was FINISHED or ABANDONED, and it runs HERE for two
+		// reasons that are both load-bearing. AFTER the category fallback above, because on the
+		// measured instance 138 of 3,000 resolved issues reach `done` only through statusCategory —
+		// a route the CSV mapper does not have. And BEFORE jiraCompletedAt below, because that
+		// mapping gates on the status this line can change, and on THIS transport the mapper's gate
+		// is the only one: UpsertByIdentifier passes CompletedAt through ungated, where Create nils
+		// it itself. Reversing these two lines lands a cancelled issue carrying a completion time,
+		// which analytics counts as delivered work. See api_resolution.go.
+		status, resolutionNotes := jiraAPIResolution(it.Fields.Resolution, status)
 		due, dueNotes := jiraDueDate(it.Fields.DueDate)
 		completed, completedNotes := jiraCompletedAt(it.Fields.ResolutionDate, status)
 		created, createdNotes := jiraAPICreated(it.Fields.Created)
@@ -213,7 +229,7 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 				UpdatedAt:   updated,
 			},
 			notes: append(collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
-				append(dueNotes, append(completedNotes, append(createdNotes, updatedNotes...)...)...)...),
+				append(resolutionNotes, append(dueNotes, append(completedNotes, append(createdNotes, updatedNotes...)...)...)...)...),
 		})
 	}
 	return out

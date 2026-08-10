@@ -230,30 +230,41 @@ func hasLineContaining(lines []string, want string) bool {
 // ── rule 1: source-derived ───────────────────────────────────────────────────────────────────────
 //
 // THE PROPERTY THAT MAKES THIS MERGE DEFENSIBLE IS THAT IT INVENTS NO VOCABULARY, and a property is
-// worth nothing unless something fails when it stops holding. applyJiraCSVResolution classifies by
+// worth nothing unless something fails when it stops holding. applyJiraResolution classifies by
 // asking mapJiraStatus; the moment it grows a word list of its own — one `case "duplicate":` added
 // by a future session in a hurry — the argument in the file header becomes false while every
 // behavioural test above stays green. This reads the SHIPPED source and refuses that.
+//
+// ⚠ IT NOW GUARDS TWO TRANSPORTS. The rule was renamed from applyJiraCSVResolution when the Jira
+// API transport started calling it, so this is the guard standing between BOTH importers and an
+// invented vocabulary — and the 7,214 issues on the measured Cloud instance whose resolutions Track
+// deliberately does not read are exactly the pressure that would make somebody add one.
 func TestSourceDerived_TheResolutionRuleOwnsNoVocabulary(t *testing.T) {
 	const file = "jira_csv_resolution.go"
-	lits := caseLiteralsIn(t, file, "applyJiraCSVResolution")
+	lits := stringLiteralsIn(t, file, "applyJiraResolution")
 	if len(lits) != 0 {
-		t.Errorf("%s: applyJiraCSVResolution carries its own case literals %q — the rule must classify "+
+		t.Errorf("%s: applyJiraResolution carries its own word literals %q — the rule must classify "+
 			"only through mapJiraStatus, which is what makes this merge invent no vocabulary", file, lits)
 	}
 	// ⚠ AND IT MUST NOT PASS BY THE FUNCTION HAVING NO SWITCH AT ALL: a rule that only ever asserts
 	// an ABSENCE is green on a deleted function. Assert the call it is supposed to be making.
 	if !sourceContains(t, file, "mapJiraStatus(raw)") {
-		t.Errorf("%s: applyJiraCSVResolution no longer calls mapJiraStatus(raw) — rule 1 was asserting "+
+		t.Errorf("%s: applyJiraResolution no longer calls mapJiraStatus(raw) — rule 1 was asserting "+
 			"an absence and would have stayed green on a rewrite that hardcoded its own table", file)
 	}
 }
 
-// caseLiteralsIn is caseLiteralsOf without its non-empty floor: this guard's whole point is that the
+// stringLiteralsIn is caseLiteralsOf without its non-empty floor: this guard's whole point is that the
 // count is ZERO, so the shared helper's "cannot pass by finding nothing" Fatal is the wrong shape
 // here. Duplicated deliberately rather than loosened — status_fidelity_test.go's floor is load-
 // bearing for the mappers and weakening it there to serve this file would blind that guard.
-func caseLiteralsIn(t *testing.T, file, fn string) []string {
+// ⚠ IT COLLECTS EVERY STRING LITERAL IN THE BODY, NOT ONLY THOSE IN `case` CLAUSES, AND THAT
+// WIDENING WAS FORCED BY A CONTROL RATHER THAN CHOSEN. The first version inspected CaseClause nodes
+// only; a control that added `if raw == "Duplicate" { return model.StatusCancelled, nil }` — the
+// most natural way a session in a hurry would answer the open question — left it perfectly GREEN.
+// A vocabulary is a vocabulary whichever syntax carries it. `""` is excluded by the caller, because
+// the empty-value check is a shape test rather than a word.
+func stringLiteralsIn(t *testing.T, file, fn string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, file, nil, 0)
@@ -269,18 +280,16 @@ func caseLiteralsIn(t *testing.T, file, fn string) []string {
 		}
 		found = true
 		ast.Inspect(fd.Body, func(n ast.Node) bool {
-			cc, ok := n.(*ast.CaseClause)
-			if !ok {
+			bl, ok := n.(*ast.BasicLit)
+			if !ok || bl.Kind != token.STRING {
 				return true
 			}
-			for _, e := range cc.List {
-				if bl, ok := e.(*ast.BasicLit); ok && bl.Kind == token.STRING {
-					s, err := strconv.Unquote(bl.Value)
-					if err != nil {
-						t.Fatalf("unquote %s in %s: %v", bl.Value, fn, err)
-					}
-					out = append(out, s)
-				}
+			s, err := strconv.Unquote(bl.Value)
+			if err != nil {
+				t.Fatalf("unquote %s in %s: %v", bl.Value, fn, err)
+			}
+			if s != "" {
+				out = append(out, s)
 			}
 			return true
 		})
@@ -340,7 +349,7 @@ func TestPinned_TheMeasuredResolutionVocabularyStillClassifiesAsShipped(t *testi
 	// still satisfy every row of itself.
 	seen := map[string]int{}
 	for raw, w := range measured {
-		gotStatus, notes := applyJiraCSVResolution(raw, model.StatusDone)
+		gotStatus, notes := applyJiraResolution(raw, model.StatusDone)
 		if gotStatus != w.status {
 			t.Errorf("resolution %q (%d issues measured): status = %q, want %q", raw, w.issues, gotStatus, w.status)
 		}
