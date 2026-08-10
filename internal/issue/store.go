@@ -485,6 +485,28 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
         --   providers emit that same shape — Linear ENG-123, Jira PROJ-123 — so a team called ENG
         --   in Track and a team called ENG in Linear collide in this one un-namespaced column.
         --   Without this predicate the import UPDATEs a user's issue and reports it as Imported.
+        AND issues.team_id = $2
+        -- ^ THE SAME ARGUMENT, ONE STEP FURTHER, AND IT IS THE HALF THE LINE ABOVE COULD NOT MAKE.
+        --   creator_id separates an IMPORT from a HUMAN; it does not separate one import from
+        --   another, and the identifier column carries no team. So the row this statement lands on
+        --   may belong to a DIFFERENT TEAM of the same workspace, and every consequence of that is
+        --   silent: team_id is not in the SET (correctly — a re-imported issue keeps its identity,
+        --   and number is UNIQUE per (team_id, number)), so the write goes to the other team's
+        --   row and the caller counts it Imported.
+        --   MEASURED through the async runner on real Postgres, two teams in one workspace:
+        --   the same export imported into team B after team A reported succeeded imported=2 with
+        --   ZERO issues in team B, and a Linear export whose keys collide REWROTE team A's Jira
+        --   issues — title, description and labels, the three columns this arm clobbers — under
+        --   succeeded again. The collision is the namespace, not a coincidence: whole-population
+        --   over 305 real Jira exports (172 distinct project keys, MEDIAN LENGTH 4), NINE keys are
+        --   carried by exports from two or more DISTINCT REPOSITORY OWNERS, and the list is headed
+        --   by SCRUM (9 owners), KAN (3) and PROJ (2) — the keys Jira Software's own Scrum and
+        --   Kanban templates hand out by default. Two unrelated Jira sites landing in one Track
+        --   workspace collide on the key the provider itself chose for both of them.
+        --   Refusing is the same policy the line above already implements, and it is deliberately
+        --   NOT a move: carrying a row into the requested team would reallocate an issue's number
+        --   under a user, and no Track path moves an issue between teams (team_id is not in
+        --   updatableFields). That is a product decision, written up rather than made here.
     RETURNING (xmax = 0) AS inserted, ` + issueColumns
 
 	var inserted bool
@@ -493,17 +515,57 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 		inserted: &inserted,
 	})
 	if err != nil {
-		// The conflicting row exists but is not the importer's: the DO UPDATE ... WHERE matched nothing, so
-		// RETURNING produced no row. Say exactly that — the caller (importer.run) tallies it as Skipped with
-		// this message, which is the difference between "we did not import one issue" and a silent overwrite.
+		// The conflicting row exists but the DO UPDATE ... WHERE matched nothing, so RETURNING produced no
+		// row. Say exactly WHICH of the two predicates declined — the caller (importer.run) counts both as
+		// Refused, and the difference is the sentence a human reads off the job row. One read, on the error
+		// path only, because the statement cannot report a row it deliberately did not touch.
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, false, fmt.Errorf(
-				"issue: %q already exists in this workspace and was not created by an import; refusing to overwrite it: %w",
-				issue.Identifier, ErrIdentifierNotImportOwned)
+			return nil, false, s.diagnoseUpsertRefusal(ctx, issue.WorkspaceID, issue.TeamID, issue.Identifier)
 		}
 		return nil, false, err
 	}
 	return out, inserted, nil
+}
+
+// diagnoseUpsertRefusal names which of the conflict arm's two predicates declined the write. It runs ONLY on
+// the ErrNoRows path — a refusal — so the ordinary import costs nothing, and it reads the ONE row the
+// statement just refused to touch, scoped to the same (workspace_id, identifier) the conflict fired on.
+//
+// ⚠ THE ORDER IS NOT ARBITRARY. A row can be BOTH human-created and in another team; "a human owns this
+// key" is the stronger fact and the one #71's whole refusal exists to state, so it is answered first and
+// its sentence is byte-identical to the one that shipped before the team predicate existed.
+//
+// ⚠ THE THIRD BRANCH IS NOT DEFENSIVE PADDING. Between the upsert and this read another connection may have
+// deleted the conflicting row, and a diagnosis that assumed the row is still there would either panic or
+// report a confident falsehood. It says what it knows: the write did not land and the reason could not be
+// re-read.
+func (s *Store) diagnoseUpsertRefusal(ctx context.Context, workspaceID, teamID, identifier string) error {
+	var creatorID, holdingTeamID, holdingTeamIdentifier string
+	err := s.pool.QueryRow(ctx,
+		`SELECT i.creator_id, i.team_id, COALESCE(t.identifier, '')
+           FROM issues i LEFT JOIN teams t ON t.id = i.team_id
+          WHERE i.workspace_id = $1 AND i.identifier = $2`,
+		workspaceID, identifier).Scan(&creatorID, &holdingTeamID, &holdingTeamIdentifier)
+	switch {
+	case err != nil:
+		return fmt.Errorf(
+			"issue: %q already exists in this workspace and this import did not overwrite it (the conflicting row could not be re-read: %v): %w",
+			identifier, err, ErrIdentifierNotImportOwned)
+	case creatorID != model.ImporterCreatorID:
+		return fmt.Errorf(
+			"issue: %q already exists in this workspace and was not created by an import; refusing to overwrite it: %w",
+			identifier, ErrIdentifierNotImportOwned)
+	case holdingTeamID != teamID:
+		return fmt.Errorf(
+			"issue: %q is already imported into another team of this workspace (%s); this import will not move it or overwrite it: %w",
+			identifier, holdingTeamIdentifier, ErrIdentifierOwnedByAnotherTeam)
+	default:
+		// Neither predicate explains it: the row is this team's and is import-owned, so the conflict arm
+		// should have updated it. Reporting a refusal we cannot account for is the only honest answer.
+		return fmt.Errorf(
+			"issue: %q exists and is owned by this team's import, yet the re-import matched no row: %w",
+			identifier, ErrIdentifierNotImportOwned)
+	}
 }
 
 // ErrIdentifierNotImportOwned is returned by UpsertByIdentifier when the provider key collides with an issue
@@ -515,6 +577,12 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 // different error from the one the importer tests against and every refusal would silently score as a
 // failure again. See model.ErrIdentifierNotImportOwned for the argument.
 var ErrIdentifierNotImportOwned = model.ErrIdentifierNotImportOwned
+
+// ErrIdentifierOwnedByAnotherTeam is returned by UpsertByIdentifier when the provider key resolves to an
+// issue an EARLIER IMPORT put in a different team of the same workspace. Same aliasing argument as above and
+// for the same reason: errors.Is compares identity, so a re-declaration here would be a different error from
+// the one importer.run tests against and every cross-team refusal would score as a failure.
+var ErrIdentifierOwnedByAnotherTeam = model.ErrIdentifierOwnedByAnotherTeam
 
 // insertedScanner adapts a row whose projection is `(xmax=0) AS inserted, ` + issueColumns so scanIssue (which
 // scans exactly issueColumns) can be reused unchanged: it prepends &inserted to the scan destinations.

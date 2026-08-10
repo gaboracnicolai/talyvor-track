@@ -103,9 +103,22 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 				// human created; the row not landing is the policy working. It is counted apart so the
 				// job row can say which of the two happened — issue.Store exported the sentinel for
 				// exactly this and, until now, nobody asked.
-				if errors.Is(err, model.ErrIdentifierNotImportOwned) {
+				//
+				// ⚠ THE SECOND REFUSAL IS COUNTED THE SAME AND REPORTED DIFFERENTLY. A key that
+				// resolves to another TEAM's import is refused for the same reason a human's issue
+				// is — this import does not own that row — so it belongs in the same counter and
+				// must not reach `failed`. What it must not share is the SENTENCE: "was not
+				// created by an import" is false of a row the operator's own earlier import
+				// created, and it sends them looking for a duplicate that does not exist. The
+				// second tally exists for summarise and for nothing else; it is unexported, so the
+				// shipped ImportResult JSON shape is unchanged (see its comment).
+				switch {
+				case errors.Is(err, model.ErrIdentifierOwnedByAnotherTeam):
 					out.Refused++
-				} else {
+					out.refusedOtherTeam++
+				case errors.Is(err, model.ErrIdentifierNotImportOwned):
+					out.Refused++
+				default:
 					out.Skipped++
 				}
 				out.Errors = append(out.Errors, fmt.Sprintf("row %d: upsert: %v", row.RowNum, err))

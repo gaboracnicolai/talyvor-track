@@ -88,6 +88,28 @@ const ImporterCreatorID = "importer"
 // up an import that protected three human-written issues reported {status:"failed", failed:3}.
 var ErrIdentifierNotImportOwned = errors.New("identifier not owned by an import")
 
+// ErrIdentifierOwnedByAnotherTeam is the SECOND refusal the same conflict arm makes, and it exists
+// because ErrIdentifierNotImportOwned answers only half of the question that arm has to ask.
+// `issues.identifier` is UNIQUE per (workspace_id, identifier) and carries no team in it, so the
+// row an import collides with may be a HUMAN's (that one) or ANOTHER TEAM'S IMPORT (this one).
+//
+// ⚠ MEASURED before this existed, through the async runner on real Postgres, two teams in one
+// workspace: importing the same export into team B after team A reported `succeeded imported=2`
+// with ZERO issues in team B, and a Linear export whose keys collide overwrote team A's Jira
+// issues' title, description and labels — the three columns the conflict arm clobbers — while
+// reporting `succeeded` again.
+//
+// ⚠ THE COLLISION IS THE NAMESPACE RATHER THAN A COINCIDENCE: across 305 real Jira exports, NINE
+// project keys are carried by two or more distinct repository owners, headed by SCRUM (9 owners)
+// and KAN (3) — the keys Jira's own Scrum and Kanban templates assign by default.
+//
+// ⚠ IT IS A DISTINCT VALUE RATHER THAN A REUSE, and the reason is the sentence rather than the
+// control flow: both refusals are counted the same way (Refused, never Failed), but telling an
+// operator their issue "was not created by an import" when it was created by their own earlier
+// import sends them to look for a duplicate that does not exist. The two halves must be tellable
+// apart at the point a human reads the job row.
+var ErrIdentifierOwnedByAnotherTeam = errors.New("identifier already imported into another team")
+
 type IssuePriority int
 
 const (
