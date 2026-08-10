@@ -172,6 +172,13 @@ func (n FieldNote) render(count int) string {
 		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as last updated at "+
 			"import time, so they sort above current work and every one reads as just updated",
 			jiraCSVUpdatedColumn, count)
+	case n.Via == viaNoLinearUpdatedColumn:
+		// The Linear twin of the line above, and a SEPARATE branch for the same reason
+		// viaNoLinearCreatedColumn is: it names THIS provider's column constant, so a Linear
+		// operator is never sent to look at a column spelled for Jira.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) recorded as last updated at "+
+			"import time, so they sort above current work and every one reads as just updated",
+			linearCSVUpdatedColumn, count)
 	case n.Via == viaNoUpdatedValue:
 		return fmt.Sprintf("empty %s on %d issue(s) — recorded as last updated at import time", n.Field, count)
 	case n.Via == viaNoCreatedField:
@@ -355,6 +362,15 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// reason they overturn.
 	created, createdNotes := linearCSVCreated(ci, row)
 	completed, completedNotes := linearCSVCompleted(ci.get(row, linearCSVCompletedColumn), status)
+	// WHEN LINEAR LAST TOUCHED THE ISSUE — the column the other three transports have read since
+	// #85/#86 and this one alone was still dropping. Same invisible-failure shape as Created
+	// (issues.updated_at is DEFAULT NOW(), so the loss is a plausible timestamp rather than a null),
+	// but it surfaces on the product's MAIN SCREEN rather than on an analytics page: the issue list
+	// sorts by updated_at DESC and every row prints "updated <n> ago". MEASURED through the async
+	// runner on real Postgres, a Linear issue untouched for 200 days ranked ABOVE work created
+	// during the test. See linear_csv_updated.go for the column's provenance — 44 of 45 real
+	// exports, all six header shapes — and for why #89's census could not see it.
+	updated, updatedNotes := linearCSVUpdated(ci, row)
 	return mappedIssue{
 		issue: model.Issue{
 			// THE NAME LINEAR GAVE THE ISSUE, and the ROUTING KEY of source.go's write pipeline —
@@ -376,9 +392,10 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			Labels:      splitLabelColumns(ci.getAll(row, "Labels")),
 			CompletedAt: completed,
 			CreatedAt:   created,
+			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			concatNotes(createdNotes, completedNotes)...),
+			concatNotes(createdNotes, completedNotes, updatedNotes)...),
 	}, nil
 }
 

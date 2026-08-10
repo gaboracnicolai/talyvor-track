@@ -182,9 +182,19 @@ func TestLinearCSV_UnparseableCompletedIsReported(t *testing.T) {
 // demands a NEW warning; without this one a mapper that reported something about every row would
 // pass all of them, and the warnings channel is the one an operator has to trust for every OTHER
 // note kind in this package.
+//
+// ⚠ IT CARRIES ITS OWN HEADER, NOT linearCSVHeader, AND THAT IS THIS TEST'S SECOND FINDING RATHER
+// THAN A CONVENIENCE. linearCSVHeader is the nine columns Linear's IMPORT documentation names, and
+// a real EXPORT carries `Updated` too — measured in 44 of 45 real exports and in all six header
+// shapes (scripts/w34-linear-csv-updated-probe.py). Once linearRowMapper reads that column, a row
+// built from the import header is no longer a row whose every column mapped: Track cannot tell when
+// Linear last touched it, and says so. So the fixture that must produce NO warning is the one that
+// actually gives the mapper everything it reads. Suppressing the warning instead would have hidden
+// the loss this file's own Created argument exists to make audible.
 func TestLinearCSV_AFullyReadableRowAddsNoWarning(t *testing.T) {
-	_, out := importOneLinearRow(t, linearCSVHeader+
-		"LIN-5,Clean row,d,Done,Medium,,bug,2023-03-14,2023-06-30\n")
+	_, out := importOneLinearRow(t,
+		"ID,Title,Description,Status,Priority,Assignee,Labels,Created,Updated,Completed\n"+
+			"LIN-5,Clean row,d,Done,Medium,,bug,2023-03-14,2023-06-29,2023-06-30\n")
 
 	if len(out.Warnings) != 0 {
 		t.Errorf("a row whose every column mapped reported warnings %q; want none", out.Warnings)
