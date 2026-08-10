@@ -215,11 +215,14 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 		completed, completedNotes := jiraCompletedAt(it.Fields.ResolutionDate, status)
 		created, createdNotes := jiraAPICreated(it.Fields.Created)
 		updated, updatedNotes := jiraAPIUpdated(it.Fields.Updated)
+		// `description` is the only field on this transport that is a DOCUMENT rather than a
+		// scalar, and its losses are per-NODE rather than per-value: see adf_attrs.go.
+		description, descriptionNotes := adfToText(it.Fields.Description)
 		out = append(out, mappedIssue{
 			issue: model.Issue{
 				Identifier:  it.Key, // provider-key (PROJ-123)
 				Title:       it.Fields.Summary,
-				Description: adfToText(it.Fields.Description),
+				Description: description,
 				Status:      status,
 				Priority:    prio,
 				Labels:      labels,
@@ -229,7 +232,8 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 				UpdatedAt:   updated,
 			},
 			notes: append(collectNotes(it.Fields.Status.Name, status, statusOK, fallback, it.Fields.Priority.Name, prio, prioOK),
-				append(resolutionNotes, append(dueNotes, append(completedNotes, append(createdNotes, updatedNotes...)...)...)...)...),
+				append(resolutionNotes, append(dueNotes, append(completedNotes, append(createdNotes,
+					append(updatedNotes, descriptionNotes...)...)...)...)...)...),
 		})
 	}
 	return out
@@ -301,37 +305,59 @@ func resolveJiraStatusCategory(key string, unresolved model.IssueStatus) (model.
 // tolerant of an older plain-string description.
 
 type adfNode struct {
-	Type    string    `json:"type"`
-	Text    string    `json:"text"`
-	Content []adfNode `json:"content"`
+	Type string `json:"type"`
+	Text string `json:"text"`
+
+	// Attrs is where a whole class of ADF nodes keeps its content — a link's URL, a mention's
+	// display name, an emoji's character. Decoded per key rather than into a struct because the
+	// attribute that matters differs per node type (see adfAttrText) and a value that is not a
+	// string must not become a decode error that loses the entire description.
+	Attrs   map[string]json.RawMessage `json:"attrs"`
+	Content []adfNode                  `json:"content"`
 }
 
-func adfToText(raw json.RawMessage) string {
+// adfToText flattens the document and returns, alongside the text, one FieldNote per node type whose
+// payload it could not place. See adf_attrs.go for what is pinned and why the notes exist at all.
+func adfToText(raw json.RawMessage) (string, []FieldNote) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return ""
+		return "", nil
 	}
 	var doc adfNode
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		var s string // tolerate a plain-string description (older API)
 		if json.Unmarshal(raw, &s) == nil {
-			return s
+			return s, nil
 		}
-		return ""
+		return "", nil
 	}
 	var b strings.Builder
-	walkADF(doc, &b)
-	return strings.TrimSpace(b.String())
+	var dropped droppedTypes
+	walkADF(doc, &b, &dropped)
+	return strings.TrimSpace(b.String()), dropped.notes()
 }
 
-func walkADF(n adfNode, b *strings.Builder) {
+func walkADF(n adfNode, b *strings.Builder, dropped *droppedTypes) {
 	if n.Text != "" {
 		b.WriteString(n.Text)
+	}
+	// A node whose content lives in an attribute. If the pinned attribute is absent or is not a
+	// string, the node carried something this importer did not place — which is the same report as
+	// an attachment, and for the same reason.
+	if attr, ok := adfAttrText[n.Type]; ok {
+		if s := adfAttrString(n.Attrs, attr); s != "" {
+			b.WriteString(s)
+		} else {
+			dropped.add(n.Type)
+		}
+	}
+	if _, ok := adfNoTextEquivalent[n.Type]; ok {
+		dropped.add(n.Type)
 	}
 	if n.Type == "hardBreak" {
 		b.WriteByte('\n')
 	}
 	for _, c := range n.Content {
-		walkADF(c, b)
+		walkADF(c, b, dropped)
 	}
 	switch n.Type { // block-level nodes end a line
 	case "paragraph", "heading", "listItem", "blockquote", "codeBlock":

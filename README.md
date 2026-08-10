@@ -141,6 +141,22 @@ that carried it — `Duplicate`, `Timed out`, `Obsolete` and the rest plainly de
 too, and deciding which of them Track should treat as cancelled is a product judgement, not
 something the importer should guess. The first import tells you which ones your instance uses.
 
+⚠ **A link in a Jira description is not text, and until recently it did not survive the import.**
+The Jira API sends `description` as an Atlassian Document Format tree, and a whole class of its
+nodes keeps its content in an *attribute* rather than in a text node: a pasted URL becomes an
+`inlineCard` whose only payload is `attrs.url`, an `@name` becomes a `mention`, an emoji becomes an
+`emoji`. The flattener read text nodes and nothing else, so all of it vanished and the surrounding
+prose landed broken — "Follow up to&nbsp;&nbsp;- remove the deprecated stuff", verbatim from a real
+issue whose link was the only thing saying *what* was being followed up. Measured on a live Jira
+Cloud project: **587 of 1,828 descriptions (32.1%) carried at least one such node**, and 6 flattened
+to the empty string entirely. That is not only a display problem — `description` is the column
+Track's search indexes, so an issue whose distinguishing content is a link was unfindable by that
+link. Links, mentions and emoji now import as the text Jira's own renderer emits for them.
+
+**An attachment still does not come across, and the job says so.** An image or a file referenced in
+a description has no text equivalent in Jira's own rendering either, so there is nothing to place —
+the import reports it in `warnings`, naming the node, rather than dropping it in silence.
+
 Both endpoints return `{"imported": N, "skipped": N, "refused": N, "errors": [...], "warnings": [...]}` so you
 can see exactly which rows didn't make it, and why they didn't:
 

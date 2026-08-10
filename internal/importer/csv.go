@@ -198,6 +198,14 @@ func (n FieldNote) render(count int) string {
 		return fmt.Sprintf("the provider response carried no %q field — %d issue(s) closed in Jira were "+
 			"imported as delivered work without checking whether they were finished or abandoned",
 			jiraAPIResolutionField, count)
+	case n.Via == viaADFNodeDropped:
+		// The only line in this file about a DOCUMENT rather than a scalar, so it names the node
+		// type — an operator who is told "media" can find it in their editor, and "something in
+		// your description" would send them nowhere. It names the search index too, because that is
+		// the consequence a display-only reading of "the description imported without it" misses.
+		return fmt.Sprintf("the %s on %d issue(s) contains a Jira %q node, which carries no text — "+
+			"it imported without that node, and Track's search reads only the text",
+			n.Field, count, n.Value)
 	case n.Via == viaResolutionUnreadable:
 		return fmt.Sprintf("%s %q on %d issue(s) — Track cannot read that word as finished-or-abandoned, so the issue imported as %q unchanged",
 			n.Field, n.Value, count, n.Mapped)
