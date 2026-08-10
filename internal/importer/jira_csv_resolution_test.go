@@ -186,8 +186,8 @@ func TestJiraCSVResolution_OnlyEverActsOnADoneRow(t *testing.T) {
 // A CSV with NO Resolution column must behave byte-identically to before this merge. Every fixture
 // in jira_csv_dates_test.go is that shape, so this is the guarantee that nothing already working moved.
 func TestJiraCSVResolution_AbsentColumnChangesNothing(t *testing.T) {
-	const noResolution = "Summary,Description,Status,Priority,Resolved,Created\n" +
-		"Closed work,d,Closed,High,25/Mar/2025 10:03 AM,23/Jul/2026 7:36 PM\n"
+	const noResolution = "Summary,Description,Status,Priority,Resolved,Created,Updated\n" +
+		"Closed work,d,Closed,High,25/Mar/2025 10:03 AM,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 	i := mappedByTitle(t, noResolution)["Closed work"]
 	if i.Status != model.StatusDone {
 		t.Errorf("status = %q, want %q", i.Status, model.StatusDone)

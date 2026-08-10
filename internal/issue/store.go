@@ -264,20 +264,33 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 		t := issue.CreatedAt
 		createdAt = &t
 	}
+	// updated_at rides the SAME import-owned gate as created_at, for the same reason and with the
+	// same shape: the column is DEFAULT NOW(), so an unsupplied value is not a null anybody can
+	// spot but a plausible timestamp. It is load-bearing on the product's MAIN SCREEN — the issue
+	// list sorts by updated_at DESC and every row renders "updated <n> ago" — so an import that
+	// leaves it defaulted puts a backlog whose real median staleness is 2692 DAYS at the top of
+	// today's list. Native paths (Create, MCP, feature-board conversion, automation) all leave it
+	// zero and take the DEFAULT, which is correct for them: they really are being written now.
+	var updatedAt *time.Time
+	if !issue.UpdatedAt.IsZero() && issue.CreatorID == model.ImporterCreatorID {
+		t := issue.UpdatedAt
+		updatedAt = &t
+	}
 
 	const insertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
          assignee_id, creator_id, cycle_id, parent_id,
-         due_date, completed_at, lens_feature, labels, sort_order, created_at)
+         due_date, completed_at, lens_feature, labels, sort_order, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-            COALESCE($19::timestamptz, NOW()))
+            COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()))
     RETURNING ` + issueColumns
 	return scanIssue(s.pool.QueryRow(ctx, insertSQL,
 		issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier,
 		issue.Title, issue.Description, string(issue.Status), int(issue.Priority),
 		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID,
 		issue.DueDate, completedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt,
+		updatedAt,
 	))
 }
 
@@ -414,7 +427,17 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 		t := issue.CreatedAt
 		createdAt = &t
 	}
-
+	// ⚠ updated_at IS DELIBERATELY NOT SUPPLIED HERE, AND THE ABSENCE IS THE DECISION. Create's
+	// INSERT now carries the provider's last-updated instant (see the comment there and
+	// importer/jira_csv_updated.go for the measurement). This statement serves the API transports,
+	// whose mappers do not read `updated`/`updatedAt` YET — adding the column here first would ship
+	// exactly what #74's C9 taught and #83 wrote down: an un-fed column is untestable and rots.
+	// Mapper and statement land together, in the merge that takes the API half.
+	// ⚠ AND THE CONFLICT ARM BELOW IS ITS OWN QUESTION, not an oversight: a local edit bumps
+	// updated_at to NOW(), so clobbering with the provider's older instant would move the column
+	// BACKWARDS past a human's edit and hide it from the recency sort — this defect's mirror image.
+	// GREATEST(issues.updated_at, EXCLUDED.updated_at) is the obvious third option and is still a
+	// rule nobody has decided, so it is NOT invented here. Stated in the queue with numbers.
 	const upsertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,

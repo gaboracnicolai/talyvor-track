@@ -29,11 +29,11 @@ import (
 //	cancelled + Resolved   → due only; the completion time refused AND reported
 //	todo      + Due Date   → due only, nothing reported
 //	todo      + neither    → both NULL, nothing reported
-const jiraCSVWithDates = "Summary,Description,Status,Priority,Labels,Due Date,Resolved,Created\n" +
-	"Shipped work,d,Closed,High,bug,19/Jan/2025 12:00 AM,25/Mar/2025 10:03 AM,23/Jul/2026 7:36 PM\n" +
-	"Abandoned work,d,Won't Do,High,bug,19/Jan/2025 12:00 AM,25/Mar/2025 10:03 AM,23/Jul/2026 7:36 PM\n" +
-	"Planned work,d,To Do,High,bug,19/Jan/2025 12:00 AM,,23/Jul/2026 7:36 PM\n" +
-	"Bare work,d,To Do,High,bug,,,23/Jul/2026 7:36 PM\n"
+const jiraCSVWithDates = "Summary,Description,Status,Priority,Labels,Due Date,Resolved,Created,Updated\n" +
+	"Shipped work,d,Closed,High,bug,19/Jan/2025 12:00 AM,25/Mar/2025 10:03 AM,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
+	"Abandoned work,d,Won't Do,High,bug,19/Jan/2025 12:00 AM,25/Mar/2025 10:03 AM,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
+	"Planned work,d,To Do,High,bug,19/Jan/2025 12:00 AM,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
+	"Bare work,d,To Do,High,bug,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 
 type csvIssueDates struct {
 	status      string
@@ -150,8 +150,8 @@ func TestJobRow_JiraCSV_NoDateColumnsIsCleanAndSilent(t *testing.T) {
 	// issues.created_at is `DEFAULT NOW()`, so an absent column leaves a WRONG non-null value and
 	// jira_csv_created.go reports it. Supplying it here keeps this test about the two columns #78
 	// shipped rather than silently re-deciding a neighbouring merge.
-	const noDates = "Summary,Description,Status,Priority,Labels,Created\n" +
-		"Shipped work,d,Closed,High,bug,23/Jul/2026 7:36 PM\n"
+	const noDates = "Summary,Description,Status,Priority,Labels,Created,Updated\n" +
+		"Shipped work,d,Closed,High,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 	jobID, err := js.Create(ctx, ws.ID, team.ID, "jira_csv", []byte(noDates))
 	if err != nil {
 		t.Fatal(err)
