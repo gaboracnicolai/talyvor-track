@@ -505,12 +505,33 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 	rows.Close()
 
 	// Top-cost issues.
+	//
+	// THE SAME COHORT AS EVERY OTHER FIGURE IN THIS REPORT. This was the one sub-query of the five
+	// that took the workspace id alone, so an N-day report carried an ALL-TIME leaderboard beside
+	// an N-day total — and because it is not a subset of the total's cohort it could sum to more
+	// than the total printed next to it. Measured on real Postgres at days=7 for a workspace with
+	// one issue touched today ($101 lifetime) and one last touched 200 days ago ($50): total
+	// $101.00, leaderboard $151.00.
+	//
+	// The consumer is the agent surface rather than the page — frontend/src DECLARES the field
+	// (api/types.ts:430) and renders it nowhere; mcp.Server.toolGetAICosts reads it, and returns
+	// it stamped `"period_days": N`
+	// under a tool description that reads "cost breakdown for the last N days … top-5 most
+	// expensive issues".
+	//
+	// ⚠ THIS MAKES THE REPORT SELF-CONSISTENT, NOT TRUE. ai_cost_usd is a LIFETIME running total
+	// per issue and updated_at is the row's LAST TOUCH, so every figure here is still "the lifetime
+	// cost of issues touched in the window" rather than "the spend in the window". ai_spend_events
+	// carries each event's own created_at and an index on (workspace_id, created_at DESC) for
+	// exactly that question, and no query in this repo reads it. That is a decision about what
+	// total_cost_usd means, written up with its numbers rather than taken here.
 	rows, err = e.pool.Query(ctx, `
         SELECT id, identifier, title, ai_cost_usd, ai_tokens
         FROM issues
         WHERE workspace_id = $1 AND ai_cost_usd > 0
+          AND updated_at > NOW() - (INTERVAL '1 day' * $2::int)
         ORDER BY ai_cost_usd DESC LIMIT 10`,
-		workspaceID,
+		workspaceID, days,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("analytics: top issues: %w", err)
