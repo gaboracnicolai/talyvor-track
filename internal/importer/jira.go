@@ -205,7 +205,9 @@ func mapJiraIssues(issues []jiraIssue) []mappedIssue {
 		// `resolution` says whether closed work was FINISHED or ABANDONED, and it runs HERE for two
 		// reasons that are both load-bearing. AFTER the category fallback above, because on the
 		// measured instance 138 of 3,000 resolved issues reach `done` only through statusCategory —
-		// a route the CSV mapper does not have. And BEFORE jiraCompletedAt below, because that
+		// a route the Jira CSV mapper NOW HAS TOO, from its export's own `Status Category` column
+		// (jira_csv_status_category.go); this comment used to say it did not. And BEFORE
+		// jiraCompletedAt below, because that
 		// mapping gates on the status this line can change, and on THIS transport the mapper's gate
 		// is the only one: UpsertByIdentifier passes CompletedAt through ungated, where Create nils
 		// it itself. Reversing these two lines lands a cancelled issue carrying a completion time,

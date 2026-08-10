@@ -286,9 +286,13 @@ func TestPinned_TheFourMeasuredCategories(t *testing.T) {
 	}
 }
 
-// The CSV transports have no category and their wording must be untouched by this merge — a Jira
-// CSV export carries no such column, so claiming "no statusCategory present" there would be a
-// sentence about a field that was never in play.
+// An export with NO category column keeps this wording exactly, and that is still right — but the
+// reason written here was wrong and is worth keeping visible. It said "a Jira CSV export carries
+// no such column"; 228 of 304 real exports carry one, and reading it moved 1,424 corpus rows off
+// backlog (jira_csv_status_category.go). What survives is the narrower claim: for an export that
+// genuinely lacks the column — 76 of the 304 — "no statusCategory present" would be a sentence
+// about a field that was never in play. This fixture is exactly that case, and it is the
+// must-stay-green half of C5 in scripts/w34-jira-csv-status-category-controls.py.
 func TestCSVWarningsAreUnchangedByThisMerge(t *testing.T) {
 	out, err := New(&fakeIssueStore{}).ImportJiraCSV(t.Context(), "ws1", "team1",
 		strings.NewReader("Summary,Description,Status,Priority,Labels,Created,Updated\nOne,d,Deployed,High,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"))
