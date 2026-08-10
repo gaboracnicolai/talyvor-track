@@ -911,7 +911,22 @@ func (s *Server) toolGetSprintStatus(ctx context.Context, args json.RawMessage) 
 	}
 	wsID, _ := authz.WorkspaceID(ctx) // SEC-5: authorized workspace (chokepoint)
 	active, err := s.cycleStore.GetActive(ctx, in.TeamID, wsID)
-	if err != nil {
+	// ⚠ `active == nil` IS THE ORDINARY CASE AND IT USED TO BE THE ONLY UNHANDLED ONE.
+	// cycle.Store.GetActive signals "this team has no active cycle" as (nil, nil) — its doc
+	// comment says "or nil if none" — so branching on `err` alone left the no-sprint state to
+	// fall through to `active.ID` below and take a nil pointer dereference. Nothing in this
+	// repo's HTTP stack recovers a panic, so the caller got a dropped connection.
+	//
+	// The comment below is unchanged and was always the intent; before this line it described a
+	// branch only a REAL database failure could reach, which is why nothing noticed.
+	//
+	// ⚠ THE SEAM HAS A SECOND CONSUMER AND IT WAS ALREADY CORRECT: cycle/handler.go's HTTP
+	// GetActive checks `out == nil` and answers 404 NO_ACTIVE_CYCLE. Both copies are now held
+	// together by TestSeam_BothGetActiveConsumersHandleNil, so fixing one cannot regress the other.
+	//
+	// ⚠ AN IMPORTED WORKSPACE IS ALWAYS IN THIS STATE: an import writes ISSUES and never a CYCLE,
+	// so the first get_sprint_status against a freshly imported Jira/Linear workspace lands here.
+	if err != nil || active == nil {
 		// No active cycle is not an error condition — agents should
 		// see a clear "no active sprint" signal instead of a 500.
 		return map[string]any{
