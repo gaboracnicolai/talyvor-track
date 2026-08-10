@@ -57,6 +57,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // linearCSVShortRowExport is the measured shape, byte-for-byte in structure: the 30-column header
@@ -94,15 +95,28 @@ const linearCSVWideRowExport = "ID,Team,Title,Description,Status,Estimate,Priori
 const linearCSVShortRowDateToStringExport = "ID,Team,Title,Description,Status,Estimate,Priority,Project ID,Project,Creator,Assignee,Labels,Cycle Number,Cycle Name,Cycle Start,Cycle End,Created,Updated,Started,Triaged,Completed,Canceled,Archived,Due Date,Parent issue,Initiatives,Project Milestone ID,Project Milestone,SLA Status,Roadmaps\n" +
 	"IN-10,Nordic-app,License,Add licence to the nordic app,Done,,High,,,pathliving@gmail.com,pathliving@gmail.com,Improvement,,,,,Tue May 14 2024 08:53:33 GMT+0000 (GMT),Thu May 23 2024 16:06:19 GMT+0000 (GMT),,,Thu May 23 2024 16:06:19 GMT+0000 (GMT),,,,,,,,\n"
 
-// TestLinearCSV_AShortRowStillRefusesAnUnpinnedDateShape is a MUST-STAY-GREEN for a decision this
-// merge did not make and must not quietly undo.
+// TestLinearCSV_AShortRowsRealDatesLandAndTheNarrowRowIsStillReported composes the two questions
+// this row carries — its WIDTH and its DATE SHAPE — on the one fixture in the package made of real
+// corpus bytes rather than of a formatted constant.
 //
-// #101 measured that a quarter of real `Updated` cells are JavaScript's Date.toString and left
-// linearCSVTimeLayouts alone on purpose, so those values arrive as a warning naming the value and
-// never as a silent guess. Landing the row (this merge) and parsing its dates (not this merge) are
-// two different questions, and the row that carries BOTH is the one where they could be confused.
-// This asserts they compose: the issue imports, the date is refused, and BOTH facts are reported.
-func TestLinearCSV_AShortRowStillRefusesAnUnpinnedDateShape(t *testing.T) {
+// ⚠⚠ THE DATE HALF INVERTED AND THE BYTES DID NOT MOVE. This test used to assert that
+// `Tue May 14 2024 08:53:33 GMT+0000 (GMT)` is REFUSED, because #101 measured the shape at 25.3% of
+// the corpus and left linearCSVTimeLayouts alone on the stated ground that its provenance was
+// undecidable. It is decidable from the HEADER: this fixture's own 30-column header — ending
+// `Project Milestone ID, Project Milestone, SLA Status, Roadmaps` — is Linear's published export
+// shape, and the corpus's 34-column toString file carries a header byte-identical to three
+// unrelated owners' ISO files. One exporter, two renderings. So the row's dates are now read.
+//
+// ⚠ THE FIXTURE IS DELIBERATELY NOT RE-DATED. Rewriting these cells to RFC3339 would keep the test
+// green while removing the only real toString bytes in the package, which is how the column went
+// unmeasured for thirty-one merges in the first place: a fixture that cannot carry the value cannot
+// fail when the value is dropped.
+//
+// ⚠ THE REFUSAL PROPERTY IS STILL PINNED, one file over and one package level up — the
+// `15/01/2026 10:23` cases in TestParseLinearCSVTime_TheStripIsAnchoredToTheOffset and
+// TestJobRow_LinearCSV_AnUnknownDateShapeIsStillRefusedAndReported. Widening one measured shape is
+// not becoming a tolerant parser, and that is asserted rather than asserted-about.
+func TestLinearCSV_AShortRowsRealDatesLandAndTheNarrowRowIsStillReported(t *testing.T) {
 	imp, store := newTestImporter()
 	res, err := imp.ImportLinearCSV(context.Background(), "ws-1", "team-1", strings.NewReader(linearCSVShortRowDateToStringExport))
 	if err != nil {
@@ -112,20 +126,42 @@ func TestLinearCSV_AShortRowStillRefusesAnUnpinnedDateShape(t *testing.T) {
 		t.Fatalf("imported=%d creates=%d, want 1/1 — the ROW must land regardless of its date shape",
 			res.Imported, len(store.created))
 	}
-	if !store.created[0].CreatedAt.IsZero() {
-		t.Errorf("CreatedAt = %v, want zero — %q is not a pinned layout, and #101 decided on purpose "+
-			"that an unpinned shape is reported rather than guessed at. If this is now parsed, that "+
-			"decision was reversed by a merge about row width.",
-			store.created[0].CreatedAt, "Tue May 14 2024 08:53:33 GMT+0000 (GMT)")
+	// The three instants these real bytes denote. Written out by hand from the fixture's own
+	// cells rather than parsed with the layout under test.
+	for _, want := range []struct {
+		field string
+		got   time.Time
+		when  time.Time
+	}{
+		{"CreatedAt", store.created[0].CreatedAt, time.Date(2024, 5, 14, 8, 53, 33, 0, time.UTC)},
+		{"UpdatedAt", store.created[0].UpdatedAt, time.Date(2024, 5, 23, 16, 6, 19, 0, time.UTC)},
+		{"CompletedAt", derefTime(store.created[0].CompletedAt), time.Date(2024, 5, 23, 16, 6, 19, 0, time.UTC)},
+	} {
+		if !want.got.Equal(want.when) {
+			t.Errorf("%s = %v, want %s — these are a REAL export's bytes, and a defaulted column "+
+				"here is the import instant rather than a null anybody can spot",
+				want.field, want.got, want.when.Format(time.RFC3339))
+		}
 	}
 	joined := strings.Join(res.Warnings, "\n")
-	if !strings.Contains(joined, "not a date shape this importer recognises") {
-		t.Errorf("warnings = %v, want the unpinned-date line — the refusal is only honest if it is reported", res.Warnings)
+	if strings.Contains(joined, "not a date shape this importer recognises") {
+		t.Errorf("warnings = %v — no cell in this row is unpinned any more; a warning naming one "+
+			"means the parse regressed and the row is silently carrying import-instant timestamps",
+			res.Warnings)
 	}
 	if !strings.Contains(joined, "narrower than the header") {
-		t.Errorf("warnings = %v, want the narrow-row line as well — both facts are true of this row "+
-			"and reporting one of them is reporting half the import", res.Warnings)
+		t.Errorf("warnings = %v, want the narrow-row line — the WIDTH half of this row is what the "+
+			"fixture exists for and it is unaffected by the date question", res.Warnings)
 	}
+}
+
+// derefTime reads an optional instant as a value so the table above can hold all three columns.
+// A nil pointer reads as the zero time, which fails the comparison loudly rather than panicking.
+func derefTime(p *time.Time) time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	return *p
 }
 
 // TestLinearCSV_ShortRowFixtureIsActuallyShort is the FIXTURE PREMISE, asserted before anything

@@ -142,25 +142,40 @@ func TestLinearCSVUpdated_Rule2_TheMeasuredBytes(t *testing.T) {
 	}
 }
 
-// TestLinearCSVUpdated_Rule2_TheMeasuredLIMIT — the 25% of the corpus the pinned layouts REFUSE,
-// pinned as a fact rather than left as prose.
+// TestLinearCSVUpdated_Rule2_TheMeasuredShapeTheLayoutsUsedToRefuse — the 25% of the corpus that
+// was pinned as a LIMIT and is now pinned as a VALUE, in the same place, so the reversal is legible
+// rather than silent.
 //
-// ⚠ THIS IS A LIMIT, NOT A BUG, AND THE DISTINCTION IS THE POINT. 746 of 2,947 real `Updated`
-// cells — from SIX unrelated owners — are `Sun May 11 2025 07:43:48 GMT+0000 (GMT)`, JavaScript's
-// Date.toString. Whether Linear emits that or those repositories re-serialised the export is NOT
-// decidable from here, so the layout list is left exactly as #89 pinned it. What this test pins is
-// that such a value is REFUSED, and therefore REPORTED by the caller, rather than silently becoming
-// a guess. If someone later widens linearCSVTimeLayouts on better provenance, this test is where
-// they will find the measurement that says what widening it would change.
-func TestLinearCSVUpdated_Rule2_TheMeasuredShapeTheLayoutsRefuse(t *testing.T) {
-	for _, raw := range []string{
-		"Fri Apr 17 2026 04:00:00 GMT+0000 (GMT+00:00)",
-		"Fri Feb 06 2026 10:01:29 GMT+0000 (GMT)",
+// ⚠⚠ THIS TEST CARRIED ITS OWN EXPIRY AND THE CONDITION FIRED. It used to assert that
+// `Fri Feb 06 2026 10:01:29 GMT+0000 (GMT)` is REFUSED, on the stated ground that "whether Linear
+// emits that or those repositories re-serialised the export is NOT decidable from here" — and it
+// ended: "If someone later widens linearCSVTimeLayouts on better provenance, this test is where
+// they will find the measurement that says what widening it would change." That is what happened.
+//
+// ⚠ THE BETTER PROVENANCE IS THE HEADER, NOT THE DATE. A re-serialiser would have had to reproduce
+// Linear's export header byte for byte; measured, gong8's toString export carries the SAME 34
+// columns in the SAME order as the ISO exports of amo-tech-ai, UIT6 and null-hype (including
+// `Project Milestone ID`, `UUID`, `Time in status (minutes)`, `Related to`, `Blocked by`,
+// `Duplicate of`), and wubin28's toString export is Linear's other published shape, the 30-column
+// one ending in `Roadmaps`. One exporter, four unrelated tenants, two date renderings.
+//
+// ⚠ WHAT DID NOT CHANGE IS THE FAIL-SAFE, and it is asserted one function down and in
+// TestParseLinearCSVTime_TheStripIsAnchoredToTheOffset: a shape that is genuinely unpinned is still
+// refused and still reported. Widening one measured shape is not becoming a tolerant parser.
+func TestLinearCSVUpdated_Rule2_TheMeasuredShapeTheLayoutsUsedToRefuse(t *testing.T) {
+	for raw, want := range map[string]time.Time{
+		"Fri Apr 17 2026 04:00:00 GMT+0000 (GMT+00:00)": time.Date(2026, 4, 17, 4, 0, 0, 0, time.UTC),
+		"Fri Feb 06 2026 10:01:29 GMT+0000 (GMT)":       time.Date(2026, 2, 6, 10, 1, 29, 0, time.UTC),
 	} {
-		if _, ok := parseLinearCSVTime(raw); ok {
-			t.Errorf("parseLinearCSVTime accepts %q — the pinned list has been widened, and the "+
-				"25.3%% of the measured corpus that this test records as REFUSED is now a stale "+
-				"number in linear_csv_updated.go's header", raw)
+		got, ok := parseLinearCSVTime(raw)
+		if !ok {
+			t.Errorf("parseLinearCSVTime refuses %q — this is 25.3%% of the measured corpus's "+
+				"`Updated` column, from six unrelated owners, and refusing it defaults the column "+
+				"to the import instant", raw)
+			continue
+		}
+		if !got.Equal(want) {
+			t.Errorf("parseLinearCSVTime(%q) = %s, want %s", raw, got.Format(time.RFC3339), want.Format(time.RFC3339))
 		}
 	}
 }
@@ -208,7 +223,12 @@ func TestLinearCSVUpdated_TheFourOutcomes(t *testing.T) {
 	})
 
 	t.Run("a shape no pinned layout accepts is REPORTED, never defaulted", func(t *testing.T) {
-		const js = "Fri Feb 06 2026 10:01:29 GMT+0000 (GMT)"
+		// ⚠ THE EXAMPLE MOVED AND THE PROPERTY DID NOT. This used to be
+		// `Fri Feb 06 2026 10:01:29 GMT+0000 (GMT)`, which the layouts now accept — so leaving it
+		// here would have turned a live guard into one that can never fail, which is the exact
+		// failure mode a negative assertion has when its subject stops existing. The shape below
+		// is genuinely unpinned: no corpus cell carries it and no layout reads it.
+		const js = "15/01/2026 10:23"
 		ci, row := buildIndex([]string{"Title", "Updated"}), []string{"a", js}
 		got, notes := linearCSVUpdated(ci, row)
 		if !got.IsZero() {

@@ -85,20 +85,41 @@ const (
 // REPORTED, never silently defaulted — so a tenant whose export differs from both shapes below
 // learns it on its first import, in the warnings channel, instead of receiving a column of
 // import-instant timestamps that reads as a working import.
+//
+// ⚠⚠ AND THE PARAGRAPH ABOVE IS NOW STALE IN ITS PREMISE, WHICH IS WHY THE LIST HAS A THIRD ENTRY.
+// "Nothing reachable from here emits a Linear CSV export" was true when it was written and stopped
+// being true at #99, which found 45 real exports unrelated tenants had committed to public
+// repositories. Measured against those bytes, the two hand-pinned layouts below accept 4,698 of
+// 5,440 distinct date cells and REFUSE 734 — a quarter of every `Created` and `Updated` column in
+// the corpus, from six owners who have never met. The list is what this file said it was: a
+// hand-pinned guess to be replaced by a measurement. See linear_csv_tostring_dates.go for the
+// population, the owner attribution, and what is deliberately NOT claimed about it.
+//
+// ⚠ THE FIRST ENTRY IS THE OTHER HALF OF THE SAME POINT AND IS LEFT ALONE DELIBERATELY: zero cells
+// in the whole corpus are date-only. It is pinned from this package's FIXTURES, it matches nothing
+// a real tenant emits, and it is kept because removing a layout can only refuse a shape somebody
+// might hold — which is a different decision from adding one, and not this merge's.
 var linearCSVTimeLayouts = []string{
-	"2006-01-02", // the shape this package's fixtures have always carried, and what Linear's docs call a "created date"
-	time.RFC3339, // Linear's docs call Completed a "timestamp"; its API renders DateTime this way
+	"2006-01-02",                // the shape this package's fixtures have always carried, and what Linear's docs call a "created date"
+	time.RFC3339,                // Linear's docs call Completed a "timestamp"; its API renders DateTime this way
+	linearCSVDateToStringLayout, // ECMAScript Date.prototype.toString — 746 of 2,947 real `Updated` cells
 }
 
 // parseLinearCSVTime returns the instant and true, or false if no pinned layout accepts the value.
 // A false is REPORTED by the caller, never silently nil'd — that is what keeps a hand-pinned list
-// honest, and it carries more weight here than anywhere else in this package because this list is
-// the one nobody has been able to check against a real export.
+// honest, and it carries more weight here than anywhere else in this package because this list was
+// the one nobody had been able to check against a real export.
 func parseLinearCSVTime(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, false
 	}
+	// The optional, implementation-defined zone NAME that ECMA-262 appends after the numeric
+	// offset. Stripped BEFORE the loop rather than inside a fourth layout because Go's MST verb
+	// reads an abbreviation and the corpus carries two spellings, only one of which is one —
+	// see jsDateToStringZoneName for why the rule is anchored so tightly that no other shape in
+	// this file's history can reach it.
+	s = stripJSDateToStringZoneName(s)
 	for _, layout := range linearCSVTimeLayouts {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC(), true
