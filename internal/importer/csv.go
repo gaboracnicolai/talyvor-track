@@ -173,6 +173,15 @@ func (n FieldNote) render(count int) string {
 		// exports: 73 rows short, all of them by exactly one, all missing only `Roadmaps`.
 		return fmt.Sprintf("%d issue(s) arrived on a row narrower than the header (%s supplied) — "+
 			"every column past the last one supplied read as empty", count, n.Value)
+	case n.Via == viaColumnNotRead:
+		// The one line here about a column the mapper NEVER LOOKS AT. It is deliberately not
+		// phrased as "unrecognised" — nothing was unrecognised, and nothing failed to parse. It
+		// names BOTH ENDS because either alone is useless: the export's own column spelling, so the
+		// operator can find it, and the Track reference that stayed empty, so they know what it
+		// cost. See csv_unread_refs.go for the whole-population measurement and for why this
+		// reports rather than maps.
+		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
+			"their Track %s is left empty", count, n.Value, n.Field)
 	case n.Via == viaUnparseableDate:
 		// The layouts are pinned by hand from a real Jira's responses. A tenant whose serialisation
 		// differs from all of them learns it here, on its first import, instead of receiving a
@@ -499,7 +508,10 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			concatNotes(createdNotes, completedNotes, updatedNotes, dueNotes, doneGapNotes)...),
+			concatNotes(createdNotes, completedNotes, updatedNotes, dueNotes, doneGapNotes,
+				// The four object references Track declares and this transport fills none of —
+				// reported per POPULATED cell, never per header. See csv_unread_refs.go.
+				unreadRefNotes(ci, row, linearUnreadRefs))...),
 		// Same two columns, same spellings, same report — see the jira twin above.
 		onUpdate: csvClobberedColumnNotes(ci),
 	}, nil
@@ -719,7 +731,10 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFB, rawPrio, prio, prioOK),
-			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes, doneGapNotes)...),
+			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes, doneGapNotes,
+				// Three of the four object references — a Jira `Project` is the Track TEAM this job
+				// already targets, not a lost project_id. See csv_unread_refs.go.
+				unreadRefNotes(ci, row, jiraUnreadRefs))...),
 		// The columns this export does not carry that a RE-import would empty. Reported only if
 		// this row overwrote an issue that already existed — see csv_clobbered_columns.go.
 		onUpdate: csvClobberedColumnNotes(ci),
