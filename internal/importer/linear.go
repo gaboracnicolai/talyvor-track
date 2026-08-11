@@ -148,7 +148,19 @@ type linearNode struct {
 		// mapLinearStateType and scripts/w34-linear-schema-probe.py.
 		Type string `json:"type"`
 	} `json:"state"`
-	Priority int `json:"priority"`
+	// ⚠ json.Number, NOT int, AND IT IS THE SAME RULE THE TWO DATE FIELDS BELOW ARE DECODED UNDER:
+	// a shape this importer does not expect must be REPORTED, never a decode error that fails the
+	// whole page. Measured by unauthenticated introspection (scripts/w34-linear-api-priority-probe.py),
+	// `Issue.priority` is declared `Float!` — a double — and `2`, `2.0` and `2e0` are all legal JSON
+	// serialisations of the same value. encoding/json accepts only the first into an `int`, and
+	// fetchPage returns on ANY decode error, so one such value discarded the whole 100-issue page
+	// and stopped the source, abandoning every later page for a field nothing reads as a number.
+	//
+	// ⚠ THE OUTPUT SERIALISATION IS STILL NOT MEASURABLE FROM HERE — Linear authenticates before it
+	// executes, so only a real tenant can say which spelling its server emits (W3.4 item (3)). That
+	// is precisely why the decoder must not be the thing that decides: json.Number accepts every
+	// spelling of the declared type and hands the verbatim bytes to the warning.
+	Priority json.Number `json:"priority"`
 	Labels   struct {
 		Nodes []struct {
 			Name string `json:"name"`
@@ -285,7 +297,7 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 		if !statusOK {
 			status, fallback = resolveLinearStateType(n.State.Type, status)
 		}
-		prio, prioOK := linearPriorityFromInt(n.Priority)
+		prio, prioOK := linearPriorityFromNumber(n.Priority)
 		due, dueNotes := linearDueDate(n.DueDate)
 		completed, completedNotes := linearCompletedAt(n.CompletedAt, status)
 		created, createdNotes := linearAPICreated(n.CreatedAt)
@@ -303,18 +315,43 @@ func mapLinearNodes(nodes []linearNode) []mappedIssue {
 				CreatedAt:   created,
 				UpdatedAt:   updated,
 			},
-			notes: append(collectNotes(n.State.Name, status, statusOK, fallback, strconv.Itoa(n.Priority), prio, prioOK),
+			// The priority reaches the warning as the PROVIDER'S OWN BYTES. strconv.Itoa could only
+			// ever render what the int decode produced, which for every shape this change exists to
+			// read is 0 — a warning naming a value the response never carried.
+			notes: append(collectNotes(n.State.Name, status, statusOK, fallback, string(n.Priority), prio, prioOK),
 				append(dueNotes, append(completedNotes, append(createdNotes, updatedNotes...)...)...)...),
 		})
 	}
 	return out
 }
 
-// linearPriorityFromInt maps Linear's numeric priority (0 none, 1 urgent, 2 high, 3 medium/normal, 4 low) to
-// Track's scale, and reports whether the value was ON that scale. 0 is a REAL value the user chose
-// ("No priority"), so it is recognised; anything outside 0..4 is not a Linear priority and falls
-// back to none — now reported rather than assumed.
-func linearPriorityFromInt(p int) (model.IssuePriority, bool) {
+// linearPriorityFromNumber maps Linear's numeric priority (0 none, 1 urgent, 2 high, 3 medium/normal,
+// 4 low) to Track's scale, and reports whether the value was ON that scale. 0 is a REAL value the
+// user chose ("No priority"), so it is recognised; anything outside 0..4 is not a Linear priority and
+// falls back to none — reported rather than assumed.
+//
+// ⚠ AN ABSENT priority IS STILL RECOGNISED, AND THAT IS DELIBERATELY UNCHANGED. `Float!` is NON_NULL,
+// so an absent value means the response did not come from the schema this importer was written
+// against — the same argument createdAt/updatedAt make for reporting it. It is NOT reported here,
+// because today an absent priority decodes to the int zero and imports as PriorityNone with no note,
+// and turning that into a warning is a separate decision about a separate field state. This change
+// is about a value that ARRIVES in a spelling the decoder refused; smuggling the absence question in
+// under it would make both harder to argue with. It is written down instead: W3.4.
+//
+// ⚠ NON-INTEGRAL IS OFF THE SCALE, NOT ROUNDED. Linear's own field description enumerates 0..4, so
+// 2.5 is not "High-ish" — it is a value this importer cannot place, and the existing warning channel
+// already says exactly that, now carrying the provider's verbatim bytes rather than an int.
+func linearPriorityFromNumber(raw json.Number) (model.IssuePriority, bool) {
+	f, err := raw.Float64()
+	if err != nil {
+		// Absent or unparseable. Byte-identical to the pre-json.Number behaviour, where an absent
+		// priority decoded to the int zero: PriorityNone, recognised, no note.
+		return model.PriorityNone, true
+	}
+	p := int(f)
+	if float64(p) != f {
+		return model.PriorityNone, false
+	}
 	switch p {
 	case 0:
 		return model.PriorityNone, true
