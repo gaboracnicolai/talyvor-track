@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -190,16 +191,20 @@ func TestPinned_DocumentedVocabularyStaysMapped(t *testing.T) {
 			t.Errorf("mapJiraPriority(%q) = (%d, %v), want (%d, true)", in, got, ok, want)
 		}
 	}
-	// Linear's API priority is an int, not a name. 0 is "No priority" — a REAL value the user
+	// Linear's API priority is a number, not a name. 0 is "No priority" — a REAL value the user
 	// chose, not a failure to map, so it is recognised. Anything outside 0..4 is not.
+	//
+	// ⚠ THE INTEGRAL SPELLINGS ARE ASSERTED HERE AND THE OTHER LEGAL SPELLINGS OF THE SAME DOUBLE
+	// ARE NOT — `2.0` and `2e0` are exercised through the WIRE in linear_api_priority_test.go,
+	// because the decoder is what refused them and a mapper called directly never meets it.
 	for p := 0; p <= 4; p++ {
-		if _, ok := linearPriorityFromInt(p); !ok {
-			t.Errorf("linearPriorityFromInt(%d): Linear's documented scale must be recognised", p)
+		if _, ok := linearPriorityFromNumber(json.Number(strconv.Itoa(p))); !ok {
+			t.Errorf("linearPriorityFromNumber(%d): Linear's documented scale must be recognised", p)
 		}
 	}
 	for _, p := range []int{-1, 5, 7, 99} {
-		if got, ok := linearPriorityFromInt(p); ok {
-			t.Errorf("linearPriorityFromInt(%d) = (%d, recognised=true); outside Linear's 0..4 scale", p, got)
+		if got, ok := linearPriorityFromNumber(json.Number(strconv.Itoa(p))); ok {
+			t.Errorf("linearPriorityFromNumber(%d) = (%d, recognised=true); outside Linear's 0..4 scale", p, got)
 		}
 	}
 	// An ABSENT priority is a genuine "no priority", not a mismatch — so it must NOT warn.
