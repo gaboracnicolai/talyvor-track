@@ -139,6 +139,15 @@ const (
 	// reads those as "" — which is indistinguishable from a column the export left blank. This says
 	// which it was. See csvSource.Next for the measurement that made the refusal it replaces wrong.
 	viaShortRow = "short-row"
+
+	// The OTHER direction of the same mismatch, and the one that had no branch at all until
+	// tab-3a71 measured it. A row WIDER than its header does not read as empty — the surplus cell
+	// SHIFTS every column after it, so the mapper reads a neighbouring column's value: present,
+	// plausible and wrong. MEASURED on 2 of 340 real Jira exports from unrelated instances (11 rows
+	// of 31,103); in one of them it is 10 of 10 rows and every issue's Description holds a LABEL,
+	// while the import reports imported=10 skipped=0 errors=0. See csv_wide_row_test.go for the
+	// population, the provenance limit, and why this reports rather than refuses.
+	viaWideRow = "wide-row"
 )
 
 // The date fields a note can be about. Named so the rendered line reads as a sentence.
@@ -173,6 +182,18 @@ func (n FieldNote) render(count int) string {
 		// exports: 73 rows short, all of them by exactly one, all missing only `Roadmaps`.
 		return fmt.Sprintf("%d issue(s) arrived on a row narrower than the header (%s supplied) — "+
 			"every column past the last one supplied read as empty", count, n.Value)
+	case n.Via == viaWideRow:
+		// The twin of the line above, and DELIBERATELY NOT THE SAME SENTENCE. A narrow row loses
+		// data visibly (a column of empties); a wide row substitutes a neighbour's value, which
+		// nothing downstream can spot. It names both numbers for the same reason the narrow line
+		// does, and it splits its consequence in two because only one half is certain: the surplus
+		// cells ARE dropped, and the shift happens only if they did not arrive last. A header is
+		// the only thing that names a column and this row disagrees with it, so the parser cannot
+		// tell those apart — asserting the shift outright would be an overclaim in the opposite
+		// direction from saying nothing, which is what this branch replaces.
+		return fmt.Sprintf("%d issue(s) arrived on a row wider than the header (%s supplied) — "+
+			"the surplus cell(s) were dropped, and unless they arrived last every column after "+
+			"them read the next column's value", count, n.Value)
 	case n.Via == viaColumnNotRead:
 		// The one line here about a column the mapper NEVER LOOKS AT. It is deliberately not
 		// phrased as "unrecognised" — nothing was unrecognised, and nothing failed to parse. It

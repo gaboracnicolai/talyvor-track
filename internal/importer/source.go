@@ -318,12 +318,34 @@ func (s *csvSource) Next() (SourceRow, bool) {
 	// column the mapper reads says so, once, with a count, instead of the caller seeing a column of
 	// empties that looks exactly like a column the provider left blank. That also moves this class
 	// out of the UNBOUNDED ImportResult.Errors and into the bounded Warnings #80 built.
+	//
+	// ⚠ AND THE OTHER DIRECTION HAD NO BRANCH AT ALL. `len(row) > s.expectedCols` was the one
+	// row/header mismatch this parser KNOWS about and said nothing about, and it is the worse of
+	// the two: a narrow row reads as empty (a loss you can see), a WIDE row shifts every column
+	// after the surplus cell, so the mapper reads a NEIGHBOUR'S value — present, plausible, wrong,
+	// and invisible to everything downstream. MEASURED whole-population in Go under these exact
+	// reader settings: 11 of 31,103 rows across 2 of 340 real Jira exports, from two unrelated
+	// instances, 0 of 3,164 Linear rows. In `0347210d…` it is 10 of 10 rows — the export carries
+	// two `Labels` cells against a header declaring one — so `Description`, the next column the
+	// mapper reads, holds a LABEL on every issue and the import reports
+	// {imported:10, skipped:0, failed:0} with seven warnings, none of them about the row.
+	// See csv_wide_row_test.go for the population, the second instance, and the provenance limit.
+	//
+	// ⚠ IT REPORTS, IT DOES NOT REFUSE — the precedent is four paragraphs up: refusing the narrow
+	// row was itself the defect. No row changes where it lands.
 	var notes []FieldNote
-	if len(row) < s.expectedCols {
+	switch {
+	case len(row) < s.expectedCols:
 		notes = append(notes, FieldNote{
 			Field: fieldRowWidth,
 			Value: fmt.Sprintf("%d of %d columns", len(row), s.expectedCols),
 			Via:   viaShortRow,
+		})
+	case len(row) > s.expectedCols:
+		notes = append(notes, FieldNote{
+			Field: fieldRowWidth,
+			Value: fmt.Sprintf("%d of %d columns", len(row), s.expectedCols),
+			Via:   viaWideRow,
 		})
 	}
 	mapped, err := s.mapper(s.ci, row)
