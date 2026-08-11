@@ -141,8 +141,11 @@ func TestJobRow_JiraCSV_DatesLandInPostgres(t *testing.T) {
 }
 
 // The other direction, so the two columns cannot pass by always being written: an export with
-// NEITHER column imports cleanly, writes two NULLs, and says nothing. Without this, a mapper that
-// stamped time.Now() into both would satisfy every assertion above.
+// NEITHER column writes two NULLs. Without this, a mapper that stamped time.Now() into both would
+// satisfy every assertion above.
+//
+// ⚠⚠ IT USED TO ASSERT "AND SAYS NOTHING", AND THAT HALF WAS FALSE. See the corrected comment on
+// the fixture below: the silence was measured, not reasoned, and it was the defect.
 func TestJobRow_JiraCSV_NoDateColumnsIsCleanAndSilent(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
@@ -151,11 +154,20 @@ func TestJobRow_JiraCSV_NoDateColumnsIsCleanAndSilent(t *testing.T) {
 	js := importer.NewJobStore(d.Pool)
 	runner := importer.NewRunner(js, importer.New(issue.NewStore(d.Pool)))
 
-	// ⚠ `Created` IS PRESENT AND THAT IS THE ASYMMETRY, NOT AN OVERSIGHT. "No column, no loss" is
-	// true of Due Date and Resolved, whose absence leaves a truthful NULL. It is FALSE of Created:
-	// issues.created_at is `DEFAULT NOW()`, so an absent column leaves a WRONG non-null value and
-	// jira_csv_created.go reports it. Supplying it here keeps this test about the two columns #78
-	// shipped rather than silently re-deciding a neighbouring merge.
+	// ⚠ `Created` IS PRESENT AND THAT IS THE ASYMMETRY, NOT AN OVERSIGHT. issues.created_at is
+	// `DEFAULT NOW()`, so an absent column leaves a WRONG non-null value and jira_csv_created.go
+	// reports it. Supplying it here keeps this test about the two columns #78 shipped rather than
+	// silently re-deciding a neighbouring merge.
+	//
+	// ⚠⚠ THIS COMMENT USED TO SAY "'No column, no loss' is TRUE of Due Date and Resolved, whose
+	// absence leaves a truthful NULL", AND MEASUREMENT SPLIT THAT PAIR. It is still true of Due
+	// Date: an issue may genuinely have no deadline, so a NULL there says nothing false. It is
+	// FALSE of Resolved ON A DONE ISSUE, and this row is `Closed`: analytics' resolution and
+	// throughput queries select on `completed_at IS NOT NULL`, so the row is not wrong in those
+	// reports, it is ABSENT from them while claiming to be finished work — 2,288 such rows across
+	// 346 real Jira exports, every one silent. The rationale reached for "does the column end up
+	// non-null and wrong?", which is the right question for created_at and the wrong one for a
+	// column a report FILTERS ON. See csv_done_without_completion.go.
 	const noDates = "Summary,Description,Status,Priority,Labels,Created,Updated\n" +
 		"Shipped work,d,Closed,High,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 	jobID, err := js.Create(ctx, ws.ID, team.ID, "jira_csv", []byte(noDates))
@@ -172,8 +184,16 @@ func TestJobRow_JiraCSV_NoDateColumnsIsCleanAndSilent(t *testing.T) {
 	if j.Status != importer.JobSucceeded || j.Imported != 1 {
 		t.Fatalf("job = {status:%s imported:%d}, want {succeeded 1}", j.Status, j.Imported)
 	}
-	if len(j.Warnings) != 0 {
-		t.Errorf("warnings = %v, want none — an export with no date columns has lost nothing", j.Warnings)
+	// The corrected expectation: EXACTLY ONE warning, and it is about the completion column only.
+	// A due-date line here would be the over-report this split exists to avoid.
+	if len(j.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one (the Resolved gap on a done issue)", j.Warnings)
+	}
+	if !strings.Contains(j.Warnings[0], `"Resolved"`) || !strings.Contains(j.Warnings[0], "done") {
+		t.Errorf("the warning does not name the column and the condition: %q", j.Warnings[0])
+	}
+	if strings.Contains(j.Warnings[0], "due date") {
+		t.Errorf("an absent Due Date column was reported; a NULL due date on any issue is truthful: %q", j.Warnings[0])
 	}
 	got := readIssueDatesByTitle(t, d, ws.ID)
 	if r := got["Shipped work"]; r.dueDate != nil || r.completedAt != nil {
