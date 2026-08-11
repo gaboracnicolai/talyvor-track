@@ -174,9 +174,13 @@ func TestJiraCSVMapper_AbsentDatesAreSilentAndNil(t *testing.T) {
 		}
 	})
 	t.Run("column present and empty", func(t *testing.T) {
+		// ⚠ THE STATUS IS `To Do` AND IT USED TO BE `Closed`. An EMPTY Resolved cell on a DONE
+		// issue is no longer silent — csv_done_without_completion.go reports it, on 137 measured
+		// rows — so leaving this row done would make this subtest assert the opposite of a
+		// neighbouring merge. The subject here is the DUE DATE's silence, which is unchanged.
 		got := mapOneJiraCSVRow(t,
 			[]string{"Summary", "Status", "Priority", "Due Date", "Resolved", "Created", "Updated"},
-			[]string{"Ship it", "Closed", "High", "", "", "23/Jul/2026 7:36 PM", "23/Jul/2026 7:36 PM"})
+			[]string{"Ship it", "To Do", "High", "", "", "23/Jul/2026 7:36 PM", "23/Jul/2026 7:36 PM"})
 		if got.issue.DueDate != nil || got.issue.CompletedAt != nil {
 			t.Errorf("dates = {%v %v}, want both nil", got.issue.DueDate, got.issue.CompletedAt)
 		}

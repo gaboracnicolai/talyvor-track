@@ -27,11 +27,16 @@ import (
 // The `Created` column carries no labels meaning and is here because a real csv-all-fields export
 // always has one: without it every row is legitimately warned about (jira_csv_created.go), and the
 // "want none" assertion below would have had to be weakened to accommodate an unrelated merge.
-const jiraCSVWithRepeatedLabels = "Summary,Description,Status,Priority,Labels,Labels,Labels,Due Date,Created,Updated\n" +
-	"Widest work,d,Closed,High,alpha,beta,gamma,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
-	"Narrow work,d,To Do,High,alpha,,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
-	"Middle work,d,To Do,High,alpha,beta,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
-	"Unlabelled work,d,To Do,High,,,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
+// ⚠ `Resolved` IS PRESENT FOR THE SAME REASON `Created` IS PRESENT IN THE SIBLING FIXTURES, and
+// it was ADDED once the completion gap was measured: "Widest work" imports as DONE, and a done
+// issue whose export carries no `Resolved` column is now reported (csv_done_without_completion.go,
+// 2,288 such rows across 346 real exports). Without it this fixture would warn about something
+// that has nothing to do with labels, and the "want none" below would have had to be weakened.
+const jiraCSVWithRepeatedLabels = "Summary,Description,Status,Priority,Labels,Labels,Labels,Due Date,Created,Updated,Resolved\n" +
+	"Widest work,d,Closed,High,alpha,beta,gamma,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
+	"Narrow work,d,To Do,High,alpha,,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,\n" +
+	"Middle work,d,To Do,High,alpha,beta,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,\n" +
+	"Unlabelled work,d,To Do,High,,,,,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,\n"
 
 func readIssueLabelsByTitle(t *testing.T, d *testutil.DB, wsID string) map[string][]string {
 	t.Helper()

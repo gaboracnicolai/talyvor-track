@@ -269,10 +269,14 @@ func TestRun_WarningsAreCountedNotAccumulated(t *testing.T) {
 // CANNOT PASS BY ABSENCE, and cannot pass by warning about everything: a wholly recognised import
 // must produce ZERO warnings. Paired with the test above, a mapper stuck on either answer fails.
 func TestRun_CleanImportProducesNoWarnings(t *testing.T) {
-	csv := "Summary,Description,Status,Priority,Labels,Created,Updated\n" +
-		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
-		"Two,d,In Progress,Medium,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n" +
-		"Three,d,Resolved,Lowest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
+	// ⚠ `Resolved` IS A COLUMN HERE FOR THE REASON `Created` ALREADY WAS: row "Three" imports as
+	// DONE, and a done issue whose export supplies no completion instant is now reported
+	// (csv_done_without_completion.go). A fully recognised import is one that gives the mapper
+	// everything it reads; suppressing the line instead would hide the loss it exists to make audible.
+	csv := "Summary,Description,Status,Priority,Labels,Created,Updated,Resolved\n" +
+		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,\n" +
+		"Two,d,In Progress,Medium,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,\n" +
+		"Three,d,Resolved,Lowest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 	out, err := New(&fakeIssueStore{}).ImportJiraCSV(t.Context(), "ws1", "team1", strings.NewReader(csv))
 	if err != nil {
 		t.Fatal(err)

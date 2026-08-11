@@ -73,9 +73,11 @@ func TestJobRow_CleanImportStoresEmptyWarnings(t *testing.T) {
 
 	// `Created` is present because a real export always carries it; without it the import is
 	// legitimately warned about (jira_csv_created.go) and this assertion would have had to be
-	// weakened rather than the fixture made realistic.
-	clean := "Summary,Description,Status,Priority,Labels,Created,Updated\n" +
-		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\nTwo,d,Resolved,Low,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
+	// weakened rather than the fixture made realistic. ⚠ `Resolved` IS PRESENT FOR EXACTLY THE
+	// SAME REASON and was added by the same argument one column later: row "Two" imports as DONE,
+	// and a done issue with no completion instant is now reported (csv_done_without_completion.go).
+	clean := "Summary,Description,Status,Priority,Labels,Created,Updated,Resolved\n" +
+		"One,d,To Do,Highest,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,\nTwo,d,Resolved,Low,bug,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM,23/Jul/2026 7:36 PM\n"
 	jobID, err := js.Create(ctx, ws.ID, team.ID, "jira_csv", []byte(clean))
 	if err != nil {
 		t.Fatal(err)

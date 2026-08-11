@@ -231,6 +231,26 @@ func (n FieldNote) render(count int) string {
 			linearCSVUpdatedColumn, count)
 	case n.Via == viaNoUpdatedValue:
 		return fmt.Sprintf("empty %s on %d issue(s) — recorded as last updated at import time", n.Field, count)
+	case n.Via == viaNoResolvedColumn:
+		// The structural-zero line for the THIRD date column, and it names a consequence neither of
+		// the two above has: created_at and updated_at are never null, so their loss is a wrong
+		// number; this one is an ABSENCE from the report entirely. An operator who reads "your
+		// throughput chart is missing these" goes and re-exports; one who reads nothing does not.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) imported as done carry no "+
+			"completion time, so they count as neither open nor delivered in the resolution and "+
+			"throughput reports", jiraCSVResolvedColumn, count)
+	case n.Via == viaNoResolvedValue:
+		return fmt.Sprintf("empty %s on %d issue(s) imported as done — they count as neither open "+
+			"nor delivered in the resolution and throughput reports", n.Field, count)
+	case n.Via == viaNoLinearCompletedColumn:
+		// The Linear twin, a SEPARATE branch for the reason viaNoLinearCreatedColumn is one: it
+		// names THIS provider's column constant, so a Linear operator is never sent to `Resolved`.
+		return fmt.Sprintf("no %q column in this export — %d issue(s) imported as done carry no "+
+			"completion time, so they count as neither open nor delivered in the resolution and "+
+			"throughput reports", linearCSVCompletedColumn, count)
+	case n.Via == viaNoLinearCompletedValue:
+		return fmt.Sprintf("empty %s on %d issue(s) imported as done — they count as neither open "+
+			"nor delivered in the resolution and throughput reports", n.Field, count)
 	case n.Via == viaNoCreatedField:
 		// The API twin of viaNoCreatedColumn, and a SEPARATE sentence because it points somewhere
 		// else: there is no export to go and re-make, so it names the `fields` list the client sends.
@@ -450,6 +470,10 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// the census, the serialisation that needed no new layout, and for the assignee gap this does
 	// NOT close.
 	due, dueNotes := linearCSVDueDate(ci.get(row, linearCSVDueDateColumn))
+	// WHEN THE COMPLETION COLUMN SUPPLIED NOTHING AND THE ISSUE STILL IMPORTED AS DONE. The row
+	// lands with completed_at NULL, which analytics reads as neither open nor delivered — see
+	// csv_done_without_completion.go for the census and for why the note is gated on `done`.
+	doneGapNotes := linearCSVDoneWithoutCompleted(ci, row, status)
 	return mappedIssue{
 		issue: model.Issue{
 			// THE NAME LINEAR GAVE THE ISSUE, and the ROUTING KEY of source.go's write pipeline —
@@ -475,7 +499,7 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFallback{}, rawPrio, prio, prioOK),
-			concatNotes(createdNotes, completedNotes, updatedNotes, dueNotes)...),
+			concatNotes(createdNotes, completedNotes, updatedNotes, dueNotes, doneGapNotes)...),
 		// Same two columns, same spellings, same report — see the jira twin above.
 		onUpdate: csvClobberedColumnNotes(ci),
 	}, nil
@@ -665,6 +689,10 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 	// ago". An unread Updated puts a backlog measured in YEARS at the top of today's list. See
 	// jira_csv_updated.go for the measurement and for the stop reason it overturns.
 	updated, updatedNotes := jiraCSVUpdated(ci, row)
+	// The twin of the Linear line above, and it runs AFTER applyJiraResolution because that call
+	// can move a row done → cancelled: a cancelled issue is correctly completion-less and must not
+	// be reported. See csv_done_without_completion.go.
+	doneGapNotes := jiraCSVDoneWithoutResolved(ci, row, status)
 	return mappedIssue{
 		issue: model.Issue{
 			// THE NAME THE PROVIDER GAVE THE ISSUE, and the ROUTING KEY of source.go's write
@@ -691,7 +719,7 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			UpdatedAt:   updated,
 		},
 		notes: append(collectNotes(rawStatus, status, statusOK, statusFB, rawPrio, prio, prioOK),
-			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes)...),
+			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes, doneGapNotes)...),
 		// The columns this export does not carry that a RE-import would empty. Reported only if
 		// this row overwrote an issue that already existed — see csv_clobbered_columns.go.
 		onUpdate: csvClobberedColumnNotes(ci),

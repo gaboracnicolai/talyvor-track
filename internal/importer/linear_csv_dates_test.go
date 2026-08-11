@@ -201,18 +201,49 @@ func TestLinearCSV_AFullyReadableRowAddsNoWarning(t *testing.T) {
 	}
 }
 
-// TestLinearCSV_AnAbsentCompletedColumnIsNotAWarning is the asymmetry, stated as a test so nobody
-// "fixes" it later. An absent Created column is a WRONG value (created_at defaults to NOW()); an
-// absent Completed column is an honest NULL that no report misreads, and warning about it would put
-// a line an operator cannot act on into the channel the Created line needs to be read in.
-func TestLinearCSV_AnAbsentCompletedColumnIsNotAWarning(t *testing.T) {
-	_, out := importOneLinearRow(t,
-		"ID,Title,Description,Status,Priority,Assignee,Labels,Created\n"+
-			"LIN-6,No completed column,d,Done,Medium,,,2023-03-14\n")
+// TestLinearCSV_AnAbsentCompletedColumnIsNotAWarning STATED THE ASYMMETRY "so nobody fixes it
+// later", AND HALF OF IT WAS FALSE. It read: "an absent Completed column is an honest NULL that no
+// report misreads, and warning about it would put a line an operator cannot act on into the channel
+// the Created line needs to be read in" — and its fixture's status was `Done`.
+//
+// ⚠⚠ BOTH CLAUSES ARE FALSIFIABLE AND BOTH ARE FALSE ON A DONE ISSUE. analytics' resolution and
+// throughput queries select on `completed_at IS NOT NULL`, so a done issue with a NULL there is
+// dropped from both — it counts as neither open work nor delivered work, which is a report
+// misreading it. And the action is the SAME action the Created line asks for: re-export with the
+// column. MEASURED over the corpora: 1 of 45 real Linear exports and 7 of 346 real Jira exports
+// carry no completion column at all, for 34 and 2,288 done rows respectively.
+//
+// ⚠ THE OTHER HALF IS TRUE AND IS KEPT, because it is what stops the new line being noise: on an
+// OPEN issue an absent Completed column IS an honest NULL, and most rows in every real export are
+// open. Both directions are asserted here, so neither can pass by the mapper being stuck.
+func TestLinearCSV_AnAbsentCompletedColumnIsAWarningOnlyOnADoneIssue(t *testing.T) {
+	t.Run("done — the row analytics drops, and it is now audible", func(t *testing.T) {
+		_, out := importOneLinearRow(t,
+			"ID,Title,Description,Status,Priority,Assignee,Labels,Created\n"+
+				"LIN-6,No completed column,d,Done,Medium,,,2023-03-14\n")
 
-	for _, w := range out.Warnings {
-		if strings.Contains(w, "Completed") || strings.Contains(w, "completion time") {
-			t.Errorf("an absent Completed column produced %q; want no warning about it", w)
+		var got string
+		for _, w := range out.Warnings {
+			if strings.Contains(w, "Completed") || strings.Contains(w, "completion time") {
+				got = w
+			}
 		}
-	}
+		if got == "" {
+			t.Fatalf("an absent Completed column on a DONE issue reported nothing; warnings = %q", out.Warnings)
+		}
+		if strings.Contains(got, "Resolved") {
+			t.Errorf("the Linear line names Jira's column: %q", got)
+		}
+	})
+	t.Run("open — still silent, which is what keeps the line above readable", func(t *testing.T) {
+		_, out := importOneLinearRow(t,
+			"ID,Title,Description,Status,Priority,Assignee,Labels,Created\n"+
+				"LIN-7,No completed column,d,In Progress,Medium,,,2023-03-14\n")
+
+		for _, w := range out.Warnings {
+			if strings.Contains(w, "Completed") || strings.Contains(w, "completion time") {
+				t.Errorf("an OPEN issue produced %q; a NULL completion time on open work is truthful", w)
+			}
+		}
+	})
 }
