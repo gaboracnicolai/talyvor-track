@@ -89,7 +89,11 @@ func censusUnreadRefs(t *testing.T, dir string, mapper rowMapper, refs []unreadR
 				}
 			}
 			for _, n := range m.notes {
-				if n.Via == viaColumnNotRead {
+				// BOTH unread-column vias. They render different sentences (one reference is
+				// stamped rather than left empty — see viaColumnNotReadStamped) but they are the
+				// same loss class, and a census that knew only the first would score the fifth
+				// reference `populated>0 reported=0` and read as a product defect.
+				if n.Via == viaColumnNotRead || n.Via == viaColumnNotReadStamped {
 					c.noted[n.Value]++
 				}
 			}
@@ -108,8 +112,8 @@ func censusUnreadRefs(t *testing.T, dir string, mapper rowMapper, refs []unreadR
 // measuring cannot see a deletion. The literals below can, and assertCensus also fails when the
 // table grows past them, so the two cannot drift apart in either direction.
 var (
-	unreadRefsLinearColumns = []string{"Assignee", "Project", "Cycle Name", "Parent issue"}
-	unreadRefsJiraColumns   = []string{"Assignee", "Sprint", "Parent"}
+	unreadRefsLinearColumns = []string{"Assignee", "Project", "Cycle Name", "Parent issue", "Creator"}
+	unreadRefsJiraColumns   = []string{"Assignee", "Sprint", "Parent", "Creator", "Reporter"}
 )
 
 func assertCensus(t *testing.T, name string, c refCensus, refs []unreadRef, want []string, minFiles, minRows int) {

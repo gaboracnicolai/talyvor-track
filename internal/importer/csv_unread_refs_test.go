@@ -162,7 +162,12 @@ func TestUnreadRefTables_EveryColumnAppearsInARealExportHeader(t *testing.T) {
 	// Verbatim header lines from the corpus: the 30-column and 34-column Linear shapes, and the
 	// two Jira export shapes that carry Sprint and Parent.
 	const linearHeader30 = "ID,Team,Title,Description,Status,Estimate,Priority,Project ID,Project,Creator,Assignee,Labels,Cycle Number,Cycle Name,Cycle Start,Cycle End,Created,Updated,Started,Triaged,Completed,Canceled,Archived,Due Date,Parent issue,Initiatives,Project Milestone ID,Project Milestone,SLA Status,Roadmaps"
-	const jiraHeaderWide = "Issue key,Issue id,Summary,Issue Type,Status,Project key,Project name,Priority,Resolution,Assignee,Reporter,Created,Updated,Last Viewed,Resolved,Due Date,Sprint,Parent,Parent summary,Labels"
+	// ⚠ REPLACED, NOT EXTENDED, AND THE OLD LINE WOULD HAVE PASSED THE NEW ENTRIES BY ACCIDENT ON
+	// ONE OF THEM. The previous literal carried `Reporter` but no `Creator`, so a hand-edit adding
+	// the word would have made this floor agree with a table entry no measured export backs. This
+	// is the verbatim header of corpus file 0c70e32a9d73b7a035228f713c423257 — the all-fields Jira
+	// Cloud shape, and the one that carries all five reference columns at once.
+	const jiraHeaderWide = "Summary,Issue key,Issue id,Issue Type,Status,Project key,Project name,Project type,Project lead,Project lead id,Project description,Priority,Resolution,Assignee,Assignee Id,Reporter,Reporter Id,Creator,Creator Id,Created,Updated,Last Viewed,Resolved,Due date,Votes,Description,Environment,Watchers,Watchers Id,Original estimate,Remaining Estimate,Time Spent,Work Ratio,Σ Original Estimate,Σ Remaining Estimate,Σ Time Spent,Security Level,Inward issue link (Blocks),Inward issue link (Blocks),Outward issue link (Blocks),Custom field (Development),Custom field (Issue color),Custom field (Rank),Sprint,Custom field (Start date),Custom field (Story point estimate),Custom field (Team),Custom field (Vulnerability),Custom field (Vulnerability),Parent,Parent key,Parent summary,Status Category,Status Category Changed"
 
 	check := func(name, header string, refs []unreadRef) {
 		have := map[string]bool{}
@@ -182,20 +187,27 @@ func TestUnreadRefTables_EveryColumnAppearsInARealExportHeader(t *testing.T) {
 	check("linear", linearHeader30, linearUnreadRefs)
 	check("jira", jiraHeaderWide, jiraUnreadRefs)
 
-	// The union of the two tables is exactly the four Track references, no more and no fewer. A
-	// fifth entry here would be a claim about a Track column that does not exist; a missing one is
-	// a reference that went back to being silent.
+	// The union of the two tables is exactly the FIVE cross-object references model.Issue declares,
+	// no more and no fewer. An extra entry is a claim about a Track column that does not exist; a
+	// missing one is a reference that went back to being silent.
+	//
+	// ⚠ THIS PIN SAID FOUR AND THE FOURTH WAS NOT THE LAST ONE. Its comment read "a fifth entry
+	// would be a claim about a Track column that does not exist" — and model.Issue declares
+	// CreatorID, so the fifth entry is a claim about a column that DOES. The number came from
+	// assertRefInWorkspace's guard list rather than from model.Issue, and creator_id is absent
+	// there because it is server-stamped, not because Track has no creator. Both jobs of the pin
+	// are kept: a sixth field still reds here, and a missing one still reds.
 	seen := map[string]bool{}
 	for _, r := range append(append([]unreadRef{}, linearUnreadRefs...), jiraUnreadRefs...) {
 		seen[r.field] = true
 	}
-	for _, want := range []string{fieldAssigneeRef, fieldProjectRef, fieldCycleRef, fieldParentRef} {
+	for _, want := range []string{fieldAssigneeRef, fieldProjectRef, fieldCycleRef, fieldParentRef, fieldCreatorRef} {
 		if !seen[want] {
 			t.Errorf("no transport reports a lost %s", want)
 		}
 		delete(seen, want)
 	}
 	for extra := range seen {
-		t.Errorf("a table reports %q, which is not one of Track's four issue object references", extra)
+		t.Errorf("a table reports %q, which is not one of Track's five issue object references", extra)
 	}
 }

@@ -203,6 +203,17 @@ func (n FieldNote) render(count int) string {
 		// reports rather than maps.
 		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
 			"their Track %s is left empty", count, n.Value, n.Field)
+	case n.Via == viaColumnNotReadStamped:
+		// The twin of the line above, and a SEPARATE branch because its second half would be a
+		// FALSE sentence if shared. The four references that line covers are nullable and end up
+		// NULL; issues.creator_id is NOT NULL and run() stamps model.ImporterCreatorID on every row
+		// it writes, on the INSERT branch and — since the conflict arm requires that creator — on
+		// the re-import branch too. So the value is not missing, it is replaced, and an operator
+		// told the field is "left empty" would go looking for a null that is not there. It names
+		// what Track recorded INSTEAD, which is the only half that tells them what to act on.
+		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
+			"their Track %s is recorded as %q, not the person that column names",
+			count, n.Value, n.Field, model.ImporterCreatorID)
 	case n.Via == viaUnparseableDate:
 		// The layouts are pinned by hand from a real Jira's responses. A tenant whose serialisation
 		// differs from all of them learns it here, on its first import, instead of receiving a
