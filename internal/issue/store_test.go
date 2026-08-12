@@ -30,14 +30,14 @@ func issueRow(id, identifier, status string, number int) *pgxmock.Rows {
 	return pgxmock.NewRows([]string{
 		"id", "workspace_id", "team_id", "project_id", "number", "identifier",
 		"title", "description", "status", "priority",
-		"assignee_id", "creator_id", "cycle_id", "parent_id",
+		"assignee_id", "creator_id", "cycle_id", "parent_id", "milestone_id",
 		"due_date", "completed_at",
 		"lens_feature", "ai_cost_usd", "ai_tokens",
 		"labels", "sort_order", "created_at", "updated_at",
 	}).AddRow(
 		id, "ws-1", "team-1", nil, number, identifier,
 		"Title", "Body", status, 0,
-		nil, "creator-1", nil, nil,
+		nil, "creator-1", nil, nil, nil,
 		nil, nil,
 		"", 0.0, 0,
 		[]string{}, 0.0, now, now,
@@ -60,10 +60,15 @@ func TestCreate_InsertsWithAutoNumberAndIdentifier(t *testing.T) {
 		WithArgs("team-1", "ws-1", "ENG", identifierScanBound).
 		WillReturnRows(pgxmock.NewRows([]string{"next"}).AddRow(42))
 
-	// 3) Insert and return the materialised row. The INSERT takes 20
+	// 3) Insert and return the materialised row. The INSERT takes 21
 	//    positional args; we use AnyArg() across the board since the exact
 	//    ordering is verified end-to-end against the production schema in CI.
-	//    20, not 19, since updated_at joined created_at in the column list.
+	//    21, not 20, since milestone_id joined the column list — the fifth
+	//    cross-object reference, and the one whose absence made the Roadmap
+	//    page's per-milestone counters structurally zero
+	//    (project/roadmap_milestone_realpg_test.go). pgxmock counts arguments,
+	//    so an arity change fails LOUDLY here rather than passing as a
+	//    silently different statement — which is exactly what it did.
 	//    Neither is "a server-set timestamp" any more: both are server-set
 	//    for every native path and PROVIDER-set on an import, for the same
 	//    reason — the column DEFAULTs, so an unsupplied value is a plausible
@@ -71,7 +76,7 @@ func TestCreate_InsertsWithAutoNumberAndIdentifier(t *testing.T) {
 	//    See the comment above the statement, create_created_at_test.go, and
 	//    importer/jira_csv_updated_job_test.go, which check the VALUE and the
 	//    GATE against real Postgres rather than the arity.
-	anyArgs := make([]any, 20)
+	anyArgs := make([]any, 21)
 	for k := range anyArgs {
 		anyArgs[k] = pgxmock.AnyArg()
 	}
@@ -120,7 +125,7 @@ func TestList_FiltersByStatus(t *testing.T) {
 		WillReturnRows(issueRow("a", "ENG-1", "in_progress", 1).
 			AddRow("b", "ws-1", "team-1", nil, 2, "ENG-2",
 				"t2", "d2", "in_progress", 0,
-				nil, "c", nil, nil,
+				nil, "c", nil, nil, nil,
 				nil, nil,
 				"", 0.0, 0,
 				[]string{}, 0.0, time.Now().UTC(), time.Now().UTC()))
@@ -165,14 +170,14 @@ func TestUpdate_StatusToDoneSetsCompletedAt(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "workspace_id", "team_id", "project_id", "number", "identifier",
 			"title", "description", "status", "priority",
-			"assignee_id", "creator_id", "cycle_id", "parent_id",
+			"assignee_id", "creator_id", "cycle_id", "parent_id", "milestone_id",
 			"due_date", "completed_at",
 			"lens_feature", "ai_cost_usd", "ai_tokens",
 			"labels", "sort_order", "created_at", "updated_at",
 		}).AddRow(
 			"issue-1", "ws-1", "team-1", nil, 1, "ENG-1",
 			"t", "d", "done", 0,
-			nil, "creator", nil, nil,
+			nil, "creator", nil, nil, nil,
 			nil, ptrTime(time.Now().UTC()), // completed_at set
 			"", 0.0, 0,
 			[]string{}, 0.0, time.Now().UTC(), time.Now().UTC(),
@@ -196,14 +201,14 @@ func TestUpdate_StatusFromDoneClearsCompletedAt(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"id", "workspace_id", "team_id", "project_id", "number", "identifier",
 			"title", "description", "status", "priority",
-			"assignee_id", "creator_id", "cycle_id", "parent_id",
+			"assignee_id", "creator_id", "cycle_id", "parent_id", "milestone_id",
 			"due_date", "completed_at",
 			"lens_feature", "ai_cost_usd", "ai_tokens",
 			"labels", "sort_order", "created_at", "updated_at",
 		}).AddRow(
 			"issue-1", "ws-1", "team-1", nil, 1, "ENG-1",
 			"t", "d", "in_progress", 0,
-			nil, "creator", nil, nil,
+			nil, "creator", nil, nil, nil,
 			nil, nil, // completed_at cleared
 			"", 0.0, 0,
 			[]string{}, 0.0, time.Now().UTC(), time.Now().UTC(),

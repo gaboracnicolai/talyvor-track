@@ -137,7 +137,7 @@ type IssueFilter struct {
 // touching one constant + one scan helper.
 const issueColumns = `id, workspace_id, team_id, project_id, number, identifier,
     title, description, status, priority,
-    assignee_id, creator_id, cycle_id, parent_id,
+    assignee_id, creator_id, cycle_id, parent_id, milestone_id,
     due_date, completed_at,
     lens_feature, ai_cost_usd, ai_tokens,
     labels, sort_order, created_at, updated_at`
@@ -158,7 +158,7 @@ func scanIssue(scanner interface {
 	err := scanner.Scan(
 		&i.ID, &i.WorkspaceID, &i.TeamID, &i.ProjectID, &i.Number, &i.Identifier,
 		&i.Title, &i.Description, &status, &priority,
-		&i.AssigneeID, &i.CreatorID, &i.CycleID, &i.ParentID,
+		&i.AssigneeID, &i.CreatorID, &i.CycleID, &i.ParentID, &i.MilestoneID,
 		&i.DueDate, &i.CompletedAt,
 		&i.LensFeature, &i.AICostUSD, &i.AITokens,
 		&i.Labels, &i.SortOrder, &i.CreatedAt, &i.UpdatedAt,
@@ -202,10 +202,11 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 
 	// Object-graph integrity: optional cross-object refs must be in this workspace.
 	for field, p := range map[string]*string{
-		"project_id":  issue.ProjectID,
-		"cycle_id":    issue.CycleID,
-		"assignee_id": issue.AssigneeID,
-		"parent_id":   issue.ParentID,
+		"project_id":   issue.ProjectID,
+		"cycle_id":     issue.CycleID,
+		"assignee_id":  issue.AssigneeID,
+		"parent_id":    issue.ParentID,
+		"milestone_id": issue.MilestoneID,
 	} {
 		if p == nil || *p == "" {
 			continue
@@ -280,18 +281,23 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 		updatedAt = &t
 	}
 
+	// ⚠ milestone_id IS NAMED HERE AS WELL AS IN updatableFields, BECAUSE THE OTHER DOOR IS THE ONE
+	// THAT STAYS SHUT QUIETLY. Closing only the PATCH path would leave `POST /v1/issues` decoding a
+	// milestone_id off the body (handler.Create decodes the whole model.Issue) into a field this
+	// statement never wrote — the same 200-with-nothing-stored the allowlist used to produce, one
+	// route over. The ref-integrity loop above covers it.
 	const insertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
-         assignee_id, creator_id, cycle_id, parent_id,
+         assignee_id, creator_id, cycle_id, parent_id, milestone_id,
          due_date, completed_at, lens_feature, labels, sort_order, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-            COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()))
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            COALESCE($20::timestamptz, NOW()), COALESCE($21::timestamptz, NOW()))
     RETURNING ` + issueColumns
 	return scanIssue(s.pool.QueryRow(ctx, insertSQL,
 		issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier,
 		issue.Title, issue.Description, string(issue.Status), int(issue.Priority),
-		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID,
+		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.MilestoneID,
 		issue.DueDate, completedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt,
 		updatedAt,
 	))
@@ -377,13 +383,25 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 	).Scan(&teamIdentifier); err != nil {
 		return nil, false, fmt.Errorf("issue: team not found in workspace: %w", err)
 	}
-	// Object-graph integrity: optional cross-object refs must be in this workspace (same guard as Create —
-	// also what keeps this INSERT clear of the .semgrep cross-object-tenancy lock).
+	// Object-graph integrity: optional cross-object refs must be in this workspace (same guard as Create).
+	//
+	// ⚠ THE HALF-SENTENCE THAT USED TO FOLLOW — "also what keeps this INSERT clear of the .semgrep
+	// cross-object-tenancy lock" — IS FALSE, AND IT WAS MEASURED RATHER THAN RE-READ. Deleting this
+	// loop outright and re-running `semgrep scan --config .semgrep/ internal/ cmd/` yields ZERO
+	// findings. A four-way probe says why, and it is TWO independent reasons: the rule matches its
+	// column list against the TEXT OF THE ARGUMENT at the QueryRow call, so an inline INSERT naming
+	// (workspace_id, project_id) with no guard IS caught while the identical statement held in a
+	// `const` — which is how both of this store's INSERTs are written — is NOT; and `milestone_id`
+	// is absent from the rule's alternation, so even inline it would not match. The guard below is
+	// load-bearing; the lock is not what makes it so, and nothing in .semgrep/ would notice if it
+	// went. Reported in the queue, not widened here: adding a term to a lock my own control shows
+	// cannot fire on the code it names would be a guard that cannot fail.
 	for field, p := range map[string]*string{
-		"project_id":  issue.ProjectID,
-		"cycle_id":    issue.CycleID,
-		"assignee_id": issue.AssigneeID,
-		"parent_id":   issue.ParentID,
+		"project_id":   issue.ProjectID,
+		"cycle_id":     issue.CycleID,
+		"assignee_id":  issue.AssigneeID,
+		"parent_id":    issue.ParentID,
+		"milestone_id": issue.MilestoneID,
 	} {
 		if p == nil || *p == "" {
 			continue
@@ -462,16 +480,22 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 	const upsertSQL = `INSERT INTO issues
         (workspace_id, team_id, project_id, number, identifier,
          title, description, status, priority,
-         assignee_id, creator_id, cycle_id, parent_id,
+         assignee_id, creator_id, cycle_id, parent_id, milestone_id,
          due_date, completed_at, lens_feature, labels, sort_order, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-            COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()))
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            COALESCE($20::timestamptz, NOW()), COALESCE($21::timestamptz, NOW()))
     ON CONFLICT (workspace_id, identifier) DO UPDATE SET
         title       = EXCLUDED.title,        -- CLOBBER: provider is source of truth
         description = EXCLUDED.description,   -- CLOBBER
         labels      = EXCLUDED.labels,       -- CLOBBER
         updated_at  = NOW()
-        -- OMITTED (PRESERVE local workflow):        status, priority, completed_at, due_date, created_at
+        -- OMITTED (PRESERVE local workflow):        status, priority, completed_at, due_date, created_at,
+        --                                           milestone_id
+        --   milestone_id is omitted for a reason the others do not have: NO transport maps it, so
+        --   EXCLUDED.milestone_id is always NULL and clobbering would erase a human's attachment on
+        --   every re-import while importing nothing. It lands on INSERT like the rest, where it is
+        --   NULL too — imports are unchanged by this merge and the census in the queue says why
+        --   mapping it needs a decision (the export carries a milestone NAME, not an id).
         --   completed_at travels WITH status and cannot be split from it: status is preserved here
         --   so local workflow wins, and clobbering completed_at alone could leave a locally-done
         --   issue with status "done" and no completion time — the invariant Update maintains, broken
@@ -511,7 +535,7 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 
 	var inserted bool
 	out, err := scanIssue(insertedScanner{
-		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt, updatedAt),
+		row:      s.pool.QueryRow(ctx, upsertSQL, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier, issue.Title, issue.Description, string(issue.Status), int(issue.Priority), issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.MilestoneID, issue.DueDate, issue.CompletedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt, updatedAt),
 		inserted: &inserted,
 	})
 	if err != nil {
@@ -823,14 +847,19 @@ func (s *Store) attachFieldValuesBulk(ctx context.Context, issues []model.Issue)
 // key in the map argument that isn't in this set is silently dropped
 // — protects against SQL injection via map keys.
 var updatableFields = map[string]struct{}{
-	"title":        {},
-	"description":  {},
-	"status":       {},
-	"priority":     {},
-	"assignee_id":  {},
-	"project_id":   {},
-	"cycle_id":     {},
-	"parent_id":    {},
+	"title":       {},
+	"description": {},
+	"status":      {},
+	"priority":    {},
+	"assignee_id": {},
+	"project_id":  {},
+	"cycle_id":    {},
+	"parent_id":   {},
+	// The column this allowlist's silence made unwritable. Update drops any key that is not here
+	// WITHOUT a word, so `PATCH {"milestone_id": "..."}` answered 200 with the field untouched —
+	// indistinguishable, to a caller, from a stored value. validateRefWorkspaces covers it because
+	// it iterates issueRefQueries, which now names it.
+	"milestone_id": {},
 	"due_date":     {},
 	"labels":       {},
 	"sort_order":   {},
@@ -850,6 +879,15 @@ var issueRefQueries = map[string]string{
 	"project_id":  `SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2)`,
 	"cycle_id":    `SELECT EXISTS(SELECT 1 FROM cycles WHERE id = $1 AND workspace_id = $2)`,
 	"parent_id":   `SELECT EXISTS(SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
+	// ⚠ THE GATE IS THE WORKSPACE, NOT THE PROJECT, AND THAT IS THE SIBLINGS' RULE RATHER THAN A
+	// WEAKER ONE CHOSEN HERE. `cycle_id` is a per-TEAM object checked at workspace level by the line
+	// above; a milestone belongs to a project (milestones.project_id NOT NULL) and is checked the
+	// same way. THE RESIDUAL IS REAL AND IS NAMED: an issue can be attached to a milestone of a
+	// DIFFERENT project in the same workspace, and the roadmap will file it under that project's
+	// marker. Tightening it to "the milestone's project must be the issue's project" is a product
+	// rule — it would forbid attaching a project-less issue to any milestone at all — so it is
+	// stated here rather than invented.
+	"milestone_id": `SELECT EXISTS(SELECT 1 FROM milestones WHERE id = $1 AND workspace_id = $2)`,
 }
 
 // assertRefInWorkspace refuses unless refID exists in workspaceID. query is a fixed

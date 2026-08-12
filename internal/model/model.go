@@ -139,8 +139,17 @@ type Issue struct {
 	CreatorID   string        `json:"creator_id"            db:"creator_id"`
 	CycleID     *string       `json:"cycle_id,omitempty"    db:"cycle_id"`
 	ParentID    *string       `json:"parent_id,omitempty"   db:"parent_id"`
-	DueDate     *time.Time    `json:"due_date,omitempty"    db:"due_date"`
-	CompletedAt *time.Time    `json:"completed_at,omitempty" db:"completed_at"`
+	// MilestoneID is the FIFTH cross-object reference, and it is the one the struct was missing
+	// while `issues.milestone_id` existed. Migration 0004 declares and indexes the column,
+	// milestone.Store.GetProgress counts on it and project/roadmap.go joins on it to render
+	// "<completed>/<issues> done" plus an AI-cost line per milestone — and no write path in this
+	// repo named it: absent from both INSERTs, absent from updatableFields (which drops unknown
+	// keys in silence, so a PATCH carrying it answered 200 and changed nothing), and absent from
+	// here, so no handler could carry one in. Both rendered numbers were therefore structurally
+	// zero for every milestone in every workspace. See roadmap_milestone_realpg_test.go.
+	MilestoneID *string    `json:"milestone_id,omitempty" db:"milestone_id"`
+	DueDate     *time.Time `json:"due_date,omitempty"    db:"due_date"`
+	CompletedAt *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 
 	// Talyvor Lens integration. LensFeature is the value teams set in
 	// X-Talyvor-Feature when calling Lens; AICostUSD and AITokens are
