@@ -152,41 +152,18 @@ func TestUnreadRefWarning_RendersOneLineNamingBothEnds(t *testing.T) {
 // ─── whole-population, pinned as literals ───────────────────────────────────
 
 // The corpus numbers, written down where they run. csv_unread_refs_corpus_census_test.go recomputes
-// them from the real exports when the corpus is present; this asserts the SHAPE the numbers
-// describe — that every column named in the tables is one a real export actually carries — using
-// the real header rows from that corpus rather than a hand-written one.
+// them from the real exports when the corpus is present; this asserts the SHAPE the numbers describe.
 //
-// ⚠ THIS IS THE FLOOR, AND IT IS DELIBERATELY NOT A COUNT. A count pinned here would go red when
-// the corpus grows; what must not happen is a table entry naming a column no real export has.
-func TestUnreadRefTables_EveryColumnAppearsInARealExportHeader(t *testing.T) {
-	// Verbatim header lines from the corpus: the 30-column and 34-column Linear shapes, and the
-	// two Jira export shapes that carry Sprint and Parent.
-	const linearHeader30 = "ID,Team,Title,Description,Status,Estimate,Priority,Project ID,Project,Creator,Assignee,Labels,Cycle Number,Cycle Name,Cycle Start,Cycle End,Created,Updated,Started,Triaged,Completed,Canceled,Archived,Due Date,Parent issue,Initiatives,Project Milestone ID,Project Milestone,SLA Status,Roadmaps"
-	// ⚠ REPLACED, NOT EXTENDED, AND THE OLD LINE WOULD HAVE PASSED THE NEW ENTRIES BY ACCIDENT ON
-	// ONE OF THEM. The previous literal carried `Reporter` but no `Creator`, so a hand-edit adding
-	// the word would have made this floor agree with a table entry no measured export backs. This
-	// is the verbatim header of corpus file 0c70e32a9d73b7a035228f713c423257 — the all-fields Jira
-	// Cloud shape, and the one that carries all five reference columns at once.
-	const jiraHeaderWide = "Summary,Issue key,Issue id,Issue Type,Status,Project key,Project name,Project type,Project lead,Project lead id,Project description,Priority,Resolution,Assignee,Assignee Id,Reporter,Reporter Id,Creator,Creator Id,Created,Updated,Last Viewed,Resolved,Due date,Votes,Description,Environment,Watchers,Watchers Id,Original estimate,Remaining Estimate,Time Spent,Work Ratio,Σ Original Estimate,Σ Remaining Estimate,Σ Time Spent,Security Level,Inward issue link (Blocks),Inward issue link (Blocks),Outward issue link (Blocks),Custom field (Development),Custom field (Issue color),Custom field (Rank),Sprint,Custom field (Start date),Custom field (Story point estimate),Custom field (Team),Custom field (Vulnerability),Custom field (Vulnerability),Parent,Parent key,Parent summary,Status Category,Status Category Changed"
-
-	check := func(name, header string, refs []unreadRef) {
-		have := map[string]bool{}
-		for _, h := range strings.Split(header, ",") {
-			have[strings.ToLower(strings.TrimSpace(h))] = true
-		}
-		for _, r := range refs {
-			if !have[strings.ToLower(r.column)] {
-				t.Errorf("%s table names column %q, which is in no real export header — "+
-					"the report for %s can never fire", name, r.column, r.field)
-			}
-		}
-		if len(refs) == 0 {
-			t.Errorf("%s table is empty — the report is structurally silent", name)
-		}
-	}
-	check("linear", linearHeader30, linearUnreadRefs)
-	check("jira", jiraHeaderWide, jiraUnreadRefs)
-
+// ⚠ THE HEADER HALF OF THIS TEST MOVED, IT WAS NOT DROPPED. It used to check that every column named
+// in the tables appears in one verbatim real export header, against a single Jira literal. That
+// literal cannot justify the parent entry's other spellings — `Custom field (Epic Link)` and `Parent
+// id` are not in it — and a floor that checked ONE spelling per entry would have gone green on a
+// table whose spellings it had never read. The rule now lives in
+// csv_parent_spellings_test.go's TestUnreadRefTables_EverySpellingAppearsInARealExportHeader, over
+// three real Jira headers, per SPELLING, plus a floor proving each literal justifies a spelling the
+// others do not. Keeping a copy here would be a second guard for one rule: the control that removes
+// a spelling from the table has to red in exactly one place for that place to be the reason.
+func TestUnreadRefTables_TheUnionIsExactlyTracksFiveIssueReferences(t *testing.T) {
 	// The union of the two tables is exactly the FIVE cross-object references model.Issue declares,
 	// no more and no fewer. An extra entry is a claim about a Track column that does not exist; a
 	// missing one is a reference that went back to being silent.
