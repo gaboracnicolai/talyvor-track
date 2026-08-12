@@ -203,6 +203,13 @@ func (n FieldNote) render(count int) string {
 		// reports rather than maps.
 		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
 			"their Track %s is left empty", count, n.Value, n.Field)
+	case n.Via == viaObjectNotCreated:
+		// The link sentence one grain wider: a value whose Track home is a row in ANOTHER TABLE
+		// that is never written. It names the object rather than a column because there is no
+		// column on the issue to look at — see csv_dropped_objects.go for which objects qualify
+		// and why `Original estimate` and Story Points do not.
+		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
+			"no Track %s is created from it", count, n.Value, n.Field)
 	case n.Via == viaIssueLinkNotRead:
 		// The THIRD sentence about a column this importer does not read, and a separate branch
 		// because the other two are both about a field ON the issue. A link would have created a
@@ -782,7 +789,10 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 				unreadRefNotes(ci, row, jiraUnreadRefs),
 				// The links. Jira names the column after the link TYPE, so the spellings are
 				// discovered from this export's header rather than listed. See csv_issue_links.go.
-				issueLinkNotes(ci, row, jiraIssueLinkSpellings(ci)))...),
+				issueLinkNotes(ci, row, jiraIssueLinkSpellings(ci)),
+				// The other two Track objects a Jira export carries values for and this importer
+				// never creates. See csv_dropped_objects.go.
+				droppedObjectNotes(ci, row, jiraObjectColumns))...),
 		// The columns this export does not carry that a RE-import would empty. Reported only if
 		// this row overwrote an issue that already existed — see csv_clobbered_columns.go.
 		onUpdate: csvClobberedColumnNotes(ci),
