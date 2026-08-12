@@ -203,6 +203,16 @@ func (n FieldNote) render(count int) string {
 		// reports rather than maps.
 		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
 			"their Track %s is left empty", count, n.Value, n.Field)
+	case n.Via == viaIssueLinkNotRead:
+		// The THIRD sentence about a column this importer does not read, and a separate branch
+		// because the other two are both about a field ON the issue. A link would have created a
+		// row in `issue_relations`; no field is left empty and there is no null for an operator to
+		// find. It names the consequence that costs something rather than the table, because
+		// Issue.IsBlocked is computed from exactly those rows — an issue whose export says it is
+		// blocked imports, and renders, as unblocked. See csv_issue_links.go for the population.
+		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
+			"no Track issue relation is created, so an issue its export says is blocked "+
+			"imports as unblocked", count, n.Value)
 	case n.Via == viaColumnNotReadStamped:
 		// The twin of the line above, and a SEPARATE branch because its second half would be a
 		// FALSE sentence if shared. The four references that line covers are nullable and end up
@@ -543,7 +553,10 @@ func linearRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			concatNotes(createdNotes, completedNotes, updatedNotes, dueNotes, doneGapNotes,
 				// The four object references Track declares and this transport fills none of —
 				// reported per POPULATED cell, never per header. See csv_unread_refs.go.
-				unreadRefNotes(ci, row, linearUnreadRefs))...),
+				unreadRefNotes(ci, row, linearUnreadRefs),
+				// The links, which are not a column on the issue at all: a row in issue_relations
+				// that is never created. See csv_issue_links.go.
+				issueLinkNotes(ci, row, linearIssueLinkColumns))...),
 		// Same two columns, same spellings, same report — see the jira twin above.
 		onUpdate: csvClobberedColumnNotes(ci),
 	}, nil
@@ -766,7 +779,10 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 			concatNotes(resolutionNotes, dueNotes, completedNotes, createdNotes, updatedNotes, doneGapNotes,
 				// Three of the four object references — a Jira `Project` is the Track TEAM this job
 				// already targets, not a lost project_id. See csv_unread_refs.go.
-				unreadRefNotes(ci, row, jiraUnreadRefs))...),
+				unreadRefNotes(ci, row, jiraUnreadRefs),
+				// The links. Jira names the column after the link TYPE, so the spellings are
+				// discovered from this export's header rather than listed. See csv_issue_links.go.
+				issueLinkNotes(ci, row, jiraIssueLinkSpellings(ci)))...),
 		// The columns this export does not carry that a RE-import would empty. Reported only if
 		// this row overwrote an issue that already existed — see csv_clobbered_columns.go.
 		onUpdate: csvClobberedColumnNotes(ci),
