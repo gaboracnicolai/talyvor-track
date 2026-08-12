@@ -13,29 +13,45 @@ rules:
       # A pgx Exec/QueryRow whose SQL LITERAL is a by-id DELETE or UPDATE ... WHERE id = $n.
       # NOTE: metavariable-regex is re.match-anchored and the value includes the leading
       # backtick/quote, so the pattern must start with (?s).* to search the whole literal.
+      # Two spellings, positive and negative in lockstep — see cross-object-tenancy.yml.
+      # The NOTE above is now half-obsolete and says so: metavariable-regex alone bound only
+      # the literal, so a `const delSQL = "DELETE FROM ... WHERE id = $1"` was invisible to
+      # this rule AND to the sprintf companion. The "=~/.../" arm reads the propagated value.
       - pattern-either:
-          - pattern: $Q.Exec($CTX, $SQL, ...)
-          - pattern: $Q.QueryRow($CTX, $SQL, ...)
-      - metavariable-regex:
-          metavariable: $SQL
-          regex: (?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$
+          - patterns:
+              - pattern-either:
+                  - pattern: $Q.Exec($CTX, $SQL, ...)
+                  - pattern: $Q.QueryRow($CTX, $SQL, ...)
+              - metavariable-regex:
+                  metavariable: $SQL
+                  regex: (?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$
+          - pattern-either:
+              - pattern: $Q.Exec($CTX, "=~/(?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$/", ...)
+              - pattern: $Q.QueryRow($CTX, "=~/(?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$/", ...)
       # Excluded when the SAME statement is already workspace-scoped (…AND workspace_id = $n):
       # the by-id op provably acts within one workspace and is safe.
       - pattern-not:
-          patterns:
+          pattern-either:
+            - patterns:
+                - pattern-either:
+                    - pattern: $Q.Exec($CTX, $SQL, ...)
+                    - pattern: $Q.QueryRow($CTX, $SQL, ...)
+                - metavariable-regex:
+                    metavariable: $SQL
+                    regex: (?s).*workspace_id
             - pattern-either:
-                - pattern: $Q.Exec($CTX, $SQL, ...)
-                - pattern: $Q.QueryRow($CTX, $SQL, ...)
-            - metavariable-regex:
-                metavariable: $SQL
-                regex: (?s).*workspace_id
+                - pattern: $Q.Exec($CTX, "=~/(?s).*workspace_id/", ...)
+                - pattern: $Q.QueryRow($CTX, "=~/(?s).*workspace_id/", ...)
     paths:
-      # SEC-5. Empty exclude for THIS rule — but note its scope: it matches only INLINE STRING LITERAL
-      # SQL (the $SQL metavariable binds a literal). It was BLIND to `sql := fmt.Sprintf(...); Exec(ctx,
-      # sql, ...)` — exactly how issue BulkUpdate's unscoped by-id write slipped past the "machine-proof"
-      # claim. The companion rule operate-by-id-write-requires-workspace-scope-sprintf (below) now covers
-      # the Sprintf-constructed case. So the "machine-proof over the whole by-id surface" claim holds only
-      # WITH both rules. Groups 1-4 scoped every user-facing by-id DELETE/UPDATE (AND workspace_id / join).
+      # SEC-5. Empty exclude for THIS rule — but note its scope. It USED TO match only inline string
+      # literal SQL, and was BLIND to `sql := fmt.Sprintf(...); Exec(ctx, sql, ...)` — exactly how issue
+      # BulkUpdate's unscoped by-id write slipped past the "machine-proof" claim. The companion rule
+      # operate-by-id-write-requires-workspace-scope-sprintf (below) covers the Sprintf-constructed case,
+      # and the "=~/.../" arm added above covers const/var-held SQL. ⚠ WHAT IS STILL NOT COVERED, stated
+      # rather than implied: SQL assembled from a literal plus a RUNTIME operand binds neither arm —
+      # constant propagation cannot fold it and the text arm sees only the identifier. So the
+      # "machine-proof over the whole by-id surface" claim holds for literal, concatenated, const- and
+      # Sprintf-built statements, and NOT for runtime-assembled ones. Groups 1-4 scoped every user-facing by-id DELETE/UPDATE (AND workspace_id / join).
       #
       # The only remaining suppressions are three INLINE `nosemgrep` lines, each with a written
       # justification at the code, for by-id writes that are genuinely NOT workspace-membership

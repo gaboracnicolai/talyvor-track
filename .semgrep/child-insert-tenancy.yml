@@ -14,23 +14,38 @@ rules:
       rule keys on workspace_id in the INSERT column list, which these child tables do
       not have. See internal/issue/comments.go CreateComment for the fix shape.
     patterns:
-      - pattern-either:
-          - pattern: $Q.QueryRow($CTX, $SQL, ...)
-          - pattern: $Q.Exec($CTX, $SQL, ...)
       # INSERT INTO <table> whose column list carries a cross-object PARENT ref.
-      - metavariable-regex:
-          metavariable: $SQL
-          regex: (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)
+      # Two spellings — see cross-object-tenancy.yml for why one of them is not enough:
+      # metavariable-regex reads the argument's SOURCE TEXT and is blind to a const/var
+      # binding; "=~/.../" reads the constant-propagated VALUE and is blind to a concat with
+      # a runtime operand. THE NEGATIVE IS UPGRADED IN LOCKSTEP WITH THE POSITIVE — a
+      # positive that can read through a const against an exclusion that cannot would
+      # manufacture a false positive on the first const-held statement carrying workspace_id.
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: $Q.QueryRow($CTX, $SQL, ...)
+                  - pattern: $Q.Exec($CTX, $SQL, ...)
+              - metavariable-regex:
+                  metavariable: $SQL
+                  regex: (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)
+          - pattern-either:
+              - pattern: $Q.QueryRow($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)/", ...)
+              - pattern: $Q.Exec($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)/", ...)
       # SAFE when the statement itself binds workspace_id (the fix shape: EXISTS/JOIN on
       # the parent, or a workspace_id column) — anything whose SQL mentions workspace_id.
       - pattern-not:
-          patterns:
+          pattern-either:
+            - patterns:
+                - pattern-either:
+                    - pattern: $Q.QueryRow($CTX, $SQL, ...)
+                    - pattern: $Q.Exec($CTX, $SQL, ...)
+                - metavariable-regex:
+                    metavariable: $SQL
+                    regex: (?s).*workspace_id
             - pattern-either:
-                - pattern: $Q.QueryRow($CTX, $SQL, ...)
-                - pattern: $Q.Exec($CTX, $SQL, ...)
-            - metavariable-regex:
-                metavariable: $SQL
-                regex: (?s).*workspace_id
+                - pattern: $Q.QueryRow($CTX, "=~/(?s).*workspace_id/", ...)
+                - pattern: $Q.Exec($CTX, "=~/(?s).*workspace_id/", ...)
       # SAFE when the enclosing function routes the ref through a recognized workspace
       # guard (shared primitive / per-store asserts / public-board gate).
       - pattern-not-inside: |

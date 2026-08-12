@@ -385,17 +385,22 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 	}
 	// Object-graph integrity: optional cross-object refs must be in this workspace (same guard as Create).
 	//
-	// ⚠ THE HALF-SENTENCE THAT USED TO FOLLOW — "also what keeps this INSERT clear of the .semgrep
-	// cross-object-tenancy lock" — IS FALSE, AND IT WAS MEASURED RATHER THAN RE-READ. Deleting this
-	// loop outright and re-running `semgrep scan --config .semgrep/ internal/ cmd/` yields ZERO
-	// findings. A four-way probe says why, and it is TWO independent reasons: the rule matches its
-	// column list against the TEXT OF THE ARGUMENT at the QueryRow call, so an inline INSERT naming
-	// (workspace_id, project_id) with no guard IS caught while the identical statement held in a
-	// `const` — which is how both of this store's INSERTs are written — is NOT; and `milestone_id`
-	// is absent from the rule's alternation, so even inline it would not match. The guard below is
-	// load-bearing; the lock is not what makes it so, and nothing in .semgrep/ would notice if it
-	// went. Reported in the queue, not widened here: adding a term to a lock my own control shows
-	// cannot fire on the code it names would be a guard that cannot fail.
+	// ⚠ THE LOCK NOW COVERS Create AND STILL DOES NOT COVER THIS FUNCTION. Both halves measured.
+	// The previous note recorded that deleting this loop yielded ZERO semgrep findings, for two
+	// reasons: the rule read the TEXT OF THE ARGUMENT at the QueryRow call, so a `const`-held
+	// statement — which is how BOTH of this store's INSERTs are written — was invisible, and
+	// `milestone_id` was absent from its alternation. Both are repaired: the rule carries a
+	// second, constant-propagated arm and the milestone_id term, and removing the guard from
+	// Create is now caught (control C1).
+	//
+	// THIS function is the residual and the reason is specific: `upsertSQL` below is a const
+	// concatenated with a RUNTIME operand, so constant propagation cannot fold it to a string and
+	// the propagated arm sees nothing; the text arm sees only the identifier `upsertSQL`. Removing
+	// the loop HERE alone is still not caught, and control C8 in
+	// scripts/w34-tenancy-lock-visibility-controls.py asserts exactly that rather than describing
+	// it. THE GUARD BELOW IS LOAD-BEARING AND THE LOCK IS NOT WHAT MAKES IT SO. Closing the
+	// residual means a rule arm that links a declaration to its call site; the shape was tried and
+	// did not bind, so it is reported with the failed attempt rather than guessed at here.
 	for field, p := range map[string]*string{
 		"project_id":   issue.ProjectID,
 		"cycle_id":     issue.CycleID,
