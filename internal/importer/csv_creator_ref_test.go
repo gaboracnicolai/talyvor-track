@@ -186,17 +186,22 @@ func TestUnreadRefTables_EveryEntryNamesAViaTheRendererKnows(t *testing.T) {
 	} {
 		for _, r := range tc.refs {
 			if r.via == "" {
-				t.Errorf("%s table entry %q names no via", tc.name, r.column)
+				t.Errorf("%s table entry %q names no via", tc.name, r.columns)
 				continue
 			}
-			line := FieldNote{Field: r.field, Value: r.column, Via: r.via}.render(7)
-			if strings.Contains(line, "unrecognised") {
-				t.Errorf("%s table entry %q (via %q) renders through the unrecognised-value "+
-					"fallback: %q", tc.name, r.column, r.via, line)
-			}
-			if !strings.Contains(line, "does not read") {
-				t.Errorf("%s table entry %q (via %q) renders a line that does not say the column "+
-					"was never read: %q", tc.name, r.column, r.via, line)
+			// EVERY spelling, not the first. A note names whichever spelling held the value, so a
+			// via is only proved renderable if it renders for each of them — and an entry that grew
+			// a second spelling must not inherit the first one's clean bill.
+			for _, col := range r.columns {
+				line := FieldNote{Field: r.field, Value: col, Via: r.via}.render(7)
+				if strings.Contains(line, "unrecognised") {
+					t.Errorf("%s table entry %q (via %q) renders through the unrecognised-value "+
+						"fallback: %q", tc.name, col, r.via, line)
+				}
+				if !strings.Contains(line, "does not read") {
+					t.Errorf("%s table entry %q (via %q) renders a line that does not say the column "+
+						"was never read: %q", tc.name, col, r.via, line)
+				}
 			}
 		}
 	}

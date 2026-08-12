@@ -36,11 +36,30 @@ const (
 	unreadRefsJiraMinRows    = 18000
 )
 
+// ⚠⚠ THE INVARIANT IS PER ENTRY, AND IT USED TO BE PER COLUMN. While each entry named ONE spelling
+// the two were the same thing; they are not once an entry carries three. `Custom field (Epic Link)`
+// is populated on 3,630 rows and NOTED on 1,748 of them — the other 1,882 also populate `Parent`,
+// which wins the preference order and is the one note that fires. A per-column equality would call
+// that a defect and it is the design (one dropped reference is one line), so the census now counts
+// rows where ANY spelling of an entry is populated and compares that to the notes the entry produced
+// across ALL its spellings. Per column it keeps only the floor that matters at that grain: a spelling
+// no real export ever populates is a dead entry.
 type refCensus struct {
-	populated map[string]int // rows whose cell is non-empty
-	noted     map[string]int // rows that produced the unread-column note
-	files     int
-	rows      int
+	populated      map[string]int // per SPELLING: rows whose cell is non-empty
+	noted          map[string]int // per SPELLING: rows that produced the unread-column note
+	entryPopulated map[string]int // per ENTRY (keyed by its first spelling): rows where ANY spelling is
+	files          int
+	rows           int
+}
+
+// entryKey names an entry by its first spelling. It cannot be the FIELD: Jira's `Creator` and
+// `Reporter` are two entries with one field (they are different people on 8.6% of the rows that
+// populate both), so keying by field would merge two deliberately separate reports into one.
+func entryKey(r unreadRef) string {
+	if len(r.columns) == 0 {
+		return "(no spellings)"
+	}
+	return r.columns[0]
 }
 
 func censusUnreadRefs(t *testing.T, dir string, mapper rowMapper, refs []unreadRef, fingerprint []string) refCensus {
@@ -53,7 +72,7 @@ func censusUnreadRefs(t *testing.T, dir string, mapper rowMapper, refs []unreadR
 	if err != nil {
 		t.Fatalf("read %s: %v", dir, err)
 	}
-	c := refCensus{populated: map[string]int{}, noted: map[string]int{}}
+	c := refCensus{populated: map[string]int{}, noted: map[string]int{}, entryPopulated: map[string]int{}}
 	for _, e := range ents {
 		if e.IsDir() {
 			continue
@@ -84,8 +103,18 @@ func censusUnreadRefs(t *testing.T, dir string, mapper rowMapper, refs []unreadR
 				continue // refused rows import nothing at all; a different class, counted elsewhere
 			}
 			for _, r := range refs {
-				if ci.has(r.column) && ci.get(row, r.column) != "" {
-					c.populated[r.column]++
+				anySpelling := false
+				for _, col := range r.columns {
+					if ci.has(col) && ci.get(row, col) != "" {
+						c.populated[col]++
+						anySpelling = true
+					}
+				}
+				// Counted ONCE for the entry however many of its spellings this row populates —
+				// which is the whole point of the per-entry grain. 2,926 corpus rows populate two
+				// parent spellings and lost ONE reference between them.
+				if anySpelling {
+					c.entryPopulated[entryKey(r)]++
 				}
 			}
 			for _, n := range m.notes {
@@ -111,48 +140,88 @@ func censusUnreadRefs(t *testing.T, dir string, mapper rowMapper, refs []unreadR
 // instrument went quiet instead of red. A census that reads its subject out of the thing it is
 // measuring cannot see a deletion. The literals below can, and assertCensus also fails when the
 // table grows past them, so the two cannot drift apart in either direction.
+//
+// ⚠ THEY ARE NOW SPELLING LISTS, AND THE LITERAL IS WHAT MAKES A DELETED SPELLING VISIBLE. C5's
+// finding applies one grain finer than it was written: dropping `Custom field (Epic Link)` from the
+// parent entry would stop the census asking about it — 3,630 real rows, 1,748 of them reported by
+// nothing else — and the per-entry equality below would still balance perfectly, because both sides
+// of it would shrink together. The literal is the only thing that reds.
 var (
-	unreadRefsLinearColumns = []string{"Assignee", "Project", "Cycle Name", "Parent issue", "Creator"}
-	unreadRefsJiraColumns   = []string{"Assignee", "Sprint", "Parent", "Creator", "Reporter"}
+	unreadRefsLinearColumns = [][]string{{"Assignee"}, {"Project"}, {"Cycle Name"}, {"Parent issue"}, {"Creator"}}
+	unreadRefsJiraColumns   = [][]string{
+		{"Assignee"}, {"Sprint"},
+		{"Parent", "Custom field (Epic Link)", "Parent id"},
+		{"Creator"}, {"Reporter"},
+	}
 )
 
-func assertCensus(t *testing.T, name string, c refCensus, refs []unreadRef, want []string, minFiles, minRows int) {
+func assertCensus(t *testing.T, name string, c refCensus, refs []unreadRef, want [][]string, minFiles, minRows int) {
 	t.Helper()
 	if c.files < minFiles || c.rows < minRows {
 		t.Fatalf("%s corpus read %d files / %d rows, want at least %d / %d — the corpus is present "+
 			"but yielded almost nothing, which is an instrument failure, not a clean answer",
 			name, c.files, c.rows, minFiles, minRows)
 	}
-	have := map[string]bool{}
+	// The table's entries, keyed the way the pinned literals are keyed, so the two sets can be
+	// compared in BOTH directions: a pinned entry the table lost, and a table entry never measured.
+	have := map[string][]string{}
 	for _, r := range refs {
-		have[r.column] = true
+		have[entryKey(r)] = r.columns
 	}
-	for _, col := range want {
-		if !have[col] {
-			t.Errorf("%s: %q is no longer in the shipped table, so nothing reports it — "+
-				"the census is pinned to the columns this merge measured, not to the table", name, col)
-		}
-		delete(have, col)
-	}
-	for extra := range have {
-		t.Errorf("%s: the table reports %q, which this census has never measured — add it here with "+
-			"its population or the number in csv_unread_refs.go is unbacked", name, extra)
-	}
-	for _, col := range want {
-		pop, noted := c.populated[col], c.noted[col]
-		if pop == 0 {
-			t.Errorf("%s: NOT ONE row of %d carries a %q value — either the corpus changed or the "+
-				"column name in the table no longer matches what real exports emit", name, c.rows, col)
+	for _, entry := range want {
+		key := entry[0]
+		got, ok := have[key]
+		if !ok {
+			t.Errorf("%s: the entry for %q is no longer in the shipped table, so nothing reports it — "+
+				"the census is pinned to what this merge measured, not to the table", name, key)
 			continue
 		}
-		// THE EQUALITY IS THE POINT. Every populated cell must produce exactly one note and no
-		// unpopulated cell may produce any; a count that merely correlates would let a note fire
-		// off the header and still look right in aggregate.
-		if noted != pop {
-			t.Errorf("%s: %q populated on %d rows but reported on %d — the report and the loss are "+
-				"not the same set of rows", name, col, pop, noted)
+		// ⚠ AND THE SPELLINGS WITHIN THE ENTRY, IN BOTH DIRECTIONS TOO. An entry that keeps its first
+		// spelling and quietly loses its third still reports fewer rows, and every count below would
+		// agree with itself about it.
+		if strings.Join(got, "|") != strings.Join(entry, "|") {
+			t.Errorf("%s: entry %q ships spellings %v; this census measured %v — a spelling added or "+
+				"removed changes how many rows the report reaches and must be measured, not assumed",
+				name, key, got, entry)
 		}
-		t.Logf("%s %-14s populated=%6d reported=%6d of %d rows", name, col, pop, noted, c.rows)
+		delete(have, key)
+	}
+	for extra, cols := range have {
+		t.Errorf("%s: the table reports entry %q (%v), which this census has never measured — add it "+
+			"here with its population or the number in csv_unread_refs.go is unbacked", name, extra, cols)
+	}
+	for _, entry := range want {
+		key := entry[0]
+		// PER SPELLING: a spelling no real export ever populates is a dead entry — either the corpus
+		// changed or the name in the table does not match what exports emit. This is the floor that
+		// caught the whole finding when it was pointed the other way.
+		for _, col := range entry {
+			if c.populated[col] == 0 {
+				t.Errorf("%s: NOT ONE row of %d carries a %q value — either the corpus changed or "+
+					"that spelling no longer matches what real exports emit", name, c.rows, col)
+			}
+		}
+		// PER ENTRY, AND THE EQUALITY IS STILL THE POINT. Every row that populates ANY spelling of
+		// this reference must produce exactly one note, and no row that populates none may produce
+		// any. A count that merely correlated would let a note fire off the header and still look
+		// right in aggregate.
+		pop := c.entryPopulated[key]
+		noted := 0
+		for _, col := range entry {
+			noted += c.noted[col]
+		}
+		if pop == 0 {
+			t.Errorf("%s: NOT ONE row of %d populates any spelling of entry %q", name, c.rows, key)
+			continue
+		}
+		if noted != pop {
+			t.Errorf("%s: entry %q populated on %d rows but reported on %d — the report and the loss "+
+				"are not the same set of rows", name, key, pop, noted)
+		}
+		for _, col := range entry {
+			t.Logf("%s   %-26s populated=%6d reported=%6d", name, col, c.populated[col], c.noted[col])
+		}
+		t.Logf("%s %-14s ENTRY rows=%6d reported=%6d of %d rows", name, key, pop, noted, c.rows)
 	}
 }
 
