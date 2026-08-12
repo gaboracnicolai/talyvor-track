@@ -210,6 +210,14 @@ func (n FieldNote) render(count int) string {
 		// and why `Original estimate` and Story Points do not.
 		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
 			"no Track %s is created from it", count, n.Value, n.Field)
+	case n.Via == viaCustomFieldNotCreated:
+		// The object sentence with BOTH halves of the loss named, and a separate branch because the
+		// line above would understate it. A comment fails to become one row in a table that exists;
+		// a custom-field value has no row AND no `custom_fields` definition to hang on, because a
+		// Jira CSV carries the field's name and nothing else. See csv_custom_fields.go for the
+		// population and for why the neighbouring entry's via could not be reused.
+		return fmt.Sprintf("%d issue(s) carried a %q value this importer does not read — "+
+			"no Track custom field is created for it and no %s is stored", count, n.Value, n.Field)
 	case n.Via == viaIssueLinkNotRead:
 		// The THIRD sentence about a column this importer does not read, and a separate branch
 		// because the other two are both about a field ON the issue. A link would have created a
@@ -792,7 +800,13 @@ func jiraRowMapper(ci columnIndex, row []string) (mappedIssue, error) {
 				issueLinkNotes(ci, row, jiraIssueLinkSpellings(ci)),
 				// The other two Track objects a Jira export carries values for and this importer
 				// never creates. See csv_dropped_objects.go.
-				droppedObjectNotes(ci, row, jiraObjectColumns))...),
+				droppedObjectNotes(ci, row, jiraObjectColumns),
+				// The THIRD uncreated object, and the one with the widest population of the three:
+				// 13,255 of 18,807 corpus rows (70.5%) in 282 of 302 exports carry a populated
+				// `Custom field (…)` no entry above reads. Spellings are discovered from this
+				// export's header for the reason the link ones are — they are the tenant's own,
+				// 345 of them here. See csv_custom_fields.go.
+				customFieldNotes(ci, row, jiraCustomFieldSpellings(ci)))...),
 		// The columns this export does not carry that a RE-import would empty. Reported only if
 		// this row overwrote an issue that already existed — see csv_clobbered_columns.go.
 		onUpdate: csvClobberedColumnNotes(ci),
