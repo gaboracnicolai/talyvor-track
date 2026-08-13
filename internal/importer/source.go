@@ -57,6 +57,10 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 
 	out := &ImportResult{Errors: []string{}, Warnings: []string{}}
 	degraded := map[FieldNote]int{}
+	// The identifiers THIS import has already written. A second row under one of them does not
+	// create a second issue — it overwrites the first row's — and nothing counted or said so.
+	// See duplicate_identifier.go for the whole-population measurement and for what this costs.
+	written := map[string]struct{}{}
 	lastRow := 0
 	for {
 		// THE CONTEXT IS CONSULTED HERE AND, UNTIL THIS LINE, WAS CONSULTED NOWHERE. run took
@@ -116,6 +120,11 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		// away here ever since — and it is the ONLY thing that can tell a report about a deleted
 		// value from a false alarm on a first import. See row.NotesIfUpdated.
 		overwroteExisting := false
+		// dupNote is set when the write landed on an identifier THIS import had already written.
+		// It is computed on the write branch and applied below, alongside NotesIfUpdated, for the
+		// same reason that one is: only the pipeline knows it, and only a row that actually landed
+		// has degraded anything.
+		var dupNote []FieldNote
 		if issueModel.Identifier != "" && imp.upserter != nil {
 			_, inserted, err := imp.upserter.UpsertByIdentifier(ctx, issueModel)
 			overwroteExisting = !inserted
@@ -145,6 +154,26 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 				out.Errors = append(out.Errors, fmt.Sprintf("row %d: upsert: %v", row.RowNum, err))
 				continue
 			}
+			// ⚠ AFTER the error check, never before it: a row that did not land wrote nothing and
+			// overwrote nothing, so its key must not be remembered as written.
+			//
+			// ⚠ AND THE REACHABLE CASE IS AN ORDINARY WRITE FAILURE, NOT A REFUSAL — measured, not
+			// assumed. The first version of this comment named the refusal, and control C2 (moving
+			// the two lines above the error check) left the refusal test GREEN: a refusal is decided
+			// by the conflicting row's creator and team, neither of which changes during a run, so a
+			// key refused once is refused every time and the later row never reaches the note. What
+			// DOES reach it is a dropped connection or a statement timeout on one row and a success
+			// on a later row of the same key, which the wrong ordering would report to the operator
+			// as "your export names this issue twice". See
+			// TestRun_ARowThatDidNotLandDoesNotSeedTheDuplicateReport, which drives both.
+			if _, again := written[issueModel.Identifier]; again {
+				dupNote = []FieldNote{{
+					Field: fieldDuplicateIdentifier,
+					Value: issueModel.Identifier,
+					Via:   viaDuplicateInSameImport,
+				}}
+			}
+			written[issueModel.Identifier] = struct{}{}
 		} else if _, err := imp.issues.Create(ctx, issueModel); err != nil {
 			out.Skipped++
 			out.Errors = append(out.Errors, fmt.Sprintf("row %d: create: %v", row.RowNum, err))
@@ -158,6 +187,9 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		notes := row.Notes
 		if overwroteExisting {
 			notes = concatNotes(row.Notes, row.NotesIfUpdated)
+		}
+		if len(dupNote) > 0 {
+			notes = concatNotes(notes, dupNote)
 		}
 		for _, n := range notes {
 			degraded[n]++
