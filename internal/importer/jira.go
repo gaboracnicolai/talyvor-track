@@ -377,10 +377,19 @@ type jiraSource struct {
 	buf       []mappedIssue
 	pos       int
 	nextToken string
-	isLast    bool
-	started   bool
-	done      bool
-	rowNum    int
+	// exhausted is "the provider has no more pages", and it is NOT `isLast` alone. Atlassian's
+	// published v3 spec declares SearchAndReconcileResults with no `required` list — isLast is an
+	// OPTIONAL field — while nextPageToken is documented as the terminator: "If this result
+	// represents the last or the only page this token will be null." Deriving the end from isLast
+	// alone means a contract-valid final page that omits it leaves this source believing there is
+	// more; the next fetch carries no token, which the client sends as "start from the beginning",
+	// so the import re-reads the whole project for ever. MEASURED at be7b2cf: 3 issues came back as
+	// 12 rows in 12 HTTP calls and rising. See api_pagination_termination_test.go (1).
+	exhausted  bool
+	emptyPages int
+	started    bool
+	done       bool
+	rowNum     int
 }
 
 func newJiraSource(ctx context.Context, emailAPIToken, projectKey, baseURL string, httpc ...*http.Client) *jiraSource {
@@ -391,20 +400,46 @@ func (s *jiraSource) Next() (SourceRow, bool) {
 	if s.done {
 		return SourceRow{}, false
 	}
-	if s.pos >= len(s.buf) {
-		if s.started && s.isLast {
+	// A LOOP, NOT AN `if`: an empty page is no longer the end of the import. It used to be —
+	// unconditionally, whatever the provider said about further pages — and since a row that is
+	// never pulled is in no counter, run() handed terminalStatus {0,0,0} and the job recorded
+	// `succeeded imported=0`. That is the same "truncated import reports itself complete" this
+	// package's ctx check exists to prevent, one branch below it.
+	for s.pos >= len(s.buf) {
+		if s.started && s.exhausted {
 			s.done = true
 			return SourceRow{}, false // clean exhaustion
 		}
+		prevToken := s.nextToken
 		page, err := s.client.fetchPage(s.ctx, s.nextToken)
 		if err != nil {
 			s.done = true
 			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf("jira: fetch page: %w", err)}, true
 		}
-		s.started, s.buf, s.pos, s.nextToken, s.isLast = true, page.issues, 0, page.nextToken, page.isLast
-		if len(s.buf) == 0 {
+		s.started, s.buf, s.pos, s.nextToken = true, page.issues, 0, page.nextToken
+		s.exhausted = page.isLast || page.nextToken == ""
+		if len(page.issues) > 0 {
+			s.emptyPages = 0
+			break
+		}
+		if s.exhausted {
+			continue // an empty LAST page: the loop's own guard ends it cleanly on the next pass
+		}
+		// Past here the provider says there is more and sent nothing. Both ways that can fail to
+		// terminate are reported as an error row — which run() counts into Skipped and the job row
+		// shows — rather than swallowed as a clean stop or walked for ever.
+		if page.nextToken == prevToken {
 			s.done = true
-			return SourceRow{}, false
+			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf(
+				"jira: fetch page: no progress — the provider returned an empty page and the same nextPageToken (%q), "+
+					"so the import stopped rather than re-request it for ever", prevToken)}, true
+		}
+		s.emptyPages++
+		if s.emptyPages > maxConsecutiveEmptyPages {
+			s.done = true
+			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf(
+				"jira: fetch page: %d consecutive pages carried no issues while the provider reported more pages — "+
+					"stopping rather than paging for ever; this import is INCOMPLETE", s.emptyPages)}, true
 		}
 	}
 	m := s.buf[s.pos]

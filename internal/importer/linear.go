@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -396,15 +397,21 @@ type linearSource struct {
 	// the alternative (Next(ctx) on the interface) and why it was not taken. Without it Next
 	// fetched on context.Background(), and MEASURED at 38287be a provider kept serving a request
 	// for the full 3s after the caller's context died — no context the caller held could stop it.
-	ctx     context.Context
-	client  *linearClient
-	buf     []mappedIssue
-	pos     int
-	cursor  string
-	hasNext bool
-	started bool
-	done    bool
-	rowNum  int
+	ctx    context.Context
+	client *linearClient
+	buf    []mappedIssue
+	pos    int
+	cursor string
+	// exhausted is "the provider has no more pages" — Relay's pageInfo.hasNextPage, which unlike
+	// Jira's isLast is a non-null field of the connection and IS the terminator. What it does not
+	// carry is a guarantee that a non-final page has ROWS: an empty `nodes` beside
+	// hasNextPage:true is legal, and treating it as the end abandoned every later page while the
+	// job recorded `succeeded imported=0`. See api_pagination_termination_test.go (3).
+	exhausted  bool
+	emptyPages int
+	started    bool
+	done       bool
+	rowNum     int
 }
 
 func newLinearSource(ctx context.Context, token, teamKey, baseURL string, httpc ...*http.Client) *linearSource {
@@ -415,20 +422,52 @@ func (s *linearSource) Next() (SourceRow, bool) {
 	if s.done {
 		return SourceRow{}, false
 	}
-	if s.pos >= len(s.buf) {
-		if s.started && !s.hasNext {
+	// A LOOP, NOT AN `if` — the twin of jiraSource.Next, for the same reason and with the same
+	// three outcomes. An empty page is not the end of the import; a provider that cannot be paged
+	// further is an ERROR ROW, never a silent stop and never an unbounded walk.
+	for s.pos >= len(s.buf) {
+		if s.started && s.exhausted {
 			s.done = true
 			return SourceRow{}, false // clean exhaustion
 		}
+		// hasNextPage WITHOUT an endCursor is unfetchable: fetchPage("") omits `after` and Linear
+		// answers with the FIRST page, so continuing re-reads the connection from the top for ever
+		// (measured at be7b2cf: the same issue yielded 12 times and rising) while stopping quietly
+		// would call a truncated import complete. The third answer is to SAY it — after this page's
+		// own rows have been yielded, which are real whatever the cursor says.
+		if s.started && s.cursor == "" {
+			s.done = true
+			return SourceRow{RowNum: s.rowNum + 1, Err: errors.New(
+				"linear: fetch page: pageInfo reports hasNextPage with an empty endCursor — there is no cursor to " +
+					"request the next page with, so this import is INCOMPLETE")}, true
+		}
+		prevCursor := s.cursor
 		page, err := s.client.fetchPage(s.ctx, s.cursor)
 		if err != nil {
 			s.done = true
 			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf("linear: fetch page: %w", err)}, true
 		}
-		s.started, s.buf, s.pos, s.cursor, s.hasNext = true, page.issues, 0, page.cursor, page.hasNext
-		if len(s.buf) == 0 {
+		s.started, s.buf, s.pos, s.cursor = true, page.issues, 0, page.cursor
+		s.exhausted = !page.hasNext
+		if len(page.issues) > 0 {
+			s.emptyPages = 0
+			break
+		}
+		if s.exhausted {
+			continue // an empty LAST page: the loop's own guard ends it cleanly on the next pass
+		}
+		if page.cursor == prevCursor {
 			s.done = true
-			return SourceRow{}, false
+			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf(
+				"linear: fetch page: no progress — the provider returned an empty page and the same endCursor (%q), "+
+					"so the import stopped rather than re-request it for ever", prevCursor)}, true
+		}
+		s.emptyPages++
+		if s.emptyPages > maxConsecutiveEmptyPages {
+			s.done = true
+			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf(
+				"linear: fetch page: %d consecutive pages carried no issues while the provider reported more pages — "+
+					"stopping rather than paging for ever; this import is INCOMPLETE", s.emptyPages)}, true
 		}
 	}
 	m := s.buf[s.pos]
