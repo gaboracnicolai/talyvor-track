@@ -37,6 +37,11 @@ type SourceRow struct {
 	// existed. A source knows what its input said; only run() knows whether the row INSERTed or
 	// UPDATEd, and the difference decides whether a note is a true sentence or a false alarm. Empty
 	// for every API source: both request the fields they map, so no column can be absent.
+	//
+	// ⚠ "ALREADY EXISTED" IS NOT "THE STATEMENT TOOK ITS UPDATE BRANCH", and reading it as that was
+	// the defect: a second row naming an identifier THIS SAME JOB inserted also UPDATEs. run()'s
+	// fold-in therefore also requires that the row is not a same-import duplicate — the exact
+	// condition it already computes for viaDuplicateInSameImport. See the paragraph at that fold.
 	NotesIfUpdated []FieldNote
 }
 
@@ -185,7 +190,26 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 		// ⚠ concatNotes, NOT append: appending into row.Notes writes through the mapper's own
 		// backing array, which is the aliasing hazard that function was extracted for.
 		notes := row.Notes
-		if overwroteExisting {
+		// ⚠ `overwroteExisting && len(dupNote) == 0`, NOT `overwroteExisting` ALONE, AND THE TWO ARE
+		// DIFFERENT PREDICATES ON EXACTLY THE POPULATION #139 CENSUSED. NotesIfUpdated's own contract
+		// is "reported ONLY IF the write turned out to overwrite an issue that ALREADY EXISTED";
+		// overwroteExisting is the UPDATE branch of UpsertByIdentifier, which a second row naming an
+		// identifier THIS SAME JOB inserted also takes. The sentences hung off it say "N issue(s)
+		// already in Track were re-imported", and on a FIRST-EVER import of an export that names one
+		// issue twice — 3 of 305 real Jira exports, 3 of 45 real Linear — nothing was in Track and
+		// nothing was re-imported. MEASURED through the runner on real Postgres before this line
+		// existed: an empty workspace, one narrow two-row export, and a job reporting `1 issue(s)
+		// already in Track were re-imported`. On a GENUINE re-import of such an export the sentence is
+		// true and the NUMBER is not: the count is of ROWS THAT UPDATED, so two rows naming one issue
+		// rendered `2 issue(s)` in a workspace holding one of them — `imported` counts rows and a
+		// workspace holds issues, the same conflation #139 measured at 185 rows → 118 issues.
+		//
+		// ⚠ THE EVENT IS NOT SILENCED, ONLY THE FALSE SENTENCE ABOUT IT. dupNote is set by exactly
+		// this condition and is appended below, so the collision is still reported by the warning
+		// built for it; the assertion in csv_clobbered_columns_same_import_job_test.go that demands
+		// that line is what makes this paragraph falsifiable. No row moves and no counter changes:
+		// imports are byte-for-byte what they were.
+		if overwroteExisting && len(dupNote) == 0 {
 			notes = concatNotes(row.Notes, row.NotesIfUpdated)
 		}
 		if len(dupNote) > 0 {

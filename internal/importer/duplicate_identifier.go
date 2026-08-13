@@ -60,9 +60,15 @@ const (
 	// ⚠ IT IS NOT THE SAME EVENT AS overwroteExisting, and the two must not share a via. That flag
 	// is true of a row that overwrote an issue ANY earlier import (or this one) put there, and the
 	// notes hung off it — viaNoDescriptionColumn, viaNoLabelsColumn — say "already in Track", which
-	// is a true sentence about a re-import and a MISLEADING one here: the issue was put in Track by
-	// this same job, seconds earlier, by a row of the same file. That imprecision is REPORTED in
-	// the queue and deliberately not repaired here; those sentences are pinned by tests of their
-	// own and re-wording them is a different merge from measuring this.
+	// is a true sentence about a re-import and a false one here: the issue was put in Track by this
+	// same job, seconds earlier, by a row of the same file.
+	//
+	// ⚠ THAT IS NOW A DIFFERENCE run() ACTS ON, and this note is why it can: the row loop folds
+	// NotesIfUpdated in only when dupNote is EMPTY, so those two sentences are withheld from exactly
+	// the rows they would be false about, and this one — the true sentence about the same event — is
+	// reported in their place. Measured before the change: a FIRST import into an EMPTY workspace of
+	// a two-row export with no `Description` column reported "1 issue(s) already in Track were
+	// re-imported", and a genuine re-import of it reported "2 issue(s)" in a workspace holding one.
+	// See csv_clobbered_columns_same_import_job_test.go.
 	viaDuplicateInSameImport = "duplicate-identifier-in-same-import"
 )
