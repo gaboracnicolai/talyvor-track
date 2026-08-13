@@ -190,7 +190,18 @@ type linearNode struct {
 
 type linearResp struct {
 	Data struct {
-		Team struct {
+		// ⚠ A POINTER, AND THAT IS THE WHOLE OF THIS DETAIL. `team(id:)` is a NULLABLE field: a key
+		// this credential cannot resolve — deleted, renamed, in another workspace, or simply not
+		// visible to the token — is answered `{"data":{"team":null}}`, a 200 with NO `errors[]`.
+		// As a VALUE struct this decoded to the zero value (nodes nil, hasNextPage false), which is
+		// byte-for-byte what a team holding no issues looks like, so fetchPage returned an empty
+		// FINAL page, the source stopped cleanly, and terminalStatus recorded the job
+		// `succeeded imported=0 failed=0` with an empty warnings array. Nothing anywhere said the
+		// import never had a team to read. encoding/json unmarshalling `null` into a struct is a
+		// documented no-op; into a POINTER it is nil, which is the one shape that tells the two
+		// states apart. See linear_null_team_test.go — (2) is the control that keeps a genuinely
+		// empty team a clean success.
+		Team *struct {
 			Issues struct {
 				PageInfo struct {
 					HasNextPage bool   `json:"hasNextPage"`
@@ -245,6 +256,22 @@ func (c *linearClient) fetchPage(ctx context.Context, after string) (linearPage,
 		// A 200 with errors[] is NOT a silent success.
 		if len(parsed.Errors) > 0 {
 			return linearPage{}, fmt.Errorf("linear: api error: %s", firstLinearError(parsed))
+		}
+		// A NULL TEAM IS NOT AN EMPTY TEAM. Checked AFTER the errors[] arm on purpose: a 200 that
+		// carries a GraphQL error has a more specific sentence and must keep it. Reaching here with
+		// a nil Team means the document was well-formed, the server raised nothing, and the field
+		// the whole query hangs off resolved to null — so there is no connection to page and no
+		// issue this import could ever have read. Returning an error puts it in run()'s Errors,
+		// which is what stops terminalStatus calling the job succeeded.
+		//
+		// ⚠ THE KEY IS QUOTED BECAUSE THE KEY IS THE THING THE OPERATOR CAN CHANGE. `imported=0`
+		// sends them to their backlog; this sends them to the team field on the integration —
+		// which is also where W3.4's open key-vs-UUID question would surface if that is the cause.
+		if parsed.Data.Team == nil {
+			return linearPage{}, fmt.Errorf(
+				"the team %q did not resolve — Linear answered data.team = null with no errors[], so this "+
+					"credential can see no team under that id/key and NOTHING was imported; check the team "+
+					"key on the Linear integration", c.team)
 		}
 		iss := parsed.Data.Team.Issues
 		return linearPage{issues: mapLinearNodes(iss.Nodes), hasNext: iss.PageInfo.HasNextPage, cursor: iss.PageInfo.EndCursor}, nil
