@@ -122,6 +122,15 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 	// MUST stop when the process is going down, and letting it outlive shutdown would be a
 	// different and worse change.
 	//
+	// ⚠⚠ THAT SENTENCE WAS A CLAIM ABOUT A CONTEXT NOTHING READ, AND IT IS TRUE ONLY SINCE THE
+	// ctx CHECK IN run()'s ROW LOOP. Taking a context is not honouring one: run handed ctx to
+	// the STORE and consulted it nowhere, so an import did NOT stop — it pulled every remaining
+	// row and, on the *_api transports, fetched every remaining PAGE from the provider.
+	// MEASURED at 977f926; see run_context_test.go, which also names what is STILL not
+	// cancellable (both API sources fetch on context.Background(), and retryer.wait is a bare
+	// time.Sleep), so a fetch already in flight when the signal arrives still runs to its own
+	// timeout.
+	//
 	// ⚠ NO DEADLINE IS INVENTED HERE. Whether this write should carry its own timeout (and what
 	// it should be) is an operational judgement with a number in it; pgx's own connect/statement
 	// settings still apply. Written up in the queue rather than guessed at.
@@ -213,7 +222,14 @@ func summarise(out *ImportResult) string {
 	if len(out.Errors) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
+	// NAMED FIRST, AND NAMED APART FROM THE ROW COUNTS. An interrupted import is not a data
+	// problem, and "N row(s) failed" is the sentence that sends an operator to look for one. The
+	// clause is added ONLY when the run was cut short, so every summary this function rendered
+	// before is byte-identical.
+	if out.stopped {
+		parts = append(parts, "import stopped before the source was exhausted (the process was shutting down); rows after the stop were never attempted")
+	}
 	if out.Skipped > 0 {
 		parts = append(parts, fmt.Sprintf("%d row(s) failed", out.Skipped))
 	}
@@ -252,6 +268,15 @@ func summarise(out *ImportResult) string {
 func terminalStatus(out *ImportResult) string {
 	unlanded := out.Skipped + out.Refused
 	switch {
+	// A STOPPED IMPORT IS NEVER `succeeded`, WHATEVER THE COUNTERS SAY. The rows past the
+	// cancellation were never pulled, so they are in NO counter — `unlanded == 0` is true of an
+	// import that read three rows of ten thousand and was cut off, and reporting that as a
+	// complete import is the failure mode the ctx check in run() would otherwise create. Every
+	// status this function returns for a run that reached the end of its source is unchanged.
+	case out.stopped && out.Imported > 0:
+		return JobPartial
+	case out.stopped:
+		return JobFailed
 	case unlanded == 0:
 		return JobSucceeded
 	case out.Imported > 0:
