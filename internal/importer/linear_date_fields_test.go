@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -189,7 +190,7 @@ func TestLinearRequest_AsksForTheDateFields(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newLinearSource("k", "TEAM", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "k", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 

@@ -339,7 +339,7 @@ func TestJiraRequest_AsksForTheCreationTime(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 
@@ -364,7 +364,7 @@ func TestLinearRequest_AsksForTheCreationTime(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newLinearSource("tok", "TEAM", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "tok", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 

@@ -252,7 +252,7 @@ func TestRun_Cancelled_StopsAskingTheProviderForPages(t *testing.T) {
 	store := &cancellingStore{cancel: func() { cancel(); close(cancelled) }}
 	imp := New(store)
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(ctx, "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 
 	if _, err := imp.run(ctx, "ws-x", "team-x", src); err != nil {

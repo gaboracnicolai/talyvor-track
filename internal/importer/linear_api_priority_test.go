@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -91,7 +92,7 @@ func TestLinearSource_AFractionallySerialisedPriorityImportsAndDoesNotDiscardThe
 	}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	rows := drainRows(src)
 
@@ -118,7 +119,7 @@ func TestLinearSource_AnExponentSerialisedPriorityIsReadAsTheSameValue(t *testin
 	}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	rows := drainRows(src)
 
@@ -141,7 +142,7 @@ func TestLinearSource_APriorityOffLinearsScaleIsReportedVerbatim(t *testing.T) {
 	}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	rows := drainRows(src)
 
@@ -179,7 +180,7 @@ func TestLinearSource_ANonIntegralPriorityIsNotTruncatedIntoTheScale(t *testing.
 	}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	rows := drainRows(src)
 
@@ -214,7 +215,7 @@ func TestLinearSource_AFractionalPriorityOnPageOneDoesNotAbandonPageTwo(t *testi
 	}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	rows := drainRows(src)
 
@@ -249,7 +250,7 @@ func TestLinearSource_TheIntegralPriorityScaleIsUnchanged(t *testing.T) {
 	srv := httptest.NewServer(cannedPages([]string{linPage(false, "", nodes...)}, linPage(false, "")))
 	defer srv.Close()
 
-	src := newLinearSource("api-key", "TEAM-UUID", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "api-key", "TEAM-UUID", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	rows := drainRows(src)
 

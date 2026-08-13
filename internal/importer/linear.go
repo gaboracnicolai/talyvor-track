@@ -235,7 +235,7 @@ func (c *linearClient) fetchPage(ctx context.Context, after string) (linearPage,
 		// Rate-limit: HTTP 400 whose errors[] carries code=RATELIMITED → retryable, distinct signal.
 		if status == http.StatusBadRequest && linearRateLimited(parsed) {
 			lastErr = fmt.Errorf("linear: %w", errRateLimited)
-			c.retry.wait(linearResetBackoff(hdr))
+			c.retry.wait(ctx, linearResetBackoff(hdr))
 			continue
 		}
 		if status != http.StatusOK {
@@ -391,6 +391,12 @@ func resolveLinearStateType(typ string, unresolved model.IssueStatus) (model.Iss
 // SourceRow.Err (so run() records it and the job ends partial/failed) and then the source stops — NEVER a
 // silent stop that would look like a complete import.
 type linearSource struct {
+	// ctx is the IMPORT's context — the one runner.execute holds and SIGTERM cancels. It lives on
+	// the struct because IssueSource.Next() takes no parameters; see provider_context_test.go for
+	// the alternative (Next(ctx) on the interface) and why it was not taken. Without it Next
+	// fetched on context.Background(), and MEASURED at 38287be a provider kept serving a request
+	// for the full 3s after the caller's context died — no context the caller held could stop it.
+	ctx     context.Context
 	client  *linearClient
 	buf     []mappedIssue
 	pos     int
@@ -401,8 +407,8 @@ type linearSource struct {
 	rowNum  int
 }
 
-func newLinearSource(token, teamKey, baseURL string, httpc ...*http.Client) *linearSource {
-	return &linearSource{client: newLinearClient(token, teamKey, baseURL, httpc...)}
+func newLinearSource(ctx context.Context, token, teamKey, baseURL string, httpc ...*http.Client) *linearSource {
+	return &linearSource{ctx: ctx, client: newLinearClient(token, teamKey, baseURL, httpc...)}
 }
 
 func (s *linearSource) Next() (SourceRow, bool) {
@@ -414,7 +420,7 @@ func (s *linearSource) Next() (SourceRow, bool) {
 			s.done = true
 			return SourceRow{}, false // clean exhaustion
 		}
-		page, err := s.client.fetchPage(context.Background(), s.cursor)
+		page, err := s.client.fetchPage(s.ctx, s.cursor)
 		if err != nil {
 			s.done = true
 			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf("linear: fetch page: %w", err)}, true

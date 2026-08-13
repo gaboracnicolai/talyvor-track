@@ -192,9 +192,9 @@ func (r *Runner) apiSourceFor(ctx context.Context, job *Job, provider string) (I
 	}
 	switch provider {
 	case "linear":
-		return newLinearSource(token, projectKey, baseURL, r.sourceClients()...), nil
+		return newLinearSource(ctx, token, projectKey, baseURL, r.sourceClients()...), nil
 	case "jira":
-		return newJiraSource(token, projectKey, baseURL, r.sourceClients()...), nil
+		return newJiraSource(ctx, token, projectKey, baseURL, r.sourceClients()...), nil
 	default:
 		return nil, fmt.Errorf("importer: unknown provider %q", provider)
 	}
