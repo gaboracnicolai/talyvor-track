@@ -1,0 +1,68 @@
+{
+  "_provenance": {
+    "fetched_utc": "2026-08-13",
+    "note": "the PUBLISHED contract, not a live tenant; no Jira credentials exist in this environment",
+    "openapi": "3.0.1",
+    "source": "https://developer.atlassian.com/cloud/jira/platform/swagger-v3.v3.json",
+    "spec_version": "1001.0.0-SNAPSHOT-cf3ba5f1112f33d5ff73865dbc2b069c46ce4d4d"
+  },
+  "endpoint": {
+    "methods": [
+      "get",
+      "post"
+    ],
+    "path": "/rest/api/3/search/jql",
+    "post_deprecated": false,
+    "post_operation_id": "searchAndReconsileIssuesUsingJqlPost",
+    "request_schema": "SearchAndReconcileRequestBean",
+    "response_schema": "SearchAndReconcileResults"
+  },
+  "error_collection_properties": {
+    "errorMessages": "array",
+    "errors": "object",
+    "status": "integer"
+  },
+  "issue_bean_properties": [
+    "changelog",
+    "editmeta",
+    "expand",
+    "fields",
+    "fieldsToInclude",
+    "id",
+    "key",
+    "names",
+    "operations",
+    "properties",
+    "renderedFields",
+    "schema",
+    "self",
+    "transitions",
+    "versionedRepresentations"
+  ],
+  "old_endpoint": {
+    "get_deprecated": true,
+    "path": "/rest/api/3/search",
+    "post_deprecated": true,
+    "present": true
+  },
+  "request_properties": {
+    "expand": "string",
+    "fields": "array",
+    "fieldsByKeys": "boolean",
+    "jql": "string",
+    "maxResults": "integer",
+    "nextPageToken": "string",
+    "properties": "array",
+    "reconcileIssues": "array"
+  },
+  "request_required": [],
+  "response_properties": {
+    "isLast": "boolean",
+    "issues": "array",
+    "names": "object",
+    "nextPageToken": "string",
+    "schema": "object",
+    "warnings": "array"
+  },
+  "response_required": []
+}
