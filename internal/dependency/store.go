@@ -163,6 +163,29 @@ func (s *Store) assertIssuesShareWorkspace(ctx context.Context, aID, bID, worksp
 	return nil
 }
 
+// assertIssueInWorkspace refuses unless issueID exists AND is in workspaceID (the caller's
+// SERVER-authorized workspace). The single-issue analogue of assertIssuesShareWorkspace, used
+// by the bulk path whose source comes from chi.URLParam and is therefore entirely
+// caller-chosen. A missing issue and a foreign one are the same answer — no existence oracle.
+//
+// Held by TestSEC_BulkCreateRelations_ForeignSourceInWorkspaceTargets_Rejected, which is the
+// only test in the repository that this proof alone can satisfy: the older bulk test puts the
+// targets in the foreign workspace too, so the TARGET proof refuses it whether this one runs
+// or not.
+func (s *Store) assertIssueInWorkspace(ctx context.Context, issueID, workspaceID string) error {
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
+		issueID, workspaceID,
+	).Scan(&ok); err != nil {
+		return fmt.Errorf("dependency: bulk source check: %w", err)
+	}
+	if !ok {
+		return errors.New("dependency: source issue is not in this workspace (or missing)")
+	}
+	return nil
+}
+
 // ErrCycle is returned when a blocks-family relation would close a directed cycle in
 // the blocks graph (A blocks B when B already transitively blocks A) — a dependency
 // deadlock. Handlers map it to 409 Conflict.
@@ -783,15 +806,16 @@ func (s *Store) BulkCreateRelations(ctx context.Context, rel Relation, targets [
 	// workspace (rel.WorkspaceID). Binding targets to the *source's own* workspace (and never
 	// checking the source against the caller's workspace) let a member of one workspace forge
 	// relations among a DIFFERENT workspace's issues — the cross-tenant write this closes.
-	var srcInWS bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM issues WHERE id = $1 AND workspace_id = $2)`,
-		rel.SourceID, rel.WorkspaceID,
-	).Scan(&srcInWS); err != nil {
-		return 0, fmt.Errorf("dependency: bulk source check: %w", err)
-	}
-	if !srcInWS {
-		return 0, errors.New("dependency: source issue is not in this workspace (or missing)")
+	//
+	// THE SOURCE PROOF IS A NAMED METHOD RATHER THAN AN INLINE QUERY, AND THE NAME IS THE
+	// POINT. .semgrep/child-insert-tenancy.yml recognises a workspace proof by the guard it
+	// calls; an inline QueryRow is invisible to it, so with the proof spelled inline this
+	// INSERT was exempted only by the (now removed) "the SQL mentions workspace_id" clause,
+	// and MEASURED at 11e88bf neutering the proof left the lock at 0 findings. Spelled as
+	// assertIssueInWorkspace it is on the allowlist, so deleting or renaming it makes the
+	// tenancy-lock job RED. Behaviour is byte-for-byte the same query and the same error.
+	if err := s.assertIssueInWorkspace(ctx, rel.SourceID, rel.WorkspaceID); err != nil {
+		return 0, err
 	}
 	var badTargets int64
 	if err := s.pool.QueryRow(ctx,
