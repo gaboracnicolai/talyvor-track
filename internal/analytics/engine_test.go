@@ -213,7 +213,12 @@ func TestGetAICostTrends_ReturnsDailyCostsAndProjection(t *testing.T) {
 	}
 }
 
-func TestGetWorkload_CountsOpenAndOverdueCorrectly(t *testing.T) {
+// ⚠ THE NAME USED TO BE ...CountsOpenAndOverdueCorrectly AND THE COUNTING HAPPENS IN SQL. This
+// test FEEDS the counts (7, 3, 2, 1.50) and asserts they reach the struct's fields — worth having,
+// and blind to every FILTER predicate by construction: measured, five one-predicate mutations of
+// the shipped SQL left it green. The counting rules are asserted against real Postgres in
+// workload_counting_realpg_test.go; this one owns the row→struct mapping and says so in its name.
+func TestGetWorkload_ScansEachRowIntoMemberWorkload(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	pool.ExpectQuery(`JOIN members m ON m.id = i.assignee_id`).
 		WithArgs("ws-1", "team-1").
