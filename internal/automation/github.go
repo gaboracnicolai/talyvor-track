@@ -100,9 +100,33 @@ func (h *GitHubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	// SEC-7: cross-delivery replay guard (AFTER signature verify — only authentic deliveries are claimed).
-	// Claim X-GitHub-Delivery exactly once; a repeat (GitHub retry or an attacker re-POSTing the same
-	// signed body) is a 200 no-op so handlePullRequest's side effects run once. The handler's other `seen`
-	// map is intra-payload only. Fail OPEN on a store error — replay protection is hygiene, not a gate.
+	// A repeat (GitHub retry or an attacker re-POSTing the same signed body) is a 200 no-op so
+	// handlePullRequest's side effects run once. The handler's other `seen` map is intra-payload only.
+	// Fail OPEN on a store error — replay protection is hygiene, not a gate.
+	//
+	// ⚠ THE CLAIM KEY MUST COME FROM INSIDE THE SIGNATURE, AND X-GitHub-Delivery DOES NOT.
+	// verifyGitHubSignature covers the BODY ONLY, so a replayer chooses their own headers freely. This
+	// guard used to key on that header alone, which made it a guard the attacker opts into. MEASURED at
+	// 69b7ded against this handler's own fake store, one authentic signed body delivered twice:
+	//     header omitted  -> 2 updates, 2 comments   (guard skipped entirely)
+	//     header varied    -> 2 updates, 2 comments   (every replay claims a fresh key)
+	//     header identical -> 1 update,  1 comment    (the only case the guard ever saw)
+	// The existing test set the header on every delivery, so it exercised exactly the third row.
+	//
+	// The body hash is the only key a replayer cannot vary without invalidating the signature, so it is
+	// claimed UNCONDITIONALLY. This is not a new design: internal/lensintegration/webhook.go already
+	// resolves the identical SEC-7 requirement the same way — a server-generated id when present, over
+	// an unconditional hash of the exact signed body ("the KEPT fallback ... what protects the path").
+	// The delivery id is kept as the FIRST claim because it is what GitHub's own retries reuse, so a
+	// plain retry short-circuits before hashing.
+	//
+	// ⚠ THE TRADE, STATED SO IT CAN BE REVERSED IN ONE LINE: claiming the hash unconditionally collapses
+	// two AUTHENTIC deliveries carrying byte-identical bodies into one. Real GitHub payloads carry
+	// per-delivery fields (updated_at, merged_at, head.sha, node_id) that this handler never reads but
+	// that are inside the bytes, so distinct events do not collide in production — and two deliveries
+	// whose bytes ARE identical describe the same event state, whose side effects (set done, comment
+	// once) are the ones this guard exists to run once. If that trade is ever unwanted, drop the second
+	// Claim; the header bypasses above come back with it.
 	if h.deduper != nil {
 		if deliveryID := r.Header.Get("X-GitHub-Delivery"); deliveryID != "" {
 			claimed, derr := h.deduper.Claim(r.Context(), "github", deliveryID)
@@ -116,6 +140,25 @@ func (h *GitHubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 				_, _ = w.Write([]byte(`{"ok":true,"deduped":true}`))
 				return
 			}
+		}
+
+		// The signed-body claim. Distinct source ("github-body") so the two key spaces cannot collide
+		// in webhook_deliveries and either can be reasoned about alone.
+		sum := sha256.Sum256(body)
+		bodyKey := hex.EncodeToString(sum[:])
+		claimed, derr := h.deduper.Claim(r.Context(), "github-body", bodyKey)
+		switch {
+		case derr != nil:
+			slog.Warn("automation: github body dedup claim failed; processing anyway",
+				slog.String("body_sha256", bodyKey), slog.String("err", derr.Error()))
+		case !claimed:
+			slog.Info("automation: github delivery DEDUPED on the signed body — the delivery id did not "+
+				"identify it (absent or varied), which is what a replay looks like",
+				slog.String("body_sha256", bodyKey))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true,"deduped":true}`))
+			return
 		}
 	}
 
