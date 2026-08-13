@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,7 +163,7 @@ func TestJiraRequest_AsksForTheDateFields(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 

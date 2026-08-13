@@ -38,13 +38,19 @@ func clientOrSafe(override []*http.Client) *http.Client {
 }
 
 // retryer carries the retry knobs. sleep is injectable so tests run without real waits.
+//
+// ⚠ sleep IS A TEST HOOK AND NOTHING ELSE NOW. It used to be time.Sleep in production, which is
+// what made a rate-limit backoff impossible to interrupt: a provider chooses the length of that
+// wait (Retry-After / X-RateLimit-Requests-Reset), so a process under SIGTERM could sit out up to
+// 30s per attempt, three attempts per page, on a delay a third party picked. nil ⇒ the ctx-aware
+// timer in wait, which is the production path.
 type retryer struct {
 	maxAttempts int
 	sleep       func(time.Duration)
 }
 
 func defaultRetryer() retryer {
-	return retryer{maxAttempts: defaultMaxAttempts, sleep: time.Sleep}
+	return retryer{maxAttempts: defaultMaxAttempts}
 }
 
 func (r retryer) attempts() int {
@@ -54,18 +60,29 @@ func (r retryer) attempts() int {
 	return r.maxAttempts
 }
 
-func (r retryer) wait(d time.Duration) {
-	if d <= 0 {
+// wait backs off, and RETURNS AT ONCE if the import it belongs to is already going down. The
+// context is the whole point: without it this was a bare time.Sleep, and the shutdown path had to
+// sit through a delay the provider chose the length of before it could even discover it had been
+// cancelled. MEASURED before the change — see provider_context_test.go.
+func (r retryer) wait(ctx context.Context, d time.Duration) {
+	if d <= 0 || ctx.Err() != nil {
 		return
 	}
 	if d > maxRateLimitBackoff {
 		d = maxRateLimitBackoff
 	}
-	s := r.sleep
-	if s == nil {
-		s = time.Sleep
+	// The injected hook is for tests that must not spend real time; it is checked AFTER the
+	// cancellation above so a test hook cannot reintroduce the uninterruptible wait.
+	if r.sleep != nil {
+		r.sleep(d)
+		return
 	}
-	s(d)
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
 }
 
 // postJSON issues one POST with the given headers and body, returning the status, response headers, and the

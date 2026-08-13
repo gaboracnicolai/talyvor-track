@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,7 +37,7 @@ func TestJiraSource_Paginates(t *testing.T) {
 	srv := httptest.NewServer(cannedPages([]string{page1, page2}, `{"issues":[],"isLast":true}`))
 	defer srv.Close()
 
-	src := newJiraSource("me@corp.com:api-token", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "me@corp.com:api-token", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 
 	var got []model.Issue
@@ -95,7 +96,7 @@ func TestJiraSource_RateLimit_HonorsRetryAfter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	var waited time.Duration
 	src.client.retry.sleep = func(d time.Duration) { waited = d }
 

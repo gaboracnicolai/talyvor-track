@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,7 +68,7 @@ func jiraRowsFrom(t *testing.T, issues ...string) []SourceRow {
 	page := fmt.Sprintf(`{"issues":[%s],"isLast":true}`, strings.Join(issues, ","))
 	srv := httptest.NewServer(cannedPages([]string{page}, `{"issues":[],"isLast":true}`))
 	t.Cleanup(srv.Close)
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 
 	var out []SourceRow
@@ -211,7 +212,7 @@ func TestJiraRequest_AsksForTheStatusFieldThatCarriesTheCategory(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 

@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func TestJiraRequest_PinsTheEndpointAndMethod(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 

@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -97,7 +98,7 @@ func linearRowsFrom(t *testing.T, nodes ...string) []SourceRow {
 	}))
 	defer srv.Close()
 
-	src := newLinearSource("k", "TEAM", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "k", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	var out []SourceRow
 	for {
@@ -223,7 +224,7 @@ func TestLinearRequest_WireContract(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := newLinearSource("lin_api_SECRET", "TEAM", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "lin_api_SECRET", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 	src.Next()
 

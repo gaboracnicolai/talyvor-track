@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -339,7 +340,7 @@ func TestJiraSource_CarriesTheNote(t *testing.T) {
 		`"status":{"name":"Deployed"},"priority":{"name":"P1"},"labels":[],"created":"` + fixtureJiraCreated + `","updated":"` + fixtureJiraUpdated + `"}}],"isLast":true}`
 	srv := httptest.NewServer(cannedPages([]string{page}, `{"issues":[],"isLast":true}`))
 	defer srv.Close()
-	src := newJiraSource("e:t", "PROJ", srv.URL, srv.Client())
+	src := newJiraSource(context.Background(), "e:t", "PROJ", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 
 	row, ok := src.Next()
@@ -360,7 +361,7 @@ func TestLinearSource_CarriesTheNote(t *testing.T) {
 		`"priority":9,"labels":{"nodes":[]},"createdAt":"` + fixtureLinearCreated + `","updatedAt":"` + fixtureLinearUpdated + `"}]}}}}`
 	srv := httptest.NewServer(cannedPages([]string{page}, `{"data":{"team":{"issues":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}`))
 	defer srv.Close()
-	src := newLinearSource("tok", "TEAM", srv.URL, srv.Client())
+	src := newLinearSource(context.Background(), "tok", "TEAM", srv.URL, srv.Client())
 	src.client.retry.sleep = noopSleep
 
 	row, ok := src.Next()

@@ -158,7 +158,7 @@ func (c *jiraClient) fetchPage(ctx context.Context, pageToken string) (jiraPage,
 		}
 		if status == http.StatusTooManyRequests {
 			lastErr = fmt.Errorf("jira: %w", errRateLimited)
-			c.retry.wait(parseRetryAfter(hdr, defaultRetryAfter))
+			c.retry.wait(ctx, parseRetryAfter(hdr, defaultRetryAfter))
 			continue
 		}
 		if status != http.StatusOK {
@@ -370,6 +370,9 @@ func walkADF(n adfNode, b *strings.Builder, dropped *droppedTypes) {
 // jiraSource drains nextPageToken/isLast pagination behind Next() — same seam pattern + same fetch-failure
 // observability (surface the error once via SourceRow.Err, then stop; never a silent complete-looking stop).
 type jiraSource struct {
+	// ctx is the IMPORT's context — see the twin field on linearSource for why it lives here and
+	// what was measured without it.
+	ctx       context.Context
 	client    *jiraClient
 	buf       []mappedIssue
 	pos       int
@@ -380,8 +383,8 @@ type jiraSource struct {
 	rowNum    int
 }
 
-func newJiraSource(emailAPIToken, projectKey, baseURL string, httpc ...*http.Client) *jiraSource {
-	return &jiraSource{client: newJiraClient(emailAPIToken, projectKey, baseURL, httpc...)}
+func newJiraSource(ctx context.Context, emailAPIToken, projectKey, baseURL string, httpc ...*http.Client) *jiraSource {
+	return &jiraSource{ctx: ctx, client: newJiraClient(emailAPIToken, projectKey, baseURL, httpc...)}
 }
 
 func (s *jiraSource) Next() (SourceRow, bool) {
@@ -393,7 +396,7 @@ func (s *jiraSource) Next() (SourceRow, bool) {
 			s.done = true
 			return SourceRow{}, false // clean exhaustion
 		}
-		page, err := s.client.fetchPage(context.Background(), s.nextToken)
+		page, err := s.client.fetchPage(s.ctx, s.nextToken)
 		if err != nil {
 			s.done = true
 			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf("jira: fetch page: %w", err)}, true
