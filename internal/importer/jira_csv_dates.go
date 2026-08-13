@@ -63,14 +63,27 @@ import (
 // Each entry carries the number of cells IN THE CORPUS that it is the first to accept, so no line
 // here is a guess. Three further shapes were evaluated and DROPPED for scoring zero — an entry with
 // no bytes behind it is exactly what limit (1) above forbids.
+//
+// ⚠ THOSE COUNTS WERE TAKEN OVER CACHE ENTRIES, AND THE CACHE HOLDS COPIES. The corpus is keyed on
+// sha256(repo\tpath), so one export committed to two repositories is two entries; see
+// jira_csv_two_digit_year.go. Each line now carries the deduplicated cell count and the number of
+// DISTINCT exports behind it, because "cells" was doing the work of "instances" in the argument
+// above and only one of those two is what a per-instance format claim needs.
+//
+// ⚠ THE ANSWER IS THAT THE LIST SURVIVES: no entry falls to zero, and the two smallest do not move
+// at all. What moves is the ORIGINAL probe's own shape, halved — its 3,268 cells are 1,654 from TWO
+// distinct exports, so the shape this file was built around is the second-thinnest evidence in the
+// list rather than the third-strongest count. Measured, unchanged, and stated so the next person to
+// weigh a layout weighs exports rather than copies.
 var jiraCSVTimeLayouts = []string{
-	"2/Jan/2006 3:04 PM",  //  3,268 — the original probe's shape; `2` and `3` also tolerate a padded day/hour
-	"2/Jan/06 3:04 PM",    // 27,147 — the same shape with a two-digit year, and the single commonest in the corpus
-	"2/Jan/06 15:04",      //  2,133 — two-digit year, 24-hour clock
-	"2006-01-02 15:04",    //  1,228 — ISO-ish, space-separated
-	"2006-01-02 15:04:05", //    360 — the same with seconds
-	"Jan/2/06 3:04 PM",    //    212 — month-first, two-digit year
-	"2/Jan/06",            //     10 — date only; Jira renders Due Date at midnight, so some instances drop the time
+	// cells (distinct) — distinct exports
+	"2/Jan/2006 3:04 PM",  //  3,268 (1,654) —   2 — the original probe's shape; `2` and `3` also tolerate a padded day/hour
+	"2/Jan/06 3:04 PM",    // 27,147 (25,986) — 201 — the same shape with a two-digit year, and the single commonest in the corpus
+	"2/Jan/06 15:04",      //  2,133 (2,133) —  40 — two-digit year, 24-hour clock
+	"2006-01-02 15:04",    //  1,228 (946) —     6 — ISO-ish, space-separated
+	"2006-01-02 15:04:05", //    360 (360) —     2 — the same with seconds
+	"Jan/2/06 3:04 PM",    //    212 (212) —     1 — month-first, two-digit year
+	"2/Jan/06",            //     10 (10) —      1 — date only; Jira renders Due Date at midnight, so some instances drop the time
 }
 
 // parseJiraCSVTime returns the instant and true, or false if no pinned layout accepts the value. A
