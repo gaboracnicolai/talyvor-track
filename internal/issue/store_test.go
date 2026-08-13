@@ -273,13 +273,18 @@ func TestBulkUpdate_AppliesUpdatesAtomically(t *testing.T) {
 	// Two rows, both changing status + sort_order. The implementation
 	// wraps the per-row UPDATEs in a single transaction so a mid-batch
 	// failure rolls everything back.
+	//
+	// ⚠ Query, not Exec, since the per-item statement gained `RETURNING team_id, status` — the two
+	// track_issues_updated_total labels a command tag cannot carry. The ARGS and the SQL prefix are
+	// unchanged, which is the property this test was written for; a returned row is the mock's
+	// spelling of the RowsAffected()==1 it asserted before.
 	pool.ExpectBegin()
-	pool.ExpectExec(`UPDATE issues SET status`).
+	pool.ExpectQuery(`UPDATE issues SET status`).
 		WithArgs("in_progress", float64(1.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1", "ws-1").
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-	pool.ExpectExec(`UPDATE issues SET status`).
+		WillReturnRows(pgxmock.NewRows([]string{"team_id", "status"}).AddRow("t-1", "in_progress"))
+	pool.ExpectQuery(`UPDATE issues SET status`).
 		WithArgs("in_progress", float64(2.5), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-2", "ws-1").
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+		WillReturnRows(pgxmock.NewRows([]string{"team_id", "status"}).AddRow("t-1", "in_progress"))
 	pool.ExpectCommit()
 
 	count, err := store.BulkUpdate(context.Background(), "ws-1", []BulkUpdateItem{
@@ -300,10 +305,10 @@ func TestBulkUpdate_AppliesUpdatesAtomically(t *testing.T) {
 func TestBulkUpdate_RollsBackOnFailure(t *testing.T) {
 	store, pool := newMockStore(t)
 	pool.ExpectBegin()
-	pool.ExpectExec(`UPDATE issues SET status`).
+	pool.ExpectQuery(`UPDATE issues SET status`).
 		WithArgs("done", float64(1.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-1", "ws-1").
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-	pool.ExpectExec(`UPDATE issues SET status`).
+		WillReturnRows(pgxmock.NewRows([]string{"team_id", "status"}).AddRow("t-1", "done"))
+	pool.ExpectQuery(`UPDATE issues SET status`).
 		WithArgs("done", float64(2.0), pgxmock.AnyArg(), pgxmock.AnyArg(), "i-bad", "ws-1").
 		WillReturnError(errors.New("constraint violation"))
 	pool.ExpectRollback()
@@ -337,9 +342,11 @@ func TestBulkUpdate_SortOrderOnly(t *testing.T) {
 	// Drag-within-column case: status omitted, only sort_order changes.
 	// The implementation should build a SET clause that skips the
 	// status column entirely.
-	pool.ExpectExec(`UPDATE issues SET sort_order`).
+	pool.ExpectQuery(`UPDATE issues SET sort_order`).
 		WithArgs(float64(3.5), pgxmock.AnyArg(), "i-1", "ws-1").
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+		// The RETURNING row carries the status the item did NOT set — a drag within a column is
+		// still an update, and it belongs to the series the row already had.
+		WillReturnRows(pgxmock.NewRows([]string{"team_id", "status"}).AddRow("t-1", "todo"))
 	pool.ExpectCommit()
 
 	count, err := store.BulkUpdate(context.Background(), "ws-1", []BulkUpdateItem{
