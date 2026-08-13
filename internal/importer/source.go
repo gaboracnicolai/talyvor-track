@@ -168,6 +168,23 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 	return out, nil
 }
 
+// maxConsecutiveEmptyPages bounds how far a source will walk through pages the provider says are
+// not the last but that carry no rows, before it stops and REPORTS that it stopped.
+//
+// ⚠ IT IS A BOUND ON A BROKEN PROVIDER, NOT A PAGE BUDGET. A page can legitimately come back short
+// — Jira's own search doc says issues appear "where the user has Browse projects permission ...
+// issue-level security permission to view the issue", i.e. the page is filtered AFTER it is cut, and
+// zero is short — so an empty non-final page must be walked past, not treated as the end. What must
+// not happen is walking for ever, so the walk is bounded and the bound is observable: hitting it
+// yields a SourceRow.Err, which run() counts and the job row shows. Contrast the behaviour this
+// replaces, where the FIRST empty page ended the import and the job recorded `succeeded imported=0`.
+//
+// 200 because at the shipped page size (100) it tolerates 20,000 consecutive rows the credential
+// cannot see before it calls the pagination broken — well past any filtering an import is likely to
+// meet, and still a hard stop. Like maxWarningExemplars, the number is a judgement and is written
+// down with what it was judged against rather than left as a literal in a loop.
+const maxConsecutiveEmptyPages = 200
+
 // maxWarningExemplars bounds how many DISTINCT values of one note kind are listed individually.
 //
 // ⚠ IT BOUNDS ENUMERATION, NEVER COUNTING. Beyond it a single summary line reports how many further
