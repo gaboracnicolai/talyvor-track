@@ -56,6 +56,12 @@ func TestJobRow_JiraAPI_ALinkedURLIsInThePostgresSearchIndex(t *testing.T) {
 		// The instrument's positive control: the same host as plain text, indexed either way.
 		adfJobIssue("PROJ-CONTROL", `{"type":"doc","version":1,"content":[{"type":"paragraph","content":[
 			{"type":"text","text":"discussed on `+adfSearchHost+` last week"}]}]}`),
+		// blockCard — inlineCard's BLOCK-LEVEL twin, and the type the probe's 2,000-issue bound hid.
+		// Its description is a linked card and NOTHING else, so before the pin this row's
+		// `description` column is the EMPTY STRING: not merely unfindable by the host, carrying no
+		// text at all, with no note saying so. Measured on HHH-18501 of the same real instance.
+		adfJobIssue("PROJ-CARD", `{"type":"doc","version":1,"content":[
+			{"type":"blockCard","attrs":{"url":"https://`+adfSearchHost+`/channel/132096/topic/card"}}]}`),
 		// The reported half: an attachment has no text equivalent, so it is named in the job row.
 		adfJobIssue("PROJ-SHOT", `{"type":"doc","version":1,"content":[
 			{"type":"paragraph","content":[{"type":"text","text":"see the screenshot"}]},
@@ -82,8 +88,8 @@ func TestJobRow_JiraAPI_ALinkedURLIsInThePostgresSearchIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Every row LANDS. Reporting a lost attachment is not a failed row.
-	if j.Status != JobSucceeded || j.Imported != 3 || j.Failed != 0 || j.Skipped != 0 {
-		t.Fatalf("job row = {status:%q imported:%d failed:%d skipped:%d}, want {succeeded 3 0 0}",
+	if j.Status != JobSucceeded || j.Imported != 4 || j.Failed != 0 || j.Skipped != 0 {
+		t.Fatalf("job row = {status:%q imported:%d failed:%d skipped:%d}, want {succeeded 4 0 0}",
 			j.Status, j.Imported, j.Failed, j.Skipped)
 	}
 
@@ -99,6 +105,17 @@ func TestJobRow_JiraAPI_ALinkedURLIsInThePostgresSearchIndex(t *testing.T) {
 	if !hit["PROJ-CONTROL"] {
 		t.Fatalf("the CONTROL row is not in the search results either (%v) — this test's instrument "+
 			"is broken, not the product: issue.Store.Search is not reading descriptions at all", found)
+	}
+	// ⚠ THE SAME CONSUMER, ONE NODE TYPE OVER, AND THE LOSS HERE IS TOTAL RATHER THAN PARTIAL.
+	// PROJ-LINK keeps its prose when the link vanishes; PROJ-CARD keeps nothing — its whole
+	// description is the card. An empty description is indistinguishable from an issue that never
+	// had one, so no reader downstream can tell this row lost anything.
+	if !hit["PROJ-CARD"] {
+		t.Errorf("searching %q found %d issue(s) and PROJ-CARD is not among them.\n"+
+			"Its ENTIRE description is an ADF `blockCard` whose whole payload is attrs.url. "+
+			"Unpinned, the flattener emits nothing for it, `description` lands EMPTY, to_tsvector "+
+			"indexes an empty string, and the job reports {imported:N, warnings:[]} — the issue is "+
+			"unfindable and nothing anywhere says a value was dropped.", adfSearchHost, len(found))
 	}
 	if !hit["PROJ-LINK"] {
 		t.Errorf("searching %q found %d issue(s) and PROJ-LINK is not among them.\n"+

@@ -57,8 +57,25 @@ import "encoding/json"
 // serialised is a type whose attribute nobody here can name. `date` and `status` (the lozenge) both
 // carry attrs.text per the ADF spec and NEITHER OCCURS ONCE in the measured project, so neither is
 // listed — the probe FAILS on an unpinned attrs-borne type rather than this file guessing one.
+//
+// ⚠ blockCard IS inlineCard's BLOCK-LEVEL TWIN AND IT WAS MISSING, WHICH IS A FACT ABOUT THE PROBE'S
+// POPULATION RATHER THAN ABOUT THIS TABLE'S RULE. Same payload attribute, no `text` child, and in
+// NEITHER table — so its URL reached neither the description nor the search index and no note said
+// so. MEASURED on the same host/project/endpoint, over 3,000 issues rather than 2,000: ONE
+// occurrence, HHH-18501, whose description is prose plus a linked GitHub PR — the reproducer for the
+// bug. The rendering control adf_attrs.go requires of every entry here was run on THAT issue and
+// passes: `expand: renderedFields` returns Atlassian's own HTML for the same document and it
+// contains attrs.url verbatim, exactly as it does for inlineCard.
+//
+// ⚠ WHY IT WAS NOT ALREADY HERE, STATED BECAUSE IT IS THE REUSABLE HALF. The comment below this
+// table names scripts/w34-jira-api-adf-probe.py as the thing that "notices a new type", and that
+// probe does fail on an unpinned attrs-borne leaf — it had simply never read this issue. It scanned
+// PAGES=20 × 100 = 2,000 of the project's ~20,550 and printed "unpinned attrs-borne leaf types:
+// NONE", a sentence about the project. The finding was one page past the bound. The script now
+// names the population its NONE is about and refuses to state it as a project-wide fact.
 var adfAttrText = map[string]string{
 	"inlineCard": "url",
+	"blockCard":  "url",
 	"mention":    "text",
 	"emoji":      "text",
 }

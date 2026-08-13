@@ -256,3 +256,62 @@ func TestJiraAPI_TheDroppedNodeWarningNamesTheNodeAndTheLoss(t *testing.T) {
 		t.Errorf("rendered warning %q fell through to the default branch", line)
 	}
 }
+
+// ─── blockCard — the type the census bound hid ────────────────────────────────────────────────────
+//
+// ⚠ THE NODE BELOW IS COPIED FROM A REAL ISSUE, HHH-18501, NOT INVENTED. It is `inlineCard`'s
+// BLOCK-LEVEL twin: same payload attribute, no `text` child, and NOTHING in adf_attrs.go's two
+// tables — so today its URL reaches neither the description nor the search index, and no note says
+// so. That is the exact defect adf_attrs.go was written to close, one node type over.
+//
+// ⚠ THE MAPPING IS JIRA'S OWN ANSWER, MEASURED THE SAME WAY inlineCard's WAS, NOT REASONED FROM THE
+// NAME. `expand: renderedFields` on the same endpoint, on THIS issue, returns Atlassian's own HTML
+// for the same document and it contains attrs.url verbatim:
+//
+//	blockCard {"url":"https://github.com/hibernate/hibernate-test-case-templates/pull/421"}
+//	   → Jira's rendered description contains that exact string
+//
+// ⚠ WHY THE SHIPPED PROBE DID NOT FIND IT, WHICH IS THE HALF WORTH KEEPING. adf_attrs.go names
+// scripts/w34-jira-api-adf-probe.py as "the only thing that would notice" a new attrs-borne type,
+// and that probe FAILS on one. It printed "unpinned attrs-borne leaf types: NONE" — a sentence about
+// the PROJECT — after reading PAGES=20 × 100 = 2,000 of the project's ~20,550 issues. blockCard
+// occurs ONCE in the first 3,000. The guard was not wrong; its negative was narrower than the
+// sentence it printed, and the script now says which population its NONE is about.
+func TestJiraAPI_ABlockCardsURLReachesTheDescription(t *testing.T) {
+	const url = "https://github.com/hibernate/hibernate-test-case-templates/pull/421"
+	m := mapOneADF(t, `{"type":"doc","version":1,"content":[
+		{"type":"paragraph","content":[{"type":"text","text":"reproducer:"}]},
+		{"type":"blockCard","attrs":{"url":"`+url+`"}}]}`)
+
+	// ⚠ AN EXACT STRING, AND A CONTROL IS WHY — THE SAME CONTROL, FOR THE SAME REASON, THAT THE
+	// inlineCard test above already states. The first draft of this test asserted
+	// `strings.Contains(desc, url)` plus a guard on the substring `"url"`, and control C3
+	// (scripts-side harness: make adfAttrString return the attribute's RAW JSON) went GREEN on it —
+	// because the quoted form `"https://…"` CONTAINS the unquoted one, and the raw bytes of the
+	// VALUE never contain the KEY. A `Contains` here would have passed on a description carrying
+	// quoted JSON. The exact sentence is what Jira renders, so the exact sentence is what is pinned.
+	const want = "reproducer:\n" + url
+	if m.issue.Description != want {
+		t.Errorf("description = %q, want %q.\n"+
+			"A blockCard's whole payload is attrs.url and it has no `text` child, so the flattener "+
+			"emits nothing for it. `description` is also the product's only full-text index "+
+			"(issue.Store.Search), so the issue is unfindable by the link that is its reproducer, "+
+			"and the import reports {imported:1, warnings:[]}.", m.issue.Description, want)
+	}
+	if n := descriptionNotes(m); len(n) != 0 {
+		t.Errorf("a blockCard whose URL DID import produced %d description note(s): %#v — "+
+			"nothing was lost here", len(n), n)
+	}
+}
+
+// The same node ALONE — the shape that makes the loss total rather than partial. Today this
+// description imports as the empty string and the job says {imported:1, warnings:[]}: an operator
+// cannot tell it from an issue that never had a description.
+func TestJiraAPI_ADescriptionThatIsOnlyABlockCardIsNotEmpty(t *testing.T) {
+	m := mapOneADF(t, `{"type":"doc","version":1,"content":[
+		{"type":"blockCard","attrs":{"url":"https://github.com/hibernate/hibernate-orm/pull/732"}}]}`)
+	if strings.TrimSpace(m.issue.Description) == "" {
+		t.Errorf("description = %q — the issue's entire description was a linked card and it "+
+			"imported as nothing, silently", m.issue.Description)
+	}
+}

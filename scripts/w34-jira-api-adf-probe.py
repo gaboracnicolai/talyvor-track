@@ -31,6 +31,7 @@ and adf_attrs_job_test.go pin the flattening, the per-type reports and the searc
 
 import collections
 import json
+import os
 import pathlib
 import re
 import sys
@@ -40,12 +41,29 @@ import urllib.request
 HOST = "https://hibernate.atlassian.net"
 PROJECT = "HHH"
 TIMEOUT = 120
-PAGES = 20  # 100 issues per page
+# ⚠ THIS NUMBER WAS THE DEFECT, NOT A TUNING KNOB. It was 20 — 2,000 of the project's ~20,550 issues
+# — and the script printed "unpinned attrs-borne leaf types: NONE", a sentence about the PROJECT,
+# off a census that had read 9.7% of it. `blockCard` occurs ONCE in the first 3,000 and was missed
+# for exactly that reason; adf_attrs.go names this script as the only thing that would notice a new
+# attrs-borne type, so the bound decided what the whole pinned table could ever contain.
+# 260 pages ⇒ 26,000 issues ⇒ the census reaches isLast on this project and the NONE becomes a fact
+# about all of it. A full run is minutes, not seconds; this is a hand-run probe and that is the
+# trade. Override for a bigger project, and read the "scanned / exhausted" line before believing a
+# NONE: the script now refuses to state one as project-wide when it stopped short.
+PAGES = int(os.environ.get("PROBE_PAGES", "260"))  # 100 issues per page
 IMPORTER = pathlib.Path(__file__).resolve().parent.parent / "internal" / "importer"
 
 # Attributes measured to be EDITOR IDENTITY rather than content: they appear on empty paragraphs,
 # rules and empty headings, none of which loses anything. A leaf carrying only these is not a loss.
-IDENTITY_ATTRS = {"localId", "level"}
+#
+# ⚠ `language` IS THE THIRD, AND IT WAS FOUND BY RAISING PAGES — i.e. by the same bound that hid
+# blockCard, in the other direction. Reading the project to its end reports `codeBlock` ×12 as an
+# unpinned attrs-borne leaf. MEASURED whole-population (18,917 descriptions) before it was
+# classified: all 12 are `{"type":"codeBlock","attrs":{"language":"java"}}` with NO content and NO
+# text — an EMPTY code block. There is no code in them, so `language` names the highlighting of
+# nothing. That is `localId` on an empty paragraph exactly, and pinning codeBlock into adfAttrText
+# would write the word "java" into 12 users' descriptions in place of a value that does not exist.
+IDENTITY_ATTRS = {"localId", "level", "language"}
 
 # What Jira's OWN renderer is expected to put in the HTML for each pinned node type, given the
 # attribute value adf_attrs.go places.
@@ -60,6 +78,11 @@ RENDERED_AS = {
     "inlineCard": lambda v: v,          # the URL is the link text, verbatim
     "emoji": lambda v: v,               # the character, verbatim
     "mention": lambda v: v.lstrip("@"),  # the display name WITHOUT the ADF sigil
+    # inlineCard's BLOCK-LEVEL twin: same attribute, same rendering. Measured on HHH-18501, the one
+    # issue in 3,000 that carries one — Jira's own HTML for that document contains attrs.url
+    # verbatim. It is listed here rather than assumed from the name, which is what makes the pin in
+    # adf_attrs.go a measurement.
+    "blockCard": lambda v: v,
 }
 
 failures = []
@@ -231,6 +254,7 @@ def main():
     unpinned = collections.Counter()
     n_issues = n_desc = n_carrying = n_empty = 0
     cursor = None
+    exhausted = False   # did the census reach the END of the project, or stop on PAGES?
     for _ in range(PAGES):
         body = {"jql": jql, "fields": ["description"], "maxResults": 100}
         if cursor:
@@ -270,11 +294,18 @@ def main():
                 n_carrying += 1
             if text_len[0] == 0:
                 n_empty += 1
-        if page.get("isLast"):
+        if page.get("isLast") or not page.get("nextPageToken"):
+            exhausted = True
             break
         cursor = page.get("nextPageToken")
 
     print(f"  issues scanned                                   {n_issues:>7,}")
+    # ⚠ THE POPULATION LINE IS NOT BOOKKEEPING. Every negative below is a statement about THESE
+    # issues and about no others, and the previous version of this script did not print it: it read
+    # 2,000 issues and announced "unpinned attrs-borne leaf types: NONE", which reads as a fact about
+    # the project. `blockCard` was one page past that bound.
+    print(f"  census reached the end of {PROJECT}                    "
+          f"{'YES' if exhausted else 'NO — STOPPED ON PAGES=' + str(PAGES)}")
     print(f"    with a description                             {n_desc:>7,}")
     print(f"    carrying >=1 attrs-borne node                  {n_carrying:>7,}"
           f"  ({100.0 * n_carrying / max(n_desc, 1):.1f}% of descriptions)")
@@ -300,8 +331,17 @@ def main():
               "exact defect this merge fixed one type over. Pin it (against Jira's own rendering, "
               "as above) or add it to adfNoTextEquivalent.", file=sys.stderr)
         return 1
-    print("\n  unpinned attrs-borne leaf types: NONE — every attrs-borne node the shipped request "
-          "returns is in one of the two tables.")
+    if exhausted:
+        print(f"\n  unpinned attrs-borne leaf types: NONE in all {n_issues:,} issues of {PROJECT} — "
+              "the census read the project to its end, so every attrs-borne node the shipped "
+              "request returns for this project is in one of the two tables.")
+    else:
+        print(f"\n  unpinned attrs-borne leaf types: NONE IN THE {n_issues:,} ISSUES SCANNED — and "
+              f"that is NOT a statement about {PROJECT}. The census stopped on PAGES={PAGES} with "
+              "more pages available. THIS IS THE SHAPE THAT HID blockCard: it occurs ONCE in the "
+              "first 3,000 issues and the bound was 2,000. Raise PROBE_PAGES until this line says "
+              "YES before reading the NONE as a property of the project.", file=sys.stderr)
+        return 1
 
     print("\n⚠ WHAT THIS DOES NOT MEASURE. `date` and `status` (the ADF lozenge) both carry attrs.text "
           "per the ADF spec and occur ZERO times here, so neither is pinned and neither would be "
