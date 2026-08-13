@@ -1,0 +1,2915 @@
+{
+  "_provenance": {
+    "authenticated": false,
+    "controls": {
+      "invalid_document_status": 400,
+      "valid_document_status": 401
+    },
+    "endpoint": "https://api.linear.app/graphql",
+    "fetched_utc": "2026-08-13",
+    "how": "unauthenticated __type introspection; see scripts/w34-linear-schema-snapshot.py"
+  },
+  "types": {
+    "Issue": {
+      "fields": {
+        "activitySummary": {
+          "args": {},
+          "deprecated": false,
+          "type": "JSONObject"
+        },
+        "addedToCycleAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "addedToProjectAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "addedToTeamAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "agentSessions": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AgentSessionConnection!"
+        },
+        "aiPromptProgresses": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AiPromptProgressFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AiPromptProgressConnection!"
+        },
+        "archivedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "asksExternalUserRequester": {
+          "args": {},
+          "deprecated": false,
+          "type": "ExternalUser"
+        },
+        "asksRequester": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "assignee": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "attachments": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AttachmentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AttachmentConnection!"
+        },
+        "autoArchivedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "autoClosedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "boardOrder": {
+          "args": {},
+          "deprecated": true,
+          "type": "Float!"
+        },
+        "botActor": {
+          "args": {},
+          "deprecated": false,
+          "type": "ActorBot"
+        },
+        "branchName": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "canceledAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "children": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "comments": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CommentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CommentConnection!"
+        },
+        "completedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "createdAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        },
+        "creator": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "customerTicketCount": {
+          "args": {},
+          "deprecated": false,
+          "type": "Int!"
+        },
+        "cycle": {
+          "args": {},
+          "deprecated": false,
+          "type": "Cycle"
+        },
+        "delegate": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "description": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "descriptionState": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "documentContent": {
+          "args": {},
+          "deprecated": false,
+          "type": "DocumentContent"
+        },
+        "documents": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "DocumentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "DocumentConnection!"
+        },
+        "dueDate": {
+          "args": {},
+          "deprecated": false,
+          "type": "TimelessDate"
+        },
+        "estimate": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float"
+        },
+        "externalUserCreator": {
+          "args": {},
+          "deprecated": false,
+          "type": "ExternalUser"
+        },
+        "favorite": {
+          "args": {},
+          "deprecated": false,
+          "type": "Favorite"
+        },
+        "formerAttachments": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AttachmentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AttachmentConnection!"
+        },
+        "formerNeeds": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CustomerNeedFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CustomerNeedConnection!"
+        },
+        "history": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueHistoryConnection!"
+        },
+        "id": {
+          "args": {},
+          "deprecated": false,
+          "type": "ID!"
+        },
+        "identifier": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "incomingSuggestions": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueSuggestionConnection!"
+        },
+        "inheritsSharedAccess": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "integrationSourceType": {
+          "args": {},
+          "deprecated": false,
+          "type": "IntegrationService"
+        },
+        "inverseRelations": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueRelationConnection!"
+        },
+        "labelIds": {
+          "args": {},
+          "deprecated": false,
+          "type": "[String!]!"
+        },
+        "labels": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueLabelFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueLabelConnection!"
+        },
+        "lastAppliedTemplate": {
+          "args": {},
+          "deprecated": false,
+          "type": "Template"
+        },
+        "needs": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CustomerNeedFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CustomerNeedConnection!"
+        },
+        "number": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "parent": {
+          "args": {},
+          "deprecated": false,
+          "type": "Issue"
+        },
+        "previousIdentifiers": {
+          "args": {},
+          "deprecated": false,
+          "type": "[String!]!"
+        },
+        "priority": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "priorityLabel": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "prioritySortOrder": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "project": {
+          "args": {},
+          "deprecated": false,
+          "type": "Project"
+        },
+        "projectMilestone": {
+          "args": {},
+          "deprecated": false,
+          "type": "ProjectMilestone"
+        },
+        "reactionData": {
+          "args": {},
+          "deprecated": false,
+          "type": "JSONObject!"
+        },
+        "reactions": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Reaction!]!"
+        },
+        "recurringIssueTemplate": {
+          "args": {},
+          "deprecated": false,
+          "type": "Template"
+        },
+        "relations": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueRelationConnection!"
+        },
+        "releases": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ReleaseFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ReleaseConnection!"
+        },
+        "sharedAccess": {
+          "args": {},
+          "deprecated": false,
+          "type": "IssueSharedAccess!"
+        },
+        "slaBreachesAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "slaHighRiskAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "slaMediumRiskAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "slaStartedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "slaType": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "snoozedBy": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "snoozedUntilAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "sortOrder": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "sourceComment": {
+          "args": {},
+          "deprecated": false,
+          "type": "Comment"
+        },
+        "startedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "startedTriageAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "state": {
+          "args": {},
+          "deprecated": false,
+          "type": "WorkflowState!"
+        },
+        "stateHistory": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "last": "Int"
+          },
+          "deprecated": false,
+          "type": "IssueStateSpanConnection!"
+        },
+        "subIssueSortOrder": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float"
+        },
+        "subscribers": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "UserFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeDisabled": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "UserConnection!"
+        },
+        "suggestions": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueSuggestionFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueSuggestionConnection!"
+        },
+        "suggestionsGeneratedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "summary": {
+          "args": {},
+          "deprecated": false,
+          "type": "Summary"
+        },
+        "syncedWith": {
+          "args": {},
+          "deprecated": false,
+          "type": "[ExternalEntityInfo!]"
+        },
+        "team": {
+          "args": {},
+          "deprecated": false,
+          "type": "Team!"
+        },
+        "title": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "trashed": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "triagedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "trusted": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "updatedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        },
+        "url": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "IssueConnection": {
+      "fields": {
+        "edges": {
+          "args": {},
+          "deprecated": false,
+          "type": "[IssueEdge!]!"
+        },
+        "nodes": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Issue!]!"
+        },
+        "pageInfo": {
+          "args": {},
+          "deprecated": false,
+          "type": "PageInfo!"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "IssueLabel": {
+      "fields": {
+        "archivedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "children": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueLabelFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueLabelConnection!"
+        },
+        "color": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "createdAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        },
+        "creator": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "description": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "id": {
+          "args": {},
+          "deprecated": false,
+          "type": "ID!"
+        },
+        "inheritedFrom": {
+          "args": {},
+          "deprecated": false,
+          "type": "IssueLabel"
+        },
+        "isGroup": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "issues": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "lastAppliedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "name": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "organization": {
+          "args": {},
+          "deprecated": true,
+          "type": "Organization!"
+        },
+        "parent": {
+          "args": {},
+          "deprecated": false,
+          "type": "IssueLabel"
+        },
+        "retiredAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "retiredBy": {
+          "args": {},
+          "deprecated": false,
+          "type": "User"
+        },
+        "team": {
+          "args": {},
+          "deprecated": false,
+          "type": "Team"
+        },
+        "updatedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "IssueLabelConnection": {
+      "fields": {
+        "edges": {
+          "args": {},
+          "deprecated": false,
+          "type": "[IssueLabelEdge!]!"
+        },
+        "nodes": {
+          "args": {},
+          "deprecated": false,
+          "type": "[IssueLabel!]!"
+        },
+        "pageInfo": {
+          "args": {},
+          "deprecated": false,
+          "type": "PageInfo!"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "PageInfo": {
+      "fields": {
+        "endCursor": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "hasNextPage": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "hasPreviousPage": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "startCursor": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "Query": {
+      "fields": {
+        "administrableTeams": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "TeamFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TeamConnection!"
+        },
+        "agentActivities": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AgentActivityFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AgentActivityConnection!"
+        },
+        "agentActivity": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "AgentActivity!"
+        },
+        "agentSession": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "AgentSession!"
+        },
+        "agentSessionSandbox": {
+          "args": {
+            "agentSessionId": "String!"
+          },
+          "deprecated": false,
+          "type": "CodingAgentSandboxPayload"
+        },
+        "agentSessions": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AgentSessionConnection!"
+        },
+        "agentSkill": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "AgentSkill!"
+        },
+        "agentSkills": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AgentSkillFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AgentSkillConnection!"
+        },
+        "applicationInfo": {
+          "args": {
+            "clientId": "String!"
+          },
+          "deprecated": false,
+          "type": "Application!"
+        },
+        "archivedIntegrations": {
+          "args": {},
+          "deprecated": false,
+          "type": "[ArchivedIntegrationPayload!]!"
+        },
+        "archivedTeams": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Team!]!"
+        },
+        "attachment": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Attachment!"
+        },
+        "attachmentIssue": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": true,
+          "type": "Issue!"
+        },
+        "attachmentSources": {
+          "args": {
+            "teamId": "String"
+          },
+          "deprecated": false,
+          "type": "AttachmentSourcesPayload!"
+        },
+        "attachments": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AttachmentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AttachmentConnection!"
+        },
+        "attachmentsForURL": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "url": "String!"
+          },
+          "deprecated": false,
+          "type": "AttachmentConnection!"
+        },
+        "auditEntries": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "AuditEntryFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "AuditEntryConnection!"
+        },
+        "auditEntryTypes": {
+          "args": {},
+          "deprecated": false,
+          "type": "[AuditEntryType!]!"
+        },
+        "auditLogWebhookFailureEvents": {
+          "args": {
+            "webhookId": "String!"
+          },
+          "deprecated": false,
+          "type": "[WebhookFailureEvent!]!"
+        },
+        "authenticationSessions": {
+          "args": {},
+          "deprecated": false,
+          "type": "[AuthenticationSessionResponse!]!"
+        },
+        "availableUsers": {
+          "args": {},
+          "deprecated": false,
+          "type": "AuthResolverResponse!"
+        },
+        "comment": {
+          "args": {
+            "hash": "String",
+            "id": "String"
+          },
+          "deprecated": false,
+          "type": "Comment!"
+        },
+        "comments": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CommentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CommentConnection!"
+        },
+        "customView": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "CustomView!"
+        },
+        "customViewDetailsSuggestion": {
+          "args": {
+            "filter": "JSONObject!",
+            "modelName": "String"
+          },
+          "deprecated": false,
+          "type": "CustomViewSuggestionPayload!"
+        },
+        "customViewHasSubscribers": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "CustomViewHasSubscribersPayload!"
+        },
+        "customViews": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CustomViewFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[CustomViewSortInput!]"
+          },
+          "deprecated": false,
+          "type": "CustomViewConnection!"
+        },
+        "customer": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Customer!"
+        },
+        "customerNeed": {
+          "args": {
+            "hash": "String",
+            "id": "String"
+          },
+          "deprecated": false,
+          "type": "CustomerNeed!"
+        },
+        "customerNeeds": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CustomerNeedFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CustomerNeedConnection!"
+        },
+        "customerStatus": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "CustomerStatus!"
+        },
+        "customerStatuses": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CustomerStatusConnection!"
+        },
+        "customerTier": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "CustomerTier!"
+        },
+        "customerTiers": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CustomerTierConnection!"
+        },
+        "customers": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CustomerFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sorts": "[CustomerSortInput!]"
+          },
+          "deprecated": false,
+          "type": "CustomerConnection!"
+        },
+        "cycle": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Cycle!"
+        },
+        "cycles": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CycleFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CycleConnection!"
+        },
+        "diff": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Diff!"
+        },
+        "document": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Document!"
+        },
+        "documentContentHistory": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "DocumentContentHistoryPayload!"
+        },
+        "documentContentHistoryEntries": {
+          "args": {
+            "entryIds": "[!]!"
+          },
+          "deprecated": false,
+          "type": "DocumentContentHistoryPayload!"
+        },
+        "documentContentHistoryTimeline": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "DocumentContentHistoryTimelinePayload!"
+        },
+        "documents": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "DocumentFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[DocumentSortInput!]"
+          },
+          "deprecated": false,
+          "type": "DocumentConnection!"
+        },
+        "emailIntakeAddress": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "EmailIntakeAddress!"
+        },
+        "emoji": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Emoji!"
+        },
+        "emojis": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "EmojiConnection!"
+        },
+        "entityExternalLink": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "EntityExternalLink!"
+        },
+        "externalUser": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ExternalUser!"
+        },
+        "externalUsers": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ExternalUserConnection!"
+        },
+        "failuresForOauthWebhooks": {
+          "args": {
+            "oauthClientId": "String!"
+          },
+          "deprecated": false,
+          "type": "[WebhookFailureEvent!]!"
+        },
+        "favorite": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Favorite!"
+        },
+        "favorites": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "FavoriteConnection!"
+        },
+        "fetchData": {
+          "args": {
+            "query": "String!"
+          },
+          "deprecated": false,
+          "type": "FetchDataPayload!"
+        },
+        "initiative": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Initiative!"
+        },
+        "initiativeFilterSuggestion": {
+          "args": {
+            "prompt": "String!",
+            "teamId": "String"
+          },
+          "deprecated": false,
+          "type": "InitiativeFilterSuggestionPayload!"
+        },
+        "initiativeLabel": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "InitiativeLabel!"
+        },
+        "initiativeLabels": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "InitiativeLabelFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "InitiativeLabelConnection!"
+        },
+        "initiativeLeadTeamChangeImpact": {
+          "args": {
+            "id": "String!",
+            "leadTeamId": "String"
+          },
+          "deprecated": false,
+          "type": "InitiativeLeadTeamChangeImpact!"
+        },
+        "initiativeRelation": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "InitiativeRelation!"
+        },
+        "initiativeRelations": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "InitiativeRelationConnection!"
+        },
+        "initiativeToProject": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "InitiativeToProject!"
+        },
+        "initiativeToProjects": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "InitiativeToProjectConnection!"
+        },
+        "initiativeUpdate": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "InitiativeUpdate!"
+        },
+        "initiativeUpdates": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "InitiativeUpdateFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "InitiativeUpdateConnection!"
+        },
+        "initiatives": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "InitiativeFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[InitiativeSortInput!]"
+          },
+          "deprecated": false,
+          "type": "InitiativeConnection!"
+        },
+        "integration": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Integration!"
+        },
+        "integrationHasScopes": {
+          "args": {
+            "integrationId": "String!",
+            "scopes": "[!]!"
+          },
+          "deprecated": false,
+          "type": "IntegrationHasScopesPayload!"
+        },
+        "integrationTemplate": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "IntegrationTemplate!"
+        },
+        "integrationTemplates": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IntegrationTemplateConnection!"
+        },
+        "integrations": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IntegrationConnection!"
+        },
+        "integrationsSettings": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "IntegrationsSettings!"
+        },
+        "issue": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Issue!"
+        },
+        "issueFigmaFileKeySearch": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "fileKey": "String!",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "issueFilterSuggestion": {
+          "args": {
+            "projectId": "String",
+            "prompt": "String!",
+            "teamId": "String"
+          },
+          "deprecated": false,
+          "type": "IssueFilterSuggestionPayload!"
+        },
+        "issueImportCheckCSV": {
+          "args": {
+            "csvUrl": "String!",
+            "service": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueImportCheckPayload!"
+        },
+        "issueImportCheckSync": {
+          "args": {
+            "issueImportId": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueImportSyncCheckPayload!"
+        },
+        "issueImportJqlCheck": {
+          "args": {
+            "jiraEmail": "String!",
+            "jiraHostname": "String!",
+            "jiraProject": "String!",
+            "jiraToken": "String!",
+            "jql": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueImportJqlCheckPayload!"
+        },
+        "issueLabel": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueLabel!"
+        },
+        "issueLabels": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueLabelFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueLabelConnection!"
+        },
+        "issuePriorityValues": {
+          "args": {},
+          "deprecated": false,
+          "type": "[IssuePriorityValue!]!"
+        },
+        "issueRelation": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueRelation!"
+        },
+        "issueRelations": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueRelationConnection!"
+        },
+        "issueRepositorySuggestions": {
+          "args": {
+            "agentSessionId": "String",
+            "candidateRepositories": "[!]!",
+            "issueId": "String!"
+          },
+          "deprecated": false,
+          "type": "RepositorySuggestionsPayload!"
+        },
+        "issueSearch": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "query": "String"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "issueTitleSuggestionFromCustomerRequest": {
+          "args": {
+            "request": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueTitleSuggestionFromCustomerRequestPayload!"
+        },
+        "issueToRelease": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueToRelease!"
+        },
+        "issueToReleases": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueToReleaseConnection!"
+        },
+        "issueVcsBranchSearch": {
+          "args": {
+            "branchName": "String!"
+          },
+          "deprecated": false,
+          "type": "Issue"
+        },
+        "issues": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[IssueSortInput!]"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "latestReleaseByAccessKey": {
+          "args": {},
+          "deprecated": false,
+          "type": "AccessKeyRelease"
+        },
+        "microsoftTeamsChannels": {
+          "args": {},
+          "deprecated": false,
+          "type": "MicrosoftTeamsChannelsPayload!"
+        },
+        "notification": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Notification!"
+        },
+        "notificationSubscription": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "NotificationSubscription!"
+        },
+        "notificationSubscriptions": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "NotificationSubscriptionConnection!"
+        },
+        "notifications": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "NotificationFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "NotificationConnection!"
+        },
+        "notificationsUnreadCount": {
+          "args": {},
+          "deprecated": false,
+          "type": "Int!"
+        },
+        "oauthApplication": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "OAuthApplication!"
+        },
+        "oauthApplications": {
+          "args": {},
+          "deprecated": false,
+          "type": "[OAuthApplication!]!"
+        },
+        "organization": {
+          "args": {},
+          "deprecated": false,
+          "type": "Organization!"
+        },
+        "organizationDomainClaimRequest": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "OrganizationDomainClaimPayload!"
+        },
+        "organizationExists": {
+          "args": {
+            "urlKey": "String!"
+          },
+          "deprecated": false,
+          "type": "OrganizationExistsPayload!"
+        },
+        "organizationInvite": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "OrganizationInvite!"
+        },
+        "organizationInviteDetails": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "OrganizationInviteDetailsPayload!"
+        },
+        "organizationInvites": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "OrganizationInviteConnection!"
+        },
+        "organizationMeta": {
+          "args": {
+            "urlKey": "String!"
+          },
+          "deprecated": false,
+          "type": "OrganizationMeta"
+        },
+        "partnerOfferDetails": {
+          "args": {
+            "slug": "String!"
+          },
+          "deprecated": false,
+          "type": "PartnerOfferDetailsPayload"
+        },
+        "partnerOfferWorkspaces": {
+          "args": {
+            "token": "String!"
+          },
+          "deprecated": false,
+          "type": "PartnerOfferWorkspacesPayload"
+        },
+        "partnerProgramPartners": {
+          "args": {},
+          "deprecated": false,
+          "type": "[PartnerProgramPartnerPayload!]!"
+        },
+        "project": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Project!"
+        },
+        "projectFilterSuggestion": {
+          "args": {
+            "prompt": "String!",
+            "teamId": "String"
+          },
+          "deprecated": false,
+          "type": "ProjectFilterSuggestionPayload!"
+        },
+        "projectLabel": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ProjectLabel!"
+        },
+        "projectLabels": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ProjectLabelFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ProjectLabelConnection!"
+        },
+        "projectMilestone": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ProjectMilestone!"
+        },
+        "projectMilestones": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ProjectMilestoneFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ProjectMilestoneConnection!"
+        },
+        "projectRelation": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ProjectRelation!"
+        },
+        "projectRelations": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ProjectRelationConnection!"
+        },
+        "projectStatus": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ProjectStatus!"
+        },
+        "projectStatusProjectCount": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ProjectStatusCountPayload!"
+        },
+        "projectStatuses": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ProjectStatusConnection!"
+        },
+        "projectUpdate": {
+          "args": {
+            "id": "String!",
+            "projectId": "String"
+          },
+          "deprecated": false,
+          "type": "ProjectUpdate!"
+        },
+        "projectUpdates": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ProjectUpdateFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ProjectUpdateConnection!"
+        },
+        "projects": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ProjectFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[ProjectSortInput!]"
+          },
+          "deprecated": false,
+          "type": "ProjectConnection!"
+        },
+        "pushSubscriptionTest": {
+          "args": {
+            "sendStrategy": "SendStrategy",
+            "targetMobile": "Boolean"
+          },
+          "deprecated": false,
+          "type": "PushSubscriptionTestPayload!"
+        },
+        "rateLimitStatus": {
+          "args": {},
+          "deprecated": false,
+          "type": "RateLimitPayload!"
+        },
+        "recentReleasesByAccessKey": {
+          "args": {
+            "limit": "Int"
+          },
+          "deprecated": false,
+          "type": "[AccessKeyRelease!]!"
+        },
+        "release": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Release!"
+        },
+        "releaseNote": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ReleaseNote!"
+        },
+        "releaseNotes": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ReleaseNoteFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ReleaseNoteConnection!"
+        },
+        "releasePipeline": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ReleasePipeline!"
+        },
+        "releasePipelineByAccessKey": {
+          "args": {},
+          "deprecated": false,
+          "type": "AccessKeyReleasePipeline!"
+        },
+        "releasePipelines": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ReleasePipelineFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[ReleasePipelineSortInput!]"
+          },
+          "deprecated": false,
+          "type": "ReleasePipelineConnection!"
+        },
+        "releaseSearch": {
+          "args": {
+            "filter": "ReleaseFilter",
+            "first": "Int",
+            "term": "String"
+          },
+          "deprecated": false,
+          "type": "[Release!]!"
+        },
+        "releaseStage": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "ReleaseStage!"
+        },
+        "releaseStages": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ReleaseStageFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ReleaseStageConnection!"
+        },
+        "releases": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ReleaseFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[ReleaseSortInput!]"
+          },
+          "deprecated": false,
+          "type": "ReleaseConnection!"
+        },
+        "roadmap": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": true,
+          "type": "Roadmap!"
+        },
+        "roadmapToProject": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": true,
+          "type": "RoadmapToProject!"
+        },
+        "roadmapToProjects": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": true,
+          "type": "RoadmapToProjectConnection!"
+        },
+        "roadmaps": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": true,
+          "type": "RoadmapConnection!"
+        },
+        "searchDocuments": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeComments": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "teamId": "String",
+            "term": "String!"
+          },
+          "deprecated": false,
+          "type": "DocumentSearchPayload!"
+        },
+        "searchIssues": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeComments": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "teamId": "String",
+            "term": "String!"
+          },
+          "deprecated": false,
+          "type": "IssueSearchPayload!"
+        },
+        "searchProjects": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeComments": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "teamId": "String",
+            "term": "String!"
+          },
+          "deprecated": false,
+          "type": "ProjectSearchPayload!"
+        },
+        "semanticSearch": {
+          "args": {
+            "filters": "SemanticSearchFilters",
+            "includeArchived": "Boolean",
+            "maxResults": "Int",
+            "query": "String!",
+            "types": "[SemanticSearchResultType!]"
+          },
+          "deprecated": false,
+          "type": "SemanticSearchPayload!"
+        },
+        "slaConfigurations": {
+          "args": {
+            "teamId": "String!"
+          },
+          "deprecated": false,
+          "type": "[SlaConfiguration!]!"
+        },
+        "ssoUrlFromEmail": {
+          "args": {
+            "email": "String!",
+            "isDesktop": "Boolean",
+            "type": "IdentityProviderType!"
+          },
+          "deprecated": false,
+          "type": "SsoUrlFromEmailResponse!"
+        },
+        "team": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Team!"
+        },
+        "teamMembership": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "TeamMembership!"
+        },
+        "teamMemberships": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TeamMembershipConnection!"
+        },
+        "teams": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "TeamFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TeamConnection!"
+        },
+        "template": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Template!"
+        },
+        "templates": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Template!]!"
+        },
+        "templatesForIntegration": {
+          "args": {
+            "integrationType": "String!"
+          },
+          "deprecated": false,
+          "type": "[Template!]!"
+        },
+        "timeSchedule": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "TimeSchedule!"
+        },
+        "timeSchedules": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TimeScheduleConnection!"
+        },
+        "triageResponsibilities": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TriageResponsibilityConnection!"
+        },
+        "triageResponsibility": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "TriageResponsibility!"
+        },
+        "user": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "User!"
+        },
+        "userSessions": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "[AuthenticationSessionResponse!]!"
+        },
+        "userSettings": {
+          "args": {},
+          "deprecated": false,
+          "type": "UserSettings!"
+        },
+        "users": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "UserFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeDisabled": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[UserSortInput!]"
+          },
+          "deprecated": false,
+          "type": "UserConnection!"
+        },
+        "verifyGitHubEnterpriseServerInstallation": {
+          "args": {
+            "integrationId": "String!"
+          },
+          "deprecated": false,
+          "type": "GitHubEnterpriseServerInstallVerificationPayload!"
+        },
+        "viewer": {
+          "args": {},
+          "deprecated": false,
+          "type": "User!"
+        },
+        "webhook": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "Webhook!"
+        },
+        "webhooks": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "WebhookConnection!"
+        },
+        "workflowState": {
+          "args": {
+            "id": "String!"
+          },
+          "deprecated": false,
+          "type": "WorkflowState!"
+        },
+        "workflowStates": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "WorkflowStateFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "WorkflowStateConnection!"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "Team": {
+      "fields": {
+        "activeCycle": {
+          "args": {},
+          "deprecated": false,
+          "type": "Cycle"
+        },
+        "aiDiscussionSummariesEnabled": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "aiThreadSummariesEnabled": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "allMembersCanJoin": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "ancestors": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Team!]!"
+        },
+        "archivedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "autoArchivePeriod": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "autoCloseChildIssues": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "autoCloseParentIssues": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "autoClosePeriod": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float"
+        },
+        "autoCloseStateId": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "children": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Team!]!"
+        },
+        "color": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "createdAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        },
+        "currentProgress": {
+          "args": {},
+          "deprecated": false,
+          "type": "JSONObject!"
+        },
+        "cycleCalenderUrl": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "cycleCooldownTime": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "cycleDuration": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "cycleIssueAutoAssignCompleted": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "cycleIssueAutoAssignStarted": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "cycleLockToActive": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "cycleStartDay": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "cycles": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "CycleFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "CycleConnection!"
+        },
+        "cyclesEnabled": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "defaultIssueEstimate": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "defaultIssueState": {
+          "args": {},
+          "deprecated": false,
+          "type": "WorkflowState"
+        },
+        "defaultProjectTemplate": {
+          "args": {},
+          "deprecated": false,
+          "type": "Template"
+        },
+        "defaultTemplateForMembers": {
+          "args": {},
+          "deprecated": false,
+          "type": "Template"
+        },
+        "defaultTemplateForMembersId": {
+          "args": {},
+          "deprecated": true,
+          "type": "String"
+        },
+        "defaultTemplateForNonMembers": {
+          "args": {},
+          "deprecated": false,
+          "type": "Template"
+        },
+        "defaultTemplateForNonMembersId": {
+          "args": {},
+          "deprecated": true,
+          "type": "String"
+        },
+        "description": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "displayName": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "draftWorkflowState": {
+          "args": {},
+          "deprecated": true,
+          "type": "WorkflowState"
+        },
+        "facets": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Facet!]!"
+        },
+        "gitAutomationStates": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "GitAutomationStateConnection!"
+        },
+        "groupIssueHistory": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "icon": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "id": {
+          "args": {},
+          "deprecated": false,
+          "type": "ID!"
+        },
+        "inheritIssueEstimation": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "inheritSlackAutoCreateProjectChannel": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "inheritWorkflowStatuses": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "initiativesEnabled": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "integrationsSettings": {
+          "args": {},
+          "deprecated": false,
+          "type": "IntegrationsSettings"
+        },
+        "inviteHash": {
+          "args": {},
+          "deprecated": true,
+          "type": "String!"
+        },
+        "issueCount": {
+          "args": {
+            "includeArchived": "Boolean"
+          },
+          "deprecated": false,
+          "type": "Int!"
+        },
+        "issueEstimationAllowZero": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "issueEstimationExtended": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "issueEstimationType": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "issueOrderingNoPriorityFirst": {
+          "args": {},
+          "deprecated": true,
+          "type": "Boolean!"
+        },
+        "issueSortOrderDefaultToBottom": {
+          "args": {},
+          "deprecated": true,
+          "type": "Boolean!"
+        },
+        "issues": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeSubTeams": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "joinByDefault": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "key": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "labels": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueLabelFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueLabelConnection!"
+        },
+        "ledInitiativeCount": {
+          "args": {},
+          "deprecated": false,
+          "type": "Int!"
+        },
+        "markedAsDuplicateWorkflowState": {
+          "args": {},
+          "deprecated": true,
+          "type": "WorkflowState"
+        },
+        "members": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "UserFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeDisabled": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[UserSortInput!]"
+          },
+          "deprecated": false,
+          "type": "UserConnection!"
+        },
+        "membership": {
+          "args": {
+            "userId": "String!"
+          },
+          "deprecated": false,
+          "type": "TeamMembership"
+        },
+        "memberships": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TeamMembershipConnection!"
+        },
+        "mergeWorkflowState": {
+          "args": {},
+          "deprecated": true,
+          "type": "WorkflowState"
+        },
+        "mergeableWorkflowState": {
+          "args": {},
+          "deprecated": true,
+          "type": "WorkflowState"
+        },
+        "name": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "organization": {
+          "args": {},
+          "deprecated": false,
+          "type": "Organization!"
+        },
+        "parent": {
+          "args": {},
+          "deprecated": false,
+          "type": "Team"
+        },
+        "pinnedResources": {
+          "args": {},
+          "deprecated": false,
+          "type": "[TeamPinnedResource!]!"
+        },
+        "posts": {
+          "args": {},
+          "deprecated": false,
+          "type": "[Post!]!"
+        },
+        "private": {
+          "args": {},
+          "deprecated": true,
+          "type": "Boolean!"
+        },
+        "progressHistory": {
+          "args": {},
+          "deprecated": false,
+          "type": "JSONObject!"
+        },
+        "projects": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ProjectFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "includeSubTeams": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy",
+            "sort": "[ProjectSortInput!]"
+          },
+          "deprecated": false,
+          "type": "ProjectConnection!"
+        },
+        "protectedBy": {
+          "args": {},
+          "deprecated": true,
+          "type": "Team"
+        },
+        "protectedById": {
+          "args": {},
+          "deprecated": true,
+          "type": "String"
+        },
+        "releasePipelines": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "ReleasePipelineFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "ReleasePipelineConnection!"
+        },
+        "requirePriorityToLeaveTriage": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "resourceSections": {
+          "args": {},
+          "deprecated": false,
+          "type": "[TeamResourceSection!]!"
+        },
+        "restrictedBy": {
+          "args": {},
+          "deprecated": false,
+          "type": "Team"
+        },
+        "restrictedById": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "retiredAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "reviewWorkflowState": {
+          "args": {},
+          "deprecated": true,
+          "type": "WorkflowState"
+        },
+        "scimGroupName": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "scimManaged": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "securitySettings": {
+          "args": {},
+          "deprecated": false,
+          "type": "JSONObject!"
+        },
+        "setIssueSortOrderOnStateChange": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "slackAutoCreateProjectChannel": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean"
+        },
+        "slackIssueComments": {
+          "args": {},
+          "deprecated": true,
+          "type": "Boolean!"
+        },
+        "slackIssueStatuses": {
+          "args": {},
+          "deprecated": true,
+          "type": "Boolean!"
+        },
+        "slackNewIssue": {
+          "args": {},
+          "deprecated": true,
+          "type": "Boolean!"
+        },
+        "startWorkflowState": {
+          "args": {},
+          "deprecated": true,
+          "type": "WorkflowState"
+        },
+        "states": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "WorkflowStateFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "WorkflowStateConnection!"
+        },
+        "templates": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "NullableTemplateFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "TemplateConnection!"
+        },
+        "timezone": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "triageEnabled": {
+          "args": {},
+          "deprecated": false,
+          "type": "Boolean!"
+        },
+        "triageIssueState": {
+          "args": {},
+          "deprecated": false,
+          "type": "WorkflowState"
+        },
+        "triageResponsibility": {
+          "args": {},
+          "deprecated": false,
+          "type": "TriageResponsibility"
+        },
+        "upcomingCycleCount": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "updatedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        },
+        "visibility": {
+          "args": {},
+          "deprecated": false,
+          "type": "TeamVisibility!"
+        },
+        "webhooks": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "WebhookConnection!"
+        }
+      },
+      "kind": "OBJECT"
+    },
+    "WorkflowState": {
+      "fields": {
+        "archivedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime"
+        },
+        "color": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "createdAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        },
+        "description": {
+          "args": {},
+          "deprecated": false,
+          "type": "String"
+        },
+        "id": {
+          "args": {},
+          "deprecated": false,
+          "type": "ID!"
+        },
+        "inheritedFrom": {
+          "args": {},
+          "deprecated": false,
+          "type": "WorkflowState"
+        },
+        "issues": {
+          "args": {
+            "after": "String",
+            "before": "String",
+            "filter": "IssueFilter",
+            "first": "Int",
+            "includeArchived": "Boolean",
+            "last": "Int",
+            "orderBy": "PaginationOrderBy"
+          },
+          "deprecated": false,
+          "type": "IssueConnection!"
+        },
+        "name": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "position": {
+          "args": {},
+          "deprecated": false,
+          "type": "Float!"
+        },
+        "team": {
+          "args": {},
+          "deprecated": false,
+          "type": "Team!"
+        },
+        "type": {
+          "args": {},
+          "deprecated": false,
+          "type": "String!"
+        },
+        "updatedAt": {
+          "args": {},
+          "deprecated": false,
+          "type": "DateTime!"
+        }
+      },
+      "kind": "OBJECT"
+    }
+  }
+}
