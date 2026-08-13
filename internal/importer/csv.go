@@ -86,6 +86,18 @@ type ImportResult struct {
 	// own comment above says may not change without a coordinated client change — for a number
 	// whose only reader is one line of runner.go.
 	refusedOtherTeam int
+
+	// stopped records that run() ended because its CONTEXT was cancelled — a shutdown mid-import —
+	// rather than because the source was exhausted. It is the difference between "this import is
+	// over" and "this import was interrupted", and without it the two are the same ImportResult:
+	// the rows past the cancellation are never pulled, so they are in no counter, and an import
+	// truncated by a deploy would satisfy terminalStatus's `unlanded == 0` and record itself
+	// SUCCEEDED.
+	//
+	// UNEXPORTED for the same reason refusedOtherTeam is: its only readers are terminalStatus and
+	// summarise, and exporting it would add a key to the JSON shape this struct's own comment
+	// above says may not change without a coordinated client change.
+	stopped bool
 }
 
 // FieldNote records ONE provider value a mapper could not place. The pipeline COUNTS these

@@ -57,11 +57,32 @@ func (imp *Importer) run(ctx context.Context, workspaceID, teamID string, src Is
 
 	out := &ImportResult{Errors: []string{}, Warnings: []string{}}
 	degraded := map[FieldNote]int{}
+	lastRow := 0
 	for {
+		// THE CONTEXT IS CONSULTED HERE AND, UNTIL THIS LINE, WAS CONSULTED NOWHERE. run took
+		// ctx and handed it to the STORE; the row loop never read it. runner.go says, right
+		// above the call, "an import MUST stop when the process is going down" — and on SIGTERM
+		// this loop kept pulling every remaining row, handing each to a store whose every call
+		// now fails, and counting each one in `failed`. MEASURED at 977f926: 50 of 50 rows
+		// pulled after cancellation and all 50 reported failed; on a linear_api job, 7 further
+		// PAGES fetched from the provider after the process had been told to stop, because on
+		// that transport "pull the next row" is an HTTP request. See run_context_test.go.
+		//
+		// ⚠ THE STOP IS RECORDED, AND THAT IS THE LOAD-BEARING HALF. Breaking out quietly leaves
+		// Skipped and Refused at zero with rows unread, which is `unlanded == 0` — so
+		// terminalStatus would call a truncated import SUCCEEDED and nothing would ever say
+		// otherwise. That is a worse defect than the one being fixed, so the stop sets a flag
+		// terminalStatus reads and appends the sentence summarise renders.
+		if err := ctx.Err(); err != nil {
+			out.stopped = true
+			out.Errors = append(out.Errors, fmt.Sprintf("stopped after row %d: %v", lastRow, err))
+			break
+		}
 		row, ok := src.Next()
 		if !ok {
 			break
 		}
+		lastRow = row.RowNum
 		if row.Err != nil {
 			out.Skipped++
 			out.Errors = append(out.Errors, row.Err.Error())
