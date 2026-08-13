@@ -258,7 +258,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		out.FieldValues = provided
 	}
 
-	metrics.IssuesCreated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
+	// track_issues_created_total is incremented by the STORE (issue.countCreated), not here. This
+	// route was the ONLY writer of that counter while four other production paths created issues
+	// without it — see countCreated's header for the census and the measurement. Counting here as
+	// well would double every API-created issue.
 	if h.notifier != nil {
 		h.notifier.IssueCreated(r.Context(), out.WorkspaceID, out.TeamID, out.CreatorID, *out)
 	}
