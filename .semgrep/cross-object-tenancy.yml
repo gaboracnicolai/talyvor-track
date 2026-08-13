@@ -26,6 +26,19 @@ rules:
       # Measured before this union existed: 16 of the 18 statements this rule is written for
       # were visible, and the 2 blind ones were the `issues` INSERT and UPSERT — the repo's
       # central write path, guarded correctly but with no lock over the guard.
+      #
+      # ⚠ source_id|target_id ARE IN THE ALTERNATION BECAUSE THEY WERE THE NEXT INSTANCE OF
+      # THAT SAME SHAPE. internal/dependency writes `issue_relations (source_id, target_id,
+      # type, workspace_id, created_by)` — workspace_id beside TWO caller-supplied issue
+      # references, exactly what this rule exists for — and the column names were not listed,
+      # so it matched nothing here. MEASURED at 11e88bf: deleting
+      # dependency.Store.Create's assertIssuesShareWorkspace call left the WHOLE .semgrep/
+      # lock at 0 findings. Widening the alternation adds exactly those 2 statements and no
+      # others across internal/ cmd/; both are then excluded by the guard clause below.
+      # ⚠ STILL NOT COVERED, stated rather than implied: BulkCreateRelations' bulk write is
+      # `INSERT … SELECT … FROM UNNEST(...)`, and both regexes here are anchored on `) VALUES`,
+      # so this rule cannot see it whatever the alternation says. That statement is covered by
+      # child-insert-tenancy.yml instead, via the assertIssueInWorkspace guard.
       # scripts/w34-tenancy-lock-visibility-controls.py is the positive control, both directions.
       - pattern-either:
           - patterns:
@@ -35,10 +48,10 @@ rules:
               - metavariable-regex:
                   metavariable: $SQL
                   regex: >-
-                    (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES
+                    (?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES
           - pattern-either:
-              - pattern: $Q.QueryRow($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES/", ...)
-              - pattern: $Q.Exec($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES/", ...)
+              - pattern: $Q.QueryRow($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES/", ...)
+              - pattern: $Q.Exec($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES/", ...)
       # Excluded when the enclosing function routes the reference through a workspace
       # guard: the shared primitive, or a grandfathered per-store guard.
       - pattern-not-inside: |
@@ -57,5 +70,16 @@ rules:
           func $F(...) $R {
             ...
             $G.assertIssueInWorkspace(...)
+            ...
+          }
+      # dependency.Store.Create's proof that BOTH relation endpoints are in the caller's
+      # authorized workspace. Added with source_id|target_id above: until they were in the
+      # alternation this rule could not see the issue_relations write path at all, and the
+      # sibling child-insert rule was releasing it on a workspace_id COLUMN that proves
+      # nothing about the refs beside it. Deleting this call is now RED in both rules.
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertIssuesShareWorkspace(...)
             ...
           }

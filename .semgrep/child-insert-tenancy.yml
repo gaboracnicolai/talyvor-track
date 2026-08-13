@@ -32,8 +32,24 @@ rules:
           - pattern-either:
               - pattern: $Q.QueryRow($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)/", ...)
               - pattern: $Q.Exec($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\b(issue_id|team_id|board_id|post_id|source_id|target_id)\b[^)]*\)/", ...)
-      # SAFE when the statement itself binds workspace_id (the fix shape: EXISTS/JOIN on
-      # the parent, or a workspace_id column) — anything whose SQL mentions workspace_id.
+      # SAFE when the statement itself COMPARES workspace_id (the fix shape: EXISTS/JOIN on
+      # the parent, or an AND workspace_id = $n predicate).
+      #
+      # ⚠ THIS USED TO READ "or a workspace_id column — anything whose SQL mentions
+      # workspace_id", and BOTH halves of that were wrong. A workspace_id COLUMN in an INSERT
+      # list proves nothing about the cross-object refs beside it: internal/dependency
+      # writes `issue_relations (source_id, target_id, workspace_id, …)`, which stamps the
+      # CALLER's workspace on a row whose two references are supplied by the caller and may
+      # be another tenant's issues. And `mentions` also passed a RETURNING or SELECT-list
+      # occurrence, which scopes nothing at all.
+      #
+      # MEASURED at 11e88bf, which is why it changed: with the loose form, deleting
+      # dependency.Store.Create's assertIssuesShareWorkspace call, or neutering EITHER of
+      # BulkCreateRelations' two workspace proofs, left this lock at 0 findings — 3 mutations,
+      # 3 silent. cross-object-tenancy.yml did not see them either (its alternation carried no
+      # source_id/target_id). The tightened form is `workspace_id` followed by a comparison;
+      # over the whole tree it releases EXACTLY the three dependency statements and nothing
+      # else, and all 22 by-id + 7 other statements the loose form excluded still pass it.
       - pattern-not:
           pattern-either:
             - patterns:
@@ -42,10 +58,10 @@ rules:
                     - pattern: $Q.Exec($CTX, $SQL, ...)
                 - metavariable-regex:
                     metavariable: $SQL
-                    regex: (?s).*workspace_id
+                    regex: (?s).*\bworkspace_id\s*(=|<>|!=|\bIN\b)
             - pattern-either:
-                - pattern: $Q.QueryRow($CTX, "=~/(?s).*workspace_id/", ...)
-                - pattern: $Q.Exec($CTX, "=~/(?s).*workspace_id/", ...)
+                - pattern: $Q.QueryRow($CTX, "=~/(?s).*\bworkspace_id\s*(=|<>|!=|\bIN\b)/", ...)
+                - pattern: $Q.Exec($CTX, "=~/(?s).*\bworkspace_id\s*(=|<>|!=|\bIN\b)/", ...)
       # SAFE when the enclosing function routes the ref through a recognized workspace
       # guard (shared primitive / per-store asserts / public-board gate).
       - pattern-not-inside: |
@@ -76,6 +92,19 @@ rules:
           func $F(...) $R {
             ...
             $G.assertPostOnPublicBoard(...)
+            ...
+          }
+      # dependency.Store.Create's own proof: BOTH issue refs must exist in the caller's
+      # authorized workspace before the relation row is written (store.go
+      # assertIssuesShareWorkspace). It was in NO rule's allowlist, so its two INSERTs were
+      # exempted by the old "mentions workspace_id" clause instead — i.e. for a reason that
+      # had nothing to do with what actually protects them, which is why deleting the call
+      # was silent. Held by TestSEC_CreateRelation_CrossWorkspace_Rejected and
+      # TestCreate_ObjectGraph_RejectsCrossWorkspaceRelation.
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            $G.assertIssuesShareWorkspace(...)
             ...
           }
       # SAFE when the function performs the inline parent-workspace comparison against the
