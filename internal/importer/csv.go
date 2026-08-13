@@ -206,6 +206,18 @@ func (n FieldNote) render(count int) string {
 		return fmt.Sprintf("%d issue(s) arrived on a row wider than the header (%s supplied) — "+
 			"the surplus cell(s) were dropped, and unless they arrived last every column after "+
 			"them read the next column's value", count, n.Value)
+	case n.Via == viaDuplicateInSameImport:
+		// The only line here about a row that COLLIDED WITH ANOTHER ROW OF THE SAME IMPORT rather
+		// than about a value. It names the identifier because that is the only handle an operator
+		// has on the issue involved, and it names the arithmetic because the arithmetic is the
+		// finding: `imported` is a count of rows written and the workspace holds issues. See
+		// duplicate_identifier.go for the whole-population measurement and for why this reports
+		// rather than refuses.
+		return fmt.Sprintf("%d further row(s) of this import named the issue already written as %q — "+
+			"an export that names one issue more than once does not create more issues: each later "+
+			"row overwrote the earlier row's title, description and labels and left its status, "+
+			"priority and dates untouched, so the imported count is higher than the number of "+
+			"issues in Track", count, n.Value)
 	case n.Via == viaColumnNotRead:
 		// The one line here about a column the mapper NEVER LOOKS AT. It is deliberately not
 		// phrased as "unrecognised" — nothing was unrecognised, and nothing failed to parse. It
