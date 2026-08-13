@@ -190,3 +190,60 @@ func TestRetryerWait_DoesNotSleepThroughAShutdown(t *testing.T) {
 			"rate-limit response becomes an immediate retry", elapsed)
 	}
 }
+
+// TestRetryerWait_ReturnsWhenTheShutdownArrivesDuringTheBackoff — THE ARM THE TEST ABOVE CANNOT
+// REACH, AND IT IS THE ONLY ONE PRODUCTION USES.
+//
+// `wait` refuses an already-dead context at the top (`ctx.Err() != nil`) and interrupts a backoff
+// that is ALREADY RUNNING through `case <-ctx.Done()` in its select. The sibling above cancels
+// BEFORE it calls wait, so it returns at the top guard and the select is never entered — MEASURED,
+// not reasoned: deleting `case <-ctx.Done():` from that select leaves the WHOLE importer package
+// green against real Postgres (25.7s), the sibling included.
+//
+// The deleted arm is the production sequence, not an edge case. A rate limit is discovered DURING a
+// fetch: fetchPage reads the 429 / RATELIMITED body, calls wait for up to 30s (the provider picks
+// the number), and only THEN does SIGTERM arrive. A context cancelled before the wait began is the
+// rarer case — it needs the signal to land in the window between the previous attempt returning and
+// this one starting.
+//
+// What it costs if it regresses is the same thing provider_context_test.go's header already prices:
+// three attempts × 30s of uncancellable sleep after the signal, against a 30s default Kubernetes
+// terminationGracePeriod, so SIGKILL lands before Runner.execute reaches its WithoutCancel write and
+// the job row strands in `running` with finished_at NULL — the exact row
+// runner_shutdown_terminal_state_test.go exists to prevent.
+//
+// ⚠ THE POSITIVE CONTROL IS IN THE TEST, on the same argument as its sibling and against a different
+// cheat: an implementation that returned the moment it was called would satisfy the deadline half
+// trivially. So the second assertion requires that the wait was genuinely blocked until the cancel
+// landed, which is what makes "returned early" mean "was interrupted" rather than "never waited".
+func TestRetryerWait_ReturnsWhenTheShutdownArrivesDuringTheBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// The signal lands while wait is provably inside its backoff, not before it. time.Sleep is
+	// guaranteed to sleep AT LEAST its argument, so the cancel cannot precede the 50ms mark and the
+	// floor asserted below cannot be met by a wait that returned at once.
+	const cancelAfter = 50 * time.Millisecond
+	go func() {
+		time.Sleep(cancelAfter)
+		cancel()
+	}()
+
+	// Ten seconds, for the reason the sibling gives: a regression makes this test WAIT OUT the
+	// delay, so the figure is what a broken build costs CI. Under `maxRateLimitBackoff` (30s) it is
+	// passed through uncapped.
+	start := time.Now()
+	defaultRetryer().wait(ctx, 10*time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Fatalf("a rate-limit backoff already in flight when the process was told to shut down ran "+
+			"for %v — the cancellation arrived DURING the wait, which is how a rate limit is actually "+
+			"met, and nothing interrupted it", elapsed)
+	}
+	if elapsed < cancelAfter {
+		t.Fatalf("wait returned after %v, before the cancel at %v could have been observed — it did "+
+			"not wait at all, so every rate-limit response becomes an immediate hot retry and this "+
+			"test's deadline above proves nothing", elapsed, cancelAfter)
+	}
+}

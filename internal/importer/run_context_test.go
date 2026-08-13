@@ -34,12 +34,15 @@ package importer
 // mid-import would record a truncated import as a complete one, and nothing would ever say
 // otherwise. A stop must be reported as a stop.
 //
-// ⚠ THE RESIDUAL IS NAMED RATHER THAN QUIETLY LEFT: the two API sources call fetchPage with
-// context.Background() (linear.go, jira.go), so a fetch ALREADY IN FLIGHT when the signal arrives
-// still runs to its own 20s timeout, and retryer.wait is a bare time.Sleep of up to 30s per
-// rate-limited attempt. This file's fix is at the pipeline, which is the one place that governs
-// every source present and future; the per-source context is a separate change with 27 call sites
-// and is written up in the queue.
+// ⚠ THE RESIDUAL IS NAMED RATHER THAN QUIETLY LEFT — AND IT HAS SINCE BEEN CLOSED, WHICH IS
+// RECORDED HERE RATHER THAN LEFT TO READ AS LIVE. As written, this file's residual was: the two API
+// sources call fetchPage with context.Background() (linear.go, jira.go), so a fetch ALREADY IN
+// FLIGHT when the signal arrives still runs to its own 20s timeout, and retryer.wait is a bare
+// time.Sleep of up to 30s per rate-limited attempt. This file's fix was at the pipeline, which is
+// the one place that governs every source present and future; the per-source context was a separate
+// change with 27 call sites. That change LANDED — see provider_context_test.go, which abandons an
+// in-flight fetch on both sources and interrupts the backoff. The paragraph is kept, in the past
+// tense, because the measurement it records is what the fix was argued from.
 
 import (
 	"context"

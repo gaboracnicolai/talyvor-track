@@ -126,10 +126,16 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 	// ctx CHECK IN run()'s ROW LOOP. Taking a context is not honouring one: run handed ctx to
 	// the STORE and consulted it nowhere, so an import did NOT stop — it pulled every remaining
 	// row and, on the *_api transports, fetched every remaining PAGE from the provider.
-	// MEASURED at 977f926; see run_context_test.go, which also names what is STILL not
-	// cancellable (both API sources fetch on context.Background(), and retryer.wait is a bare
-	// time.Sleep), so a fetch already in flight when the signal arrives still runs to its own
-	// timeout.
+	// MEASURED at 977f926; see run_context_test.go.
+	//
+	// ⚠ THE RESIDUAL THAT USED TO BE NAMED HERE IS CLOSED, AND SAYING SO IS THE POINT — this
+	// paragraph read "what is STILL not cancellable (both API sources fetch on
+	// context.Background(), and retryer.wait is a bare time.Sleep), so a fetch already in flight
+	// when the signal arrives still runs to its own timeout". All three clauses are now FALSE:
+	// both sources carry the import's ctx on the struct and fetch through it (`context.Background()`
+	// has ZERO production occurrences in this package), retryer.wait selects on ctx.Done(), and an
+	// in-flight fetch is abandoned — provider_context_test.go asserts each. A live comment saying a
+	// shutdown path is broken sends the next session to fix what is already fixed.
 	//
 	// ⚠ NO DEADLINE IS INVENTED HERE. Whether this write should carry its own timeout (and what
 	// it should be) is an operational judgement with a number in it; pgx's own connect/statement
