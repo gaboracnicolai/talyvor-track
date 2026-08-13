@@ -21,9 +21,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// maxWindowDays caps every report at 365 days. Wider windows are
-// rare in practice and would push the cost of the full-scan queries
-// above what the indexes can absorb.
+// maxWindowDays caps every report that takes a `days` WINDOW at 365 days. Wider windows are
+// rare in practice and would push the cost of the full-scan queries above what the indexes can
+// absorb.
+//
+// ⚠ "EVERY REPORT" IS WHAT THIS SAID AND IT WAS NOT TRUE. GetBurndown takes no `days` argument and
+// never calls clampDays: its window is the cycle's own start_date/end_date, which nothing bounds
+// (cycle.Store.Create and Update check only that end is after start). A 365,000-day cycle renders
+// 106,752 points and this constant does not touch it. Whether a cycle's span should be capped is a
+// product decision written up in the queue; the sentence is corrected here so the file stops
+// claiming a cap it does not apply.
 const (
 	maxWindowDays     = 365
 	defaultWindowDays = 30
@@ -46,6 +53,39 @@ func New(pool *pgxpool.Pool) *Engine {
 }
 
 func newEngine(db pgxDB) *Engine { return &Engine{pool: db} }
+
+// endOfDay is the burndown day boundary: 23:59:59 in the day's OWN location, which is the location
+// Postgres handed back with the cycle's start_date. Extracted from the loop it used to sit in so
+// the loop and the query that feeds it cannot drift apart on what "that day" means.
+func endOfDay(day time.Time) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())
+}
+
+// completionsThrough returns the ordered completion instants of the cycle's issues up to and
+// including `through`. It is the single read that replaced the per-day COUNT(*) — see GetBurndown.
+//
+// ⚠ THE `<= through` BOUND IS AN EARLY-OUT, NOT A CORRECTNESS TERM: rows completed after the last
+// day of the window are excluded by the walk anyway. It is here so a cycle whose issues kept being
+// completed long after it ended does not ship rows nobody counts.
+func completionsThrough(ctx context.Context, db pgxDB, cycleID string, through time.Time) ([]time.Time, error) {
+	rows, err := db.Query(ctx,
+		`SELECT completed_at FROM issues
+        WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at <= $2
+        ORDER BY completed_at`, cycleID, through)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var t time.Time
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
 
 func clampDays(days int) int {
 	if days <= 0 {
@@ -160,18 +200,37 @@ func (e *Engine) GetBurndown(ctx context.Context, cycleID, workspaceID string) (
 		StartDate: start, EndDate: end,
 		Points: make([]BurndownPoint, 0, days),
 	}
+
+	// ONE QUERY FOR THE WHOLE WINDOW — IT USED TO BE ONE PER CALENDAR DAY, AND `days` IS SET BY
+	// WHOEVER CREATED THE CYCLE. cycle.Store.Create and Update validate only that end_date is after
+	// start_date; there is no span bound anywhere, and `days` saturates at 106,752 only because
+	// time.Duration is int64 nanoseconds. MEASURED at 653081eb against real Postgres with an EMPTY
+	// issues table: a 3,650-day cycle cost 3,652 statements against a 36-day cycle's 38, and a
+	// 365,000-day cycle cost 106,754 statements and 11.2 seconds in one HTTP request — on a server
+	// that sets ReadHeaderTimeout and no WriteTimeout, from a route the product calls.
+	//
+	// The per-day predicate was `completed_at <= eod_i` with eod_i strictly increasing, i.e. a
+	// CUMULATIVE count. So the completion instants are read once, ordered, and walked alongside the
+	// days below. THE BOUNDARIES ARE STILL COMPUTED IN Go, EXACTLY AS BEFORE — no date arithmetic
+	// moves into SQL, so nothing is reinterpreted in a timezone the old code did not use, and
+	// `!ct.After(eod)` is `completed_at <= eod` on the same two instants.
+	//
+	// ⚠ WHAT IS NOT FIXED HERE: the report still RENDERS one point per day, so a 365,000-day cycle
+	// still serialises 106,752 points. Bounding a cycle's span is a number on a product surface and
+	// is written up in the queue rather than chosen here.
+	completions, err := completionsThrough(ctx, e.pool, cycleID, endOfDay(start.AddDate(0, 0, days-1)))
+	if err != nil {
+		return nil, fmt.Errorf("analytics: burndown completions: %w", err)
+	}
+
 	now := time.Now().UTC()
 	currentRemaining := total
+	completed := 0
 	for i := 0; i < days; i++ {
 		day := start.AddDate(0, 0, i)
-		eod := time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())
-		var completed int
-		if err := e.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM issues
-            WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at <= $2`,
-			cycleID, eod,
-		).Scan(&completed); err != nil {
-			return nil, fmt.Errorf("analytics: burndown day %s: %w", day.Format("2006-01-02"), err)
+		eod := endOfDay(day)
+		for completed < len(completions) && !completions[completed].After(eod) {
+			completed++
 		}
 		ideal := total
 		if days > 1 {
