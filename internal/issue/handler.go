@@ -11,7 +11,6 @@ import (
 
 	"github.com/talyvor/track/internal/authz"
 	"github.com/talyvor/track/internal/httpx"
-	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -357,7 +356,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
 		return
 	}
-	metrics.IssuesUpdated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
+	// track_issues_updated_total is incremented by the STORE (issue.countUpdated), not here. This
+	// route was the ONLY writer of that counter while FOURTEEN other production paths updated
+	// issues without it — twelve other Store.Update callers, the bulk route below, and the
+	// importer's upsert-UPDATE branch. See countUpdated's header for the census and the
+	// measurement. Counting here as well would double every API-updated issue.
 	if h.notifier != nil {
 		actorID, ok := authz.MemberID(r.Context())
 		if !ok {

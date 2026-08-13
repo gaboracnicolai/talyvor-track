@@ -339,6 +339,48 @@ func countCreated(out *model.Issue, err error) (*model.Issue, error) {
 	return out, nil
 }
 
+// countUpdated increments track_issues_updated_total for an issue that was actually overwritten,
+// and is the ONLY place in this repository that may. It is countCreated's twin, and it exists for
+// the same reason one merge later: the increment sat at internal/issue/handler.go's PATCH
+// /v1/issues/{id} route, and FIFTEEN production paths update an issue — that route, TWELVE other
+// Store.Update callers (internal/mcp/server.go ×3, internal/automation/engine.go ×7,
+// internal/automation/github.go ×1, internal/ai/handler.go ×1), the bulk route (BulkUpdate, which
+// powers kanban drag-and-drop), and UpsertByIdentifier's conflict arm (every RE-import of a keyed
+// export). FOURTEEN of the fifteen moved no counter. MEASURED through the shipped async runner on
+// real Postgres before the fix: a re-import reporting `succeeded imported=2` against a table that
+// gained NO rows — two overwrites — and the counter at ZERO
+// (internal/importer/updated_metric_job_test.go).
+//
+// ⚠ THE LABEL IS THE RESULTING STATUS, which is what the Help says ("labelled by ... new status")
+// and what the handler that shipped for a year did. Held by TestStore_Update_CountsTheIssueItUpdated,
+// which asserts the OLD status series stays put.
+//
+// ⚠ AN UPDATE THAT WROTE NOTHING IS NOT AN UPDATE, and here the shape is commoner than a failure:
+// Update returns the row via a plain SELECT when the caller's field map survives `updatableFields`
+// empty, and BulkUpdate's per-item statement matches 0 rows when the id belongs to another
+// workspace. Both must move nothing, and both have their own must-stay-zero test — an overcount on
+// this metric looks like work, which is worse than the zero it replaces.
+//
+// ⚠ NOTHING OUTSIDE THIS FILE MAY INCREMENT IT — a second site is a DOUBLE COUNT, not a
+// belt-and-braces. metrics_reach_test.go enumerates the references from source and fails on a
+// second one, in either direction.
+func countUpdated(out *model.Issue, err error) (*model.Issue, error) {
+	if err != nil || out == nil {
+		return out, err
+	}
+	countUpdatedLabels(out.WorkspaceID, out.TeamID, string(out.Status))
+	return out, nil
+}
+
+// countUpdatedLabels is THE increment: the one line in the production tree that touches the
+// IssuesUpdated collector. BulkUpdate cannot use countUpdated above it — it never materialises a
+// model.Issue, only the three labels — and giving it its own `.Inc()` would put two increment sites
+// in this file, which double-counts exactly as surely as two sites in two files. The reach guard
+// (metrics_reach_test.go) counts the references, so the shape is enforced rather than intended.
+func countUpdatedLabels(workspaceID, teamID, status string) {
+	metrics.IssuesUpdated.WithLabelValues(workspaceID, teamID, status).Inc()
+}
+
 // identifierScanBound caps how far past MAX(number)+1 the allocator will look for a number whose derived
 // identifier is free. Only imported provider keys can occupy those identifiers, so the gap is the size of
 // the imported key range that overlaps this team's numbering — large in theory, bounded here so a pathological
@@ -594,6 +636,11 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 	// value the importer reads to decide whether a row overwrote something.
 	if inserted {
 		_, _ = countCreated(out, nil)
+	} else {
+		// The conflict arm overwrote a row that already existed. `inserted` is the statement's own
+		// answer, so the two counters can never both claim one statement — asserted in both
+		// directions by TestStore_UpsertByIdentifier_CountsAnUpdateAndNotAnInsert.
+		_, _ = countUpdated(out, nil)
 	}
 	return out, inserted, nil
 }
@@ -1055,7 +1102,11 @@ func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return i, err
+	// ⚠ AFTER the ErrNoRows mapping, not before it: a by-id update scoped to another workspace
+	// matches no row, and counting the caller's workspace for a row it does not own would be an
+	// overcount AND a cross-tenant claim. The two early returns above (an empty field map, a field
+	// map with nothing updatable) ran no statement at all and are not counted for the same reason.
+	return countUpdated(i, err)
 }
 
 // Delete is a soft delete: the row stays but the status becomes
@@ -1361,6 +1412,11 @@ type BulkUpdateItem struct {
 	SortOrder float64 `json:"sort_order,omitempty"`
 }
 
+// bulkCounted is one row BulkUpdate's transaction has written but not yet committed: the two
+// track_issues_updated_total labels the returned count cannot carry. Held rather than counted so a
+// batch that rolls back records nothing.
+type bulkCounted struct{ teamID, status string }
+
 // BulkUpdate applies many status / sort_order patches in a single
 // transaction. Powers the kanban drag-and-drop: when a card moves
 // columns, the moved card AND every card whose sort_order shifted
@@ -1392,6 +1448,8 @@ func (s *Store) BulkUpdate(ctx context.Context, workspaceID string, updates []Bu
 
 	updated := 0
 	now := time.Now().UTC()
+	// The labels of every row this transaction wrote, held until Commit — see the loop below.
+	var counted []bulkCounted
 
 	for _, u := range updates {
 		var (
@@ -1440,16 +1498,41 @@ func (s *Store) BulkUpdate(ctx context.Context, workspaceID string, updates []Bu
 		args = append(args, workspaceID)
 
 		// ITEM A: scope every by-id write to the caller's workspace — a foreign id matches 0 rows.
-		sql := fmt.Sprintf(`UPDATE issues SET %s WHERE id = $%d AND workspace_id = $%d`, strings.Join(set, ", "), idArgN, argN)
-		tag, err := tx.Exec(ctx, sql, args...)
-		if err != nil {
+		//
+		// ⚠ RETURNING, AND tx.QueryRow RATHER THAN tx.Exec, EXIST FOR THE COUNTER AND CHANGE NO
+		// OTHER BEHAVIOUR. The per-item WHERE is `id = $n AND workspace_id = $n`, and id is the
+		// primary key, so every statement here touches AT MOST ONE ROW: pgx.ErrNoRows and
+		// RowsAffected()==0 are the same fact, and one returned row and RowsAffected()==1 are the
+		// same fact. What the tag could NOT give is the row's team_id and its resulting status,
+		// which are two of track_issues_updated_total's three labels — the metric cannot be
+		// recorded from a count, and reading the rows back in a second query would be a second
+		// snapshot of a row another transaction may have moved.
+		sql := fmt.Sprintf(
+			`UPDATE issues SET %s WHERE id = $%d AND workspace_id = $%d RETURNING team_id, status`,
+			strings.Join(set, ", "), idArgN, argN,
+		)
+		var teamID, status string
+		switch err := tx.QueryRow(ctx, sql, args...).Scan(&teamID, &status); {
+		case errors.Is(err, pgx.ErrNoRows):
+			// A foreign or unknown id: 0 rows, excluded from the count BY DESIGN and not an error.
+			continue
+		case err != nil:
 			return 0, fmt.Errorf("issue: bulk update %s: %w", u.ID, err)
 		}
-		updated += int(tag.RowsAffected())
+		updated++
+		counted = append(counted, bulkCounted{teamID: teamID, status: status})
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("issue: bulk update commit: %w", err)
+	}
+	// ⚠⚠ AFTER Commit, NEVER INSIDE THE LOOP. This is the one update door that can write and then
+	// un-write: a mid-batch statement error returns before Commit and the deferred Rollback undoes
+	// every row the loop had already updated, so a counter incremented per statement would record
+	// edits the database threw away — and a Prometheus counter cannot be decremented. Held by
+	// TestStore_BulkUpdate_ABatchThatRolledBackCountsNothing, which drives a real mid-batch failure.
+	for _, c := range counted {
+		countUpdatedLabels(workspaceID, c.teamID, c.status)
 	}
 	return updated, nil
 }
