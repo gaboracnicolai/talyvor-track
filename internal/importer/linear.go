@@ -407,7 +407,12 @@ type linearSource struct {
 	// carry is a guarantee that a non-final page has ROWS: an empty `nodes` beside
 	// hasNextPage:true is legal, and treating it as the end abandoned every later page while the
 	// job recorded `succeeded imported=0`. See api_pagination_termination_test.go (3).
-	exhausted  bool
+	exhausted bool
+	// stalled is the twin of jiraSource.stalled, for the same reason and with the same shape: a page
+	// that carried rows and handed back the endCursor it was given. Flag rather than immediate
+	// return so the page's own rows are yielded first — exactly what the empty-endCursor branch
+	// below already does, and for the same reason.
+	stalled    bool
 	emptyPages int
 	started    bool
 	done       bool
@@ -441,6 +446,16 @@ func (s *linearSource) Next() (SourceRow, bool) {
 				"linear: fetch page: pageInfo reports hasNextPage with an empty endCursor — there is no cursor to " +
 					"request the next page with, so this import is INCOMPLETE")}, true
 		}
+		// A cursor that is PRESENT but unchanged — the twin of the branch above, and of jiraSource's.
+		// Ordered after it so the more specific "there is no cursor at all" keeps its own sentence.
+		// MEASURED at 403e32b6: 40 rows in 40 HTTP calls and rising, all the same issue, no error row.
+		if s.started && s.stalled {
+			s.done = true
+			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf(
+				"linear: fetch page: no progress — the provider returned the same endCursor (%q) it was given "+
+					"while pageInfo reported another page, so the import stopped rather than re-request it for "+
+					"ever; this import is INCOMPLETE", s.cursor)}, true
+		}
 		prevCursor := s.cursor
 		page, err := s.client.fetchPage(s.ctx, s.cursor)
 		if err != nil {
@@ -449,6 +464,20 @@ func (s *linearSource) Next() (SourceRow, bool) {
 		}
 		s.started, s.buf, s.pos, s.cursor = true, page.issues, 0, page.cursor
 		s.exhausted = !page.hasNext
+		// Recorded BEFORE the break so it survives the rows being yielded. The empty-cursor case is
+		// excluded here because the branch above owns it and says something more precise.
+		//
+		// ⚠ THE EXCLUSION IS BELT-AND-BRACES, AND THE MEASUREMENT SAYS SO. Dropping it (control C5)
+		// is green, because the empty-cursor branch above answers first; swapping the two branches
+		// (C6) is green, because this term makes them mutually exclusive. Only removing BOTH (C7)
+		// can route a no-cursor page into this report — and C7 IS GREEN TOO, which is a fact about
+		// the tests rather than about the code: the sentence below names `endCursor`, and
+		// TestLinearSource_HasNextPageWithNoCursorIsReportedNotSwallowed discriminates on exactly
+		// that word, so it cannot tell the two refusals apart. Neither message is wrong about its
+		// case and no caller branches on which one it got, so this is recorded rather than repaired.
+		if !s.exhausted && page.cursor != "" && page.cursor == prevCursor {
+			s.stalled = true
+		}
 		if len(page.issues) > 0 {
 			s.emptyPages = 0
 			break

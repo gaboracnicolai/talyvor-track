@@ -385,7 +385,18 @@ type jiraSource struct {
 	// more; the next fetch carries no token, which the client sends as "start from the beginning",
 	// so the import re-reads the whole project for ever. MEASURED at be7b2cf: 3 issues came back as
 	// 12 rows in 12 HTTP calls and rising. See api_pagination_termination_test.go (1).
-	exhausted  bool
+	exhausted bool
+	// stalled is "the last page handed back the token it was given while reporting further pages".
+	// It is a FLAG rather than an immediate return because the page that revealed it CARRIED ROWS,
+	// and those rows are real whatever the token says — the same reasoning linearSource applies to a
+	// page delivered with no endCursor. So the rows are yielded first and the report follows, on the
+	// next entry to the loop, BEFORE any further request.
+	//
+	// ⚠ THE EMPTY-PAGE CASE HAS ITS OWN BRANCH BELOW AND KEEPS IT. That one can answer immediately
+	// (there is nothing to yield) and it says the page was EMPTY, which points an operator at the
+	// permission filtering maxConsecutiveEmptyPages is written around. Two provider behaviours, two
+	// sentences; this flag covers the one that had neither.
+	stalled    bool
 	emptyPages int
 	started    bool
 	done       bool
@@ -410,6 +421,20 @@ func (s *jiraSource) Next() (SourceRow, bool) {
 			s.done = true
 			return SourceRow{}, false // clean exhaustion
 		}
+		// THE THIRD WAY PAGINATION FAILS TO TERMINATE, and the one the check below could never see:
+		// it sits under `if len(page.issues) > 0 { break }`, so a provider that returns ROWS while
+		// repeating the cursor never reached it. MEASURED at 403e32b6 on the shipped source — one
+		// page served unconditionally gave 40 rows in 40 HTTP calls and rising, all the same issue,
+		// with no error row — and through run(), whose only other exit is ctx.Err(), 48,116 writes
+		// and 48,117 provider calls in 2 seconds for one issue that exists once. See
+		// api_pagination_stall_test.go.
+		if s.started && s.stalled {
+			s.done = true
+			return SourceRow{RowNum: s.rowNum + 1, Err: fmt.Errorf(
+				"jira: fetch page: no progress — the provider returned the same nextPageToken (%q) it was given "+
+					"while reporting further pages, so the import stopped rather than re-request it for ever; "+
+					"this import is INCOMPLETE", s.nextToken)}, true
+		}
 		prevToken := s.nextToken
 		page, err := s.client.fetchPage(s.ctx, s.nextToken)
 		if err != nil {
@@ -418,6 +443,19 @@ func (s *jiraSource) Next() (SourceRow, bool) {
 		}
 		s.started, s.buf, s.pos, s.nextToken = true, page.issues, 0, page.nextToken
 		s.exhausted = page.isLast || page.nextToken == ""
+		// Recorded BEFORE the break so it survives the rows being yielded. A non-empty token equal to
+		// the one just sent cannot advance: the next request is byte-for-byte the one already made.
+		//
+		// ⚠ BOTH GUARD TERMS ARE REDUNDANT TODAY AND ARE KEPT ANYWAY — MEASURED, NOT ASSUMED, so the
+		// next reader does not have to take them on trust. Dropping `!s.exhausted` (control C4) and
+		// dropping `page.nextToken != ""` (C5) each leave ALL SIX test columns green, because the
+		// exhausted branch at the top of the loop already answers before `stalled` is ever read and
+		// an empty token already implies exhausted. They are belt-and-braces against a future
+		// reordering of branches forty lines apart, not load-bearing logic — and C4/C5 are the
+		// controls that will say so again if that ever stops being true.
+		if !s.exhausted && page.nextToken != "" && page.nextToken == prevToken {
+			s.stalled = true
+		}
 		if len(page.issues) > 0 {
 			s.emptyPages = 0
 			break
