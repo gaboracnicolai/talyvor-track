@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/talyvor/track/internal/metrics"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -294,13 +295,48 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
             COALESCE($20::timestamptz, NOW()), COALESCE($21::timestamptz, NOW()))
     RETURNING ` + issueColumns
-	return scanIssue(s.pool.QueryRow(ctx, insertSQL,
+	return countCreated(scanIssue(s.pool.QueryRow(ctx, insertSQL,
 		issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.Number, issue.Identifier,
 		issue.Title, issue.Description, string(issue.Status), int(issue.Priority),
 		issue.AssigneeID, issue.CreatorID, issue.CycleID, issue.ParentID, issue.MilestoneID,
 		issue.DueDate, completedAt, issue.LensFeature, issue.Labels, issue.SortOrder, createdAt,
 		updatedAt,
-	))
+	)))
+}
+
+// countCreated increments track_issues_created_total for an issue that was actually written, and is
+// the ONLY place in the repository that does. It takes (issue, err) so it can wrap a return
+// expression directly — a counter incremented on a line of its own beside a write is a counter the
+// next early return skips.
+//
+// ⚠⚠ IT LIVES IN THE STORE BECAUSE IT USED TO LIVE AT ONE ROUTE. The increment was in
+// internal/issue/handler.go's POST /v1/issues, and this repository has FIVE production paths that
+// create an issue: that handler, the importer's upsert branch and its Create branch
+// (internal/importer/source.go), the MCP tool surface (internal/mcp/server.go) and the automation
+// engine (internal/automation/engine.go). FOUR of the five moved no counter — including the entire
+// Jira/Linear import, which is the path that writes thousands of rows at a time. MEASURED through
+// the shipped async runner on real Postgres: a jira_csv job reporting `succeeded imported=2`, two
+// rows in the issues table, and the counter at ZERO (created_metric_job_test.go).
+//
+// ⚠ A WRITE THAT FAILED CREATED NOTHING, and counting it would replace an undercount with an
+// overcount on the same metric. Held by TestStore_AFailedCreateCountsNothing.
+//
+// ⚠⚠ THE TWO CONDITIONS ARE NOT TWO MECHANISMS AND THAT IS MEASURED, NOT ASSUMED. `out == nil` is
+// the one that fires: on every reachable failure scanIssue returns (nil, err), so control C4b —
+// deleting `err != nil` and leaving the nil check — is NOT CAUGHT by any test in this repository,
+// and the harness reports it that way rather than omitting it. It is kept because the pair is the
+// contract callers actually have, and because deleting BOTH is a nil dereference in a write path
+// (control C4a, caught by a panic). Anyone reading this should know only one branch is load-bearing.
+//
+// ⚠ NOTHING OUTSIDE THIS FILE MAY INCREMENT IT — a second site is a DOUBLE COUNT, not a
+// belt-and-braces. metrics_reach_test.go enumerates the references from source and fails on a
+// second one, in either direction.
+func countCreated(out *model.Issue, err error) (*model.Issue, error) {
+	if err != nil || out == nil {
+		return out, err
+	}
+	metrics.IssuesCreated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
+	return out, nil
 }
 
 // identifierScanBound caps how far past MAX(number)+1 the allocator will look for a number whose derived
@@ -552,6 +588,12 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 			return nil, false, s.diagnoseUpsertRefusal(ctx, issue.WorkspaceID, issue.TeamID, issue.Identifier)
 		}
 		return nil, false, err
+	}
+	// An upsert that INSERTED created an issue; one that UPDATED did not. `inserted` is the
+	// statement's own answer (`RETURNING (xmax = 0)`), not a second opinion about it — the same
+	// value the importer reads to decide whether a row overwrote something.
+	if inserted {
+		_, _ = countCreated(out, nil)
 	}
 	return out, inserted, nil
 }
