@@ -191,16 +191,31 @@ const warningSummaryPrefix = "+ "
 // rows and were absent on others gets both truths in one report instead of one averaged sentence.
 // Sorted because an unordered report cannot be diffed between two runs of the same import.
 func renderWarnings(degraded map[FieldNote]int) []string {
-	// Group by everything EXCEPT the value, so "this kind of finding" is one group however many
+	// Group by everything EXCEPT the values, so "this kind of finding" is one group however many
 	// different values arrived under it. The bound is applied per group: a status column full of
 	// free text must not crowd a real date finding out of the report, and vice versa.
+	//
+	// ⚠⚠ ViaValue IS A VALUE AND WAS IN THIS KEY, WHICH IS THE WHOLE OF THE BOUND'S ONE HOLE. It is
+	// a provider cell copied verbatim — jiraCSVStatusCategory passes the uploaded CSV's "Status
+	// Category" text straight through — so a distinct cell per row was a distinct KIND per row, each
+	// holding one note, each under the bound, each rendering its own line. MEASURED through the
+	// shipped jiraRowMapper: 5,000 rows ⇒ 5,002 lines with that column, 13 without it.
+	// See warning_kind_key_test.go for the census and warning_kind_key_job_test.go for the
+	// cardinality it put in a TEXT[].
+	//
+	// ⚠ IT IS STILL RENDERED, ONLY NOT GROUPED ON. The exemplars name their category exactly as
+	// before; what changes is that ten of them stand for the rest instead of all of them being
+	// listed. Nothing merges that carried a distinct MEANING: for a RESOLVED note the category is
+	// what decided Mapped, and Mapped is still in the key, so `To Do` and `In Progress` remain two
+	// findings with their own counts. For an UNRESOLVED one the category decided nothing — which is
+	// precisely why it must not mint a kind.
 	type kind struct {
-		Field, Mapped, Via, ViaValue string
-		ViaResolved                  bool
+		Field, Mapped, Via string
+		ViaResolved        bool
 	}
 	groups := map[kind][]FieldNote{}
 	for n := range degraded {
-		k := kind{n.Field, n.Mapped, n.Via, n.ViaValue, n.ViaResolved}
+		k := kind{n.Field, n.Mapped, n.Via, n.ViaResolved}
 		groups[k] = append(groups[k], n)
 	}
 
@@ -209,7 +224,16 @@ func renderWarnings(degraded map[FieldNote]int) []string {
 		// Sorted so the exemplars are the SAME ones on every run of the same import — the bound
 		// picks a subset, and a subset chosen by map iteration order would make two runs of one
 		// import undiffable, which is the property this function sorts for in the first place.
-		sort.Slice(notes, func(i, j int) bool { return notes[i].Value < notes[j].Value })
+		//
+		// ⚠ THE TIE-BREAK IS LOAD-BEARING NOW THAT ViaValue IS OUT OF THE KEY. Two notes can share
+		// a Value and differ only in ViaValue (one unrecognised status under many unplaceable
+		// categories is the reachable case), and Value alone would order them by map iteration.
+		sort.Slice(notes, func(i, j int) bool {
+			if notes[i].Value != notes[j].Value {
+				return notes[i].Value < notes[j].Value
+			}
+			return notes[i].ViaValue < notes[j].ViaValue
+		})
 
 		shown := notes
 		if len(notes) > maxWarningExemplars {
@@ -224,8 +248,14 @@ func renderWarnings(degraded map[FieldNote]int) []string {
 				restValues++
 				restIssues += degraded[n]
 			}
+			// ⚠ "finding(s)", NOT "value(s)" — THE NUMBER IS THE COUNT OF UNLISTED NOTES AND THAT IS
+			// NO LONGER THE SAME AS A COUNT OF DISTINCT FIELD VALUES. A group may now vary along
+			// Value or ViaValue or both, so one unrecognised status under 3,000 unplaceable
+			// categories would have this line claim 2,990 distinct STATUS VALUES where there is
+			// exactly one. The count is unchanged and every other clause is unchanged; the noun is
+			// what the count has always actually been.
 			out = append(out, fmt.Sprintf(
-				"%s%d further distinct %s value(s) across %d issue(s) not listed individually (%d shown above)",
+				"%s%d further distinct %s finding(s) across %d issue(s) not listed individually (%d shown above)",
 				warningSummaryPrefix, restValues, notes[0].Field, restIssues, len(shown)))
 		}
 	}
