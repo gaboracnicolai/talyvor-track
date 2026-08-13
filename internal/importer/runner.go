@@ -143,13 +143,13 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 	finishCtx := context.WithoutCancel(ctx)
 	src, err := r.sourceFor(ctx, job)
 	if err != nil {
-		_ = r.jobs.Finish(finishCtx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
+		r.finish(finishCtx, job, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
 	// workspace_id + team_id are read from the JOB ROW — the only workspace this job can write into.
 	out, err := r.imp.run(ctx, job.WorkspaceID, job.TeamID, src)
 	if err != nil {
-		_ = r.jobs.Finish(finishCtx, job.ID, job.WorkspaceID, JobFailed, 0, 0, 0, err.Error(), nil)
+		r.finish(finishCtx, job, JobFailed, 0, 0, 0, err.Error(), nil)
 		return
 	}
 	summary := summarise(out)
@@ -163,7 +163,45 @@ func (r *Runner) execute(ctx context.Context, job *Job) {
 	// out.Warnings = rows that DID import, degraded. They do NOT change terminalStatus: the import
 	// succeeded, and calling it partial would conflate "some rows were rejected" with "every row
 	// landed but some fields could not be mapped". The distinction is the point of the column.
-	_ = r.jobs.Finish(finishCtx, job.ID, job.WorkspaceID, terminalStatus(out), out.Imported, out.Refused, out.Skipped, summary, out.Warnings)
+	r.finish(finishCtx, job, terminalStatus(out), out.Imported, out.Refused, out.Skipped, summary, out.Warnings)
+}
+
+// finish records the job's terminal state and REPORTS a failure to record it.
+//
+// ⚠⚠ THE DISCARD THIS REPLACES IS NAMED IN execute's OWN COMMENT ABOVE — "its error was discarded,
+// and ClaimNext selects `status = 'pending'` only" — as half of the reason a shutdown mid-job left
+// the row `running` for ever. That paragraph fixed the CAUSE it had measured (the cancellable ctx)
+// and left the discard, so every OTHER way this UPDATE can fail — a statement timeout, a dropped
+// connection, a refusal from the database — still produces the same outcome, and produces it in
+// total silence. MEASURED at 5057c3d on real Postgres with the terminal UPDATE refused: two issues
+// written, job row `running` with finished_at NULL, second drain claims nothing, RunOnce itself
+// returns (true, nil), and the process log is ZERO BYTES. drain() logs when CLAIMING a job fails,
+// so the cheap half of this runner was observable and the consequential half was not.
+//
+// ⚠ THE LINE CARRIES THE COUNTS BECAUSE IT REPLACES THE ROW NOBODY COULD WRITE. This is the only
+// remaining record that the import ran at all; "finish failed" alone tells an operator that
+// something happened and not what happened, and the rows are already in the database.
+//
+// ⚠ WHAT THIS DELIBERATELY DOES NOT DO: recover the job. The row still stays `running` and
+// ClaimNext still selects `status = 'pending'` only. Re-claiming it needs a lease age — a number
+// saying how long a legitimately-long import may run before it is presumed dead — which is a
+// judgement, not a fix, and is written up in the queue rather than guessed at here. Retrying the
+// UPDATE in place would be the same guess with a different number on it.
+func (r *Runner) finish(ctx context.Context, job *Job, status string, imported, skipped, failed int, errSummary string, warnings []string) {
+	if err := r.jobs.Finish(ctx, job.ID, job.WorkspaceID, status, imported, skipped, failed, errSummary, warnings); err != nil {
+		// The attribute names are the JOB ROW's own columns, so what is logged reads as what
+		// /v1/import/jobs/{id} would have answered.
+		slog.Error("importer: recording an import job's terminal state failed — the row stays 'running', no later drain re-claims it, and this line is the only record that the import ran",
+			slog.String("job_id", job.ID),
+			slog.String("workspace_id", job.WorkspaceID),
+			slog.String("source_type", job.SourceType),
+			slog.String("intended_status", status),
+			slog.Int("imported", imported),
+			slog.Int("skipped", skipped),
+			slog.Int("failed", failed),
+			slog.String("error_summary", errSummary),
+			slog.String("err", err.Error()))
+	}
 }
 
 // sourceFor dispatches on source_type → (IssueSource). A '*_csv' job reads its payload from the cold table
