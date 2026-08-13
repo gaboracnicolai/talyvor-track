@@ -272,6 +272,14 @@ func (s *Store) GetProgress(ctx context.Context, cycleID, workspaceID string) (*
 	return p, nil
 }
 
+// endOfDay is the burndown day boundary: 23:59:59 in the day's OWN location, which is the location
+// Postgres handed back with the cycle's start_date. Extracted from the loop it used to sit in so
+// the loop and the query that feeds it cannot drift apart on what "that day" means. The analytics
+// engine has the same helper for its own copy of this report.
+func endOfDay(day time.Time) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())
+}
+
 type BurndownPoint struct {
 	Date      time.Time `json:"date"`
 	Remaining int       `json:"remaining"`
@@ -302,18 +310,50 @@ func (s *Store) GetBurndown(ctx context.Context, cycleID, workspaceID string) ([
 		days = 1
 	}
 
+	// ONE QUERY FOR THE WHOLE WINDOW — IT USED TO BE ONE PER CALENDAR DAY, AND `days` COMES FROM
+	// THE CYCLE ROW, WHICH Create AND Update BOUND ONLY BY "end after start". MEASURED at 653081eb
+	// against real Postgres, issues table EMPTY: a 3,650-day cycle cost 3,654 statements against a
+	// 36-day cycle's 40, and a 365,000-day cycle cost 106,756 statements and 11.2 seconds inside one
+	// `GET /cycles/{id}/burndown`. analytics.Engine.GetBurndown is the OTHER implementation of this
+	// report and had the identical loop; both are fixed, and the twin says so too.
+	//
+	// The per-day predicate was `completed_at <= eod_i` with eod_i strictly increasing — a
+	// cumulative count — so the completion instants are read once, ordered, and walked alongside the
+	// days. THE BOUNDARIES ARE STILL COMPUTED IN Go, so no date arithmetic moves into SQL and
+	// `!ct.After(eod)` is `completed_at <= eod` on the same two instants.
+	//
+	// ⚠ NOT FIXED HERE: the report still renders one point per day, so the span itself is still
+	// unbounded. That is a number on a product surface, written up in the queue rather than chosen.
+	rows, err := s.pool.Query(ctx,
+		`SELECT completed_at FROM issues
+        WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at <= $2
+        ORDER BY completed_at`,
+		cycleID, endOfDay(c.StartDate.AddDate(0, 0, days-1)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cycle: burndown completions: %w", err)
+	}
+	var completions []time.Time
+	for rows.Next() {
+		var ct time.Time
+		if err := rows.Scan(&ct); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("cycle: burndown completions: %w", err)
+		}
+		completions = append(completions, ct)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cycle: burndown completions: %w", err)
+	}
+
 	out := make([]BurndownPoint, 0, days)
+	completed := 0
 	for i := 0; i < days; i++ {
 		day := c.StartDate.AddDate(0, 0, i)
-		eod := time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())
-
-		var completed int
-		if err := s.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM issues
-            WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at <= $2`,
-			cycleID, eod,
-		).Scan(&completed); err != nil {
-			return nil, fmt.Errorf("cycle: burndown day %s: %w", day.Format("2006-01-02"), err)
+		eod := endOfDay(day)
+		for completed < len(completions) && !completions[completed].After(eod) {
+			completed++
 		}
 
 		// Ideal line: linear from total to 0 over `days-1` intervals.

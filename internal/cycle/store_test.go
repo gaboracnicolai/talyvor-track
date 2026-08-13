@@ -131,13 +131,20 @@ func TestGetBurndown_ReturnsCorrectDataPoints(t *testing.T) {
 	pool.ExpectQuery(`SELECT COUNT\(\*\) FROM issues WHERE cycle_id`).
 		WithArgs("c-1").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(10))
-	// One COUNT query per day. We supply a steady completion rate so
-	// remaining decreases predictably.
-	for i := 0; i < 5; i++ {
-		pool.ExpectQuery(`SELECT COUNT\(\*\) FROM issues\s+WHERE cycle_id = \$1 AND completed_at IS NOT NULL`).
-			WithArgs("c-1", pgxmock.AnyArg()).
-			WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(i * 2))
+	// ONE query for the whole window, returning the ordered completion instants — it used to be one
+	// COUNT per day, which is the fan-out burndown_fanout_realpg_test.go measures. The fixture is
+	// the same steady completion rate stated the other way round: two issues finish on each of days
+	// 1..4, so the cumulative counts the loop derives are still 0, 2, 4, 6, 8 and the series this
+	// test has always asserted is unchanged.
+	completions := pgxmock.NewRows([]string{"completed_at"})
+	for day := 1; day <= 4; day++ {
+		for n := 0; n < 2; n++ {
+			completions.AddRow(start.AddDate(0, 0, day).Add(time.Duration(n+1) * time.Hour))
+		}
 	}
+	pool.ExpectQuery(`SELECT completed_at FROM issues\s+WHERE cycle_id = \$1 AND completed_at IS NOT NULL`).
+		WithArgs("c-1", pgxmock.AnyArg()).
+		WillReturnRows(completions)
 
 	out, err := store.GetBurndown(context.Background(), "c-1", "ws-1")
 	if err != nil {
@@ -153,6 +160,14 @@ func TestGetBurndown_ReturnsCorrectDataPoints(t *testing.T) {
 	}
 	if out[4].Ideal != 0 {
 		t.Errorf("last point ideal = %d, want 0", out[4].Ideal)
+	}
+	// The WHOLE series, not just its ends. The old fixture handed the loop its cumulative counts
+	// directly; the new one hands it raw instants and the loop derives them, so the derivation is
+	// the thing that has to be pinned.
+	for i, want := range []int{10, 8, 6, 4, 2} {
+		if out[i].Remaining != want {
+			t.Errorf("day %d remaining = %d, want %d", i, out[i].Remaining, want)
+		}
 	}
 }
 
