@@ -13,10 +13,25 @@ import (
 // linear_null_team_test.go — WHEN LINEAR ANSWERS THAT THE TEAM DOES NOT RESOLVE, AND THE IMPORT
 // REPORTS ITSELF CLEAN.
 //
-// `linearIssuesQuery` is `team(id: $teamId) { issues(...) }`. `team` is a NULLABLE field: when the
-// argument names nothing the credential can resolve, GraphQL's answer is `{"data":{"team":null}}`
-// with NO `errors[]` — a 200, a well-formed document, and a null where the connection should be.
-// That is not an error the transport can see:
+// `linearIssuesQuery` is `team(id: $teamId) { issues(...) }`, and the body this file locks against is
+// `{"data":{"team":null}}` with NO `errors[]` — a 200, a well-formed document, and a null where the
+// connection should be. That is not an error the transport can see:
+//
+// ⚠ THIS HEADER USED TO OPEN "`team` is a NULLABLE field", AND THAT SENTENCE WAS WRONG — MEASURED,
+// NOT ARGUED. Linear's own schema, read by unauthenticated introspection on 2026-08-13 and pinned in
+// testdata/linear_schema_snapshot.json, declares `Query.team: Team!` — NON-NULL. Under the GraphQL
+// spec a non-null field that resolves to null propagates the null to the nearest nullable parent and
+// MUST carry an entry in `errors[]`, so the document described below is one this field is not
+// allowed to produce; the unresolvable-team body a spec-conformant Linear sends is
+// `{"data":null,"errors":[…]}`, which lands on the errors[] arm case (4) already pins the order of.
+// TestLinearSchema_QueryTeamIsNonNull holds the schema fact so the two cannot drift apart again.
+// ⚠ THE TESTS BELOW STILL EARN THEIR KEEP AND ARE DELIBERATELY UNCHANGED: they lock what this
+// TRANSPORT does with a body, and a transport that only survives a provider's spec-conformant error
+// path is a transport that trusts a third party to have one. What was corrected is the PREMISE —
+// the claim about Linear that named them — and not the behaviour they assert.
+// ⚠ WHAT IS STILL NOT MEASURABLE FROM HERE: what Linear ACTUALLY sends for a team id that does not
+// resolve. Authentication fails before any resolver runs, so a credential-free probe cannot see it.
+// The nullability is a fact; the wire body for that case is still open, and neither is guessed at.
 //
 //   - status is 200, so the `status != http.StatusOK` arm does not fire;
 //   - `parsed.Errors` is empty, so the "a 200 with errors[] is NOT a silent success" arm does not
