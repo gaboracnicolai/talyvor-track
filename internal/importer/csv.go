@@ -354,6 +354,26 @@ func (n FieldNote) render(count int) string {
 		return fmt.Sprintf("%s arrived null on %d issue(s) — Linear declares %s non-null, so the response "+
 			"does not match the schema this importer reads; recorded as created at import time",
 			linearAPICreatedField, count, linearAPICreatedField)
+	case n.Via == viaNoUpdatedField:
+		// THE UPDATED TWIN OF viaNoCreatedField, AND IT HAD NO BRANCH AT ALL UNTIL #141. Both vias
+		// fell through to `default:` and rendered "no last-updated time value on N issue(s) —
+		// imported as \"\"" — the same sentence for both, naming a value nothing recorded, stating
+		// no consequence. See api_updated_render_test.go for the measurement.
+		//
+		// It names the MAIN-SCREEN consequence rather than the analytics one, exactly as
+		// viaNoUpdatedColumn does and for the same reason: created_at corrupts a number on a report,
+		// updated_at reorders the issue list and relabels every row.
+		return fmt.Sprintf("the provider response carried no %q field — %d issue(s) recorded as last "+
+			"updated at import time, so they sort above current work and every one reads as just updated",
+			jiraAPIUpdatedField, count)
+	case n.Via == viaNullUpdatedAt:
+		// The Linear twin, separate from the Jira case above for the reason api_updated.go gives:
+		// an absent key sends an operator to the `fields` list this client sends, a null on a
+		// NON_NULL field sends them to the provider. One sentence for both told them neither.
+		return fmt.Sprintf("%s arrived null on %d issue(s) — Linear declares %s non-null, so the response "+
+			"does not match the schema this importer reads; recorded as last updated at import time, "+
+			"so they sort above current work and every one reads as just updated",
+			linearAPIUpdatedField, count, linearAPIUpdatedField)
 	case n.Via == viaStatusNotDone:
 		return fmt.Sprintf("%s %q on %d issue(s) not recorded — the issue imported as %q, and Track records a completion time only on %q",
 			n.Field, n.Value, count, n.Mapped, model.StatusDone)
