@@ -34,6 +34,29 @@ const (
 	jiraCSVDateCorpusMaxRefused  = 6500  // 6,165 remain, and they are the ambiguous day/month class
 )
 
+// ⚠⚠ THE THREE ABOVE COUNT CACHE ENTRIES, AND A CACHE ENTRY IS NOT AN EXPORT. The corpus is keyed on
+// `sha256(repo \t path)`, so the same export committed to two repositories is two entries; 301
+// "genuine exports" are 285 distinct byte-contents, and the 16 surplus copies carry 2,188 of the
+// 17,898 data rows. The three below are the same census over DISTINCT EXPORTS — the population the
+// probe's own evidentiary claim ("instances that have never met") is about. Both are reported,
+// because they answer different questions and the failure mode of this file was that one number was
+// being read as the other.
+//
+// ⚠ THE OLD THREE ARE LEFT EXACTLY AS THEY WERE. They still hold of the cache and moving them is a
+// recalibration of every floor in this package at once — seven of the eight corpus censuses here
+// have at least one floor ABOVE the deduplicated population, so switching them all is a separate,
+// larger decision, measured and written down in the queue rather than taken quietly inside a
+// date-census change.
+const (
+	jiraCSVDateCorpusMinDistinctFiles = 275 // 285 distinct exports at this merge (301 cache entries)
+	jiraCSVDateCorpusMinDistinctAcc   = 30000
+	// ⚠ 5,200 IS BELOW THE AS-COUNTED 6,165 ON PURPOSE, AND THAT IS WHAT MAKES THIS LINE A GUARD
+	// RATHER THAN A RESTATEMENT: a distinctByContent that silently stopped collapsing anything would
+	// hand this pass the whole cache and 6,165 > 5,200 reds it. A ceiling a broken instrument can
+	// still satisfy would be measuring nothing. 4,827 refused at this merge.
+	jiraCSVDateCorpusMaxDistinctRef = 5200
+)
+
 func TestJiraCSVDateCorpus_TheShippedParserAcceptsWhatRealExportsEmit(t *testing.T) {
 	ents, err := os.ReadDir(jiraCSVDateCorpusDir)
 	if os.IsNotExist(err) {
@@ -44,13 +67,21 @@ func TestJiraCSVDateCorpus_TheShippedParserAcceptsWhatRealExportsEmit(t *testing
 	if err != nil {
 		t.Fatalf("read %s: %v", jiraCSVDateCorpusDir, err)
 	}
+	// The same walk, counted twice: once per cache entry, once per distinct export. One read of one
+	// directory, so the two populations cannot drift apart through two different traversals.
+	distinct, err := distinctByContent(jiraCSVDateCorpusDir)
+	if err != nil {
+		t.Fatalf("distinctByContent %s: %v", jiraCSVDateCorpusDir, err)
+	}
 
 	var files, accepted, refused int
+	var distinctFiles, distinctAccepted, distinctRefused int
 	refusedShapes := map[string]int{}
 	for _, e := range ents {
 		if e.IsDir() {
 			continue
 		}
+		isFirstOfItsContent := distinct[e.Name()]
 		rows, err := readCorpusCSV(filepath.Join(jiraCSVDateCorpusDir, e.Name()))
 		if err != nil || len(rows) < 2 {
 			continue
@@ -65,6 +96,9 @@ func TestJiraCSVDateCorpus_TheShippedParserAcceptsWhatRealExportsEmit(t *testing
 			continue
 		}
 		files++
+		if isFirstOfItsContent {
+			distinctFiles++
+		}
 		ci := buildIndex(rows[0])
 		for _, col := range jiraCSVDateCorpusColumns {
 			for _, r := range rows[1:] {
@@ -74,9 +108,15 @@ func TestJiraCSVDateCorpus_TheShippedParserAcceptsWhatRealExportsEmit(t *testing
 				}
 				if _, ok := parseJiraCSVTime(v); ok {
 					accepted++
+					if isFirstOfItsContent {
+						distinctAccepted++
+					}
 				} else {
 					refused++
 					refusedShapes[dateShape(v)]++
+					if isFirstOfItsContent {
+						distinctRefused++
+					}
 				}
 			}
 		}
@@ -87,11 +127,36 @@ func TestJiraCSVDateCorpus_TheShippedParserAcceptsWhatRealExportsEmit(t *testing
 			"nothing must not report a clean answer", jiraCSVDateCorpusDir)
 	}
 	if files < jiraCSVDateCorpusMinFiles {
-		t.Fatalf("genuine exports = %d, want >= %d — a different corpus; the numbers in "+
-			"jira_csv_two_digit_year.go were measured over 301", files, jiraCSVDateCorpusMinFiles)
+		t.Fatalf("genuine exports = %d cache entries, want >= %d — a different corpus; the numbers in "+
+			"jira_csv_two_digit_year.go were measured over 301 entries / 285 distinct exports",
+			files, jiraCSVDateCorpusMinFiles)
 	}
-	t.Logf("genuine exports=%d accepted=%d refused=%d (%.1f%% accepted)",
+	t.Logf("cache entries=%d accepted=%d refused=%d (%.1f%% accepted)",
 		files, accepted, refused, 100*float64(accepted)/float64(accepted+refused))
+	t.Logf("distinct exports=%d accepted=%d refused=%d (%.1f%% accepted) — %d entries were copies",
+		distinctFiles, distinctAccepted, distinctRefused,
+		100*float64(distinctAccepted)/float64(distinctAccepted+distinctRefused), files-distinctFiles)
+
+	// The deduplicated pass. Its ceiling is the load-bearing line: see the constant's own note.
+	if distinctFiles > files {
+		t.Fatalf("distinct exports = %d over %d cache entries — the helper returned names the walk "+
+			"never saw, so the two counts are not two readings of one directory", distinctFiles, files)
+	}
+	if distinctFiles < jiraCSVDateCorpusMinDistinctFiles {
+		t.Errorf("distinct exports = %d, want >= %d. The deduplicated figures in "+
+			"jira_csv_two_digit_year.go were measured over 285.",
+			distinctFiles, jiraCSVDateCorpusMinDistinctFiles)
+	}
+	if distinctAccepted < jiraCSVDateCorpusMinDistinctAcc {
+		t.Errorf("accepted over distinct exports = %d cells, want >= %d. The layout list has lost "+
+			"ground against the population it was measured on.",
+			distinctAccepted, jiraCSVDateCorpusMinDistinctAcc)
+	}
+	if distinctRefused > jiraCSVDateCorpusMaxDistinctRef {
+		t.Errorf("refused over distinct exports = %d cells, want <= %d (as-counted: %d). Either the "+
+			"ambiguous remainder grew, or the copies stopped collapsing and this pass is reading the "+
+			"whole cache.", distinctRefused, jiraCSVDateCorpusMaxDistinctRef, refused)
+	}
 
 	if accepted < jiraCSVDateCorpusMinAccepted {
 		t.Errorf("accepted = %d cells, want >= %d. The layout list has lost ground against the "+
