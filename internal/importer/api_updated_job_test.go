@@ -301,22 +301,28 @@ func TestJobRow_JiraAPI_MissingUpdatedIsReportedNotDefaulted(t *testing.T) {
 			"Both rows still carry a plausible updated_at (the DEFAULT), so silence here is the only " +
 			"way a reader could ever find out.")
 	}
-	if !strings.Contains(report, fieldUpdated) {
+	// ⚠ THE LITERAL, NOT `fieldUpdated`, AND THE OLD PREDICATE IS WHY THIS FILE COULD NOT SEE #141.
+	// `fieldUpdated` is Track's DISPLAY name ("last-updated time"), and the only sentence that ever
+	// contained it for viaNoUpdatedField was the `default:` arm — `"%s — imported as %q"`, which
+	// interpolates n.Field. So this assertion was satisfied by, and ONLY by, the fallthrough that
+	// meant the via had no sentence of its own. It is now the Created twin's convention verbatim
+	// (api_created_job_test.go): a HARDCODED provider literal, for #75's C6 reason — an assertion
+	// written against the same constant the code sends compares the constant to itself.
+	if !strings.Contains(report, "updated") {
 		t.Errorf("job report %q does not name the field that did not land", report)
 	}
 	// ⚠ TWO DISTINGUISHABLE LINES, NOT ONE — #74's rule at this door. "the response carried no
 	// `updated` key" and "it carried one no pinned layout accepts" are different provider facts,
 	// and collapsing them is how a serialisation change gets read as a missing field.
-	var kinds = map[string]bool{}
-	for _, w := range jobWarnings(t, d, jobID) {
-		if strings.Contains(w, fieldUpdated) {
-			kinds[w] = true
-		}
-	}
-	if len(kinds) < 2 {
-		t.Errorf("an ABSENT updated and an UNPARSEABLE updated produced %d distinct line(s) naming "+
-			"the field: %q. They are different provider facts and must not collapse into one.",
-			len(kinds), report)
+	//
+	// ⚠ THE LINES ARE COUNTED, NOT FILTERED-THEN-COUNTED, for the same reason as above: the filter
+	// was `Contains(w, fieldUpdated)`, so a via with a sentence of its own DROPPED OUT of the
+	// count — the better the report got, the fewer lines this saw. The Created twin counts
+	// `len(jobWarnings(...))` and that is the shape a distinctness check should have.
+	if lines := jobWarnings(t, d, jobID); len(lines) < 2 {
+		t.Errorf("an ABSENT updated and an UNPARSEABLE updated produced %d line(s): %q. "+
+			"They are different provider facts and must not collapse into one.",
+			len(lines), report)
 	}
 }
 
@@ -360,7 +366,15 @@ func TestJobRow_LinearAPI_NullUpdatedAtIsReportedNotDefaulted(t *testing.T) {
 	_, jobID := runLinearAPICreatedImport(t, d, node)
 
 	report := strings.Join(jobWarnings(t, d, jobID), " | ")
-	if !strings.Contains(report, fieldUpdated) {
+	// The empty-report case its Created twin asserts, which this one never did — and without it a
+	// silent import satisfies nothing below, because "" contains no literal either way.
+	if report == "" {
+		t.Fatal("a field Linear declares NON_NULL (Issue.updatedAt: DateTime!) arrived null and the " +
+			"job said nothing. The row still carries a defaulted updated_at, so nothing else can say so.")
+	}
+	// The literal, not `fieldUpdated` — see the Jira sibling above for why that constant made this
+	// assertion a test of the default branch rather than of this via's own sentence.
+	if !strings.Contains(report, "updated") {
 		t.Errorf("Linear declares Issue.updatedAt as DateTime! (NON_NULL). A null arriving there "+
 			"means the transport changed, and the job report must name it. Got %q", report)
 	}
