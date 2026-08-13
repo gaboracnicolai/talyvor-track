@@ -142,9 +142,15 @@ func TestWarnings_EveryNoteKindIsBoundedNotJustDates(t *testing.T) {
 			return FieldNote{Field: fieldResolutionDate, Value: fmt.Sprintf("25/Mar/2025 10:%02d AM", i%60),
 				Mapped: string(model.StatusTodo), Via: viaStatusNotDone}
 		}},
+		// ⚠⚠ THIS CASE PINNED `ViaValue: "indeterminate"` AND THAT CONSTANT IS WHY IT PASSED FOR
+		// EVERY VALUE OF THE DEFECT. ViaValue was in renderWarnings' group key, and it is the ONLY
+		// per-row provider text any note kind carries — so the one sub-case named for the one kind
+		// that HAS a ViaValue was the one holding it still. Varying it is what makes this assertion
+		// about the product rather than about the fixture; see warning_kind_key_test.go for the
+		// measurement and the transport that feeds it.
 		{"status resolved via category", func(i int) FieldNote {
 			return FieldNote{Field: "status", Value: fmt.Sprintf("Custom %d", i), Mapped: string(model.StatusInProgress),
-				Via: viaCategory, ViaValue: "indeterminate", ViaResolved: true}
+				Via: viaCategory, ViaValue: fmt.Sprintf("category-%d", i), ViaResolved: true}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
