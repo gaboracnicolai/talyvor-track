@@ -80,6 +80,15 @@ func TestGetVelocity_IncludesAICostPerCycle(t *testing.T) {
 	}
 }
 
+// ⚠ THIS AND ...GroupsByPriority ASSERT THE GO-SIDE PERCENTAGE OVER BUCKETS THEY SUPPLY. The
+// grouping, the cohort and the money column happen in SQL, and these are blind to all of it by
+// construction: measured, five one-term mutations left them green — the window keying on updated_at,
+// the assignee group losing its COALESCE, `SUM(ai_cost_usd)` becoming `SUM(ai_tokens)`, the label
+// path losing its window, and **the workspace scope neutralised**
+// (scripts/w34-distribution-counting-controls-8f5c.py). Those rules are asserted against real
+// Postgres in distribution_counting_realpg_test.go. What this test owns — and what the real-Postgres
+// one cannot take from it — is that `pct` is computed over the summed counts rather than the bucket
+// list; that mutation is caught by both.
 func TestGetDistribution_GroupsByStatus(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	pool.ExpectQuery(`GROUP BY status`).
