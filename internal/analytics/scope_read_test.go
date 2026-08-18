@@ -167,3 +167,100 @@ func TestAnalytics_Resolution_WorkspaceScoped(t *testing.T) {
 			gotA.ByPriority, rrA.Body.String())
 	}
 }
+
+// seedCostIssue inserts an issue carrying AI spend, a distinctive identifier/title and a
+// label, inside the AI-cost report's default 30-day updated_at window (NOT created_at — that
+// report windows on last touch).
+func seedCostIssue(t *testing.T, d *testutil.DB, wsID, teamID, tag string, number int, cost float64) {
+	t.Helper()
+	if _, err := d.Pool.Exec(context.Background(),
+		`INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
+		                     creator_id, ai_cost_usd, ai_tokens, labels, updated_at)
+	     VALUES ($1,$2,$3::int, $4 || '-' || $3::int, $4 || ' title', 'done', 1,
+	             'costprobe', $5, 4242, ARRAY[$4 || '-label'], NOW())`,
+		wsID, teamID, number, tag, cost); err != nil {
+		t.Fatalf("seed cost issue %s-%d: %v", tag, number, err)
+	}
+}
+
+// GET .../analytics/ai-costs must be workspace-scoped.
+//
+// ⚠ THIS ONE CANNOT BE WRITTEN IN THE SHAPE OF THE THREE TESTS ABOVE, AND THAT IS A FACT ABOUT
+// THE ENDPOINT RATHER THAN A CHOICE. Velocity, Burndown and Resolution each take a
+// CALLER-SUPPLIED id (team_id, cycle_id, team_id) and so can be attacked as a confused deputy:
+// a wsA member NAMES a wsB object. `AICosts` takes no selector at all — the handler passes the
+// authorized `wsID` and `days` and nothing else — so there is no id to point at another
+// workspace and the confused-deputy test is IMPOSSIBLE here. The reachable question is the
+// weaker but still real one: does wsB's spend appear in wsA's report at all.
+//
+// ⚠ AND IT TAKES FIVE ASSERTIONS BECAUSE THE REPORT RUNS FIVE INDEPENDENTLY-SCOPED QUERIES —
+// totals, the daily series, the top-cost leaderboard, cost-by-team and cost-by-label each
+// carry their own `workspace_id = $1`. Controls C1–C5 neutralise them ONE AT A TIME; each is
+// caught by its own assertion and by no other, which is the measurement that says five
+// assertions are five guards rather than one guard written five times.
+//
+// ⚠ UNLIKE THE RESOLUTION REPORT DIRECTLY ABOVE, THIS BODY DOES CARRY STRING WITNESSES
+// (identifier, title, team name, label), so the canary that is vacuous there is real here —
+// which is exactly why the shape has to be chosen per report instead of copied.
+func TestAnalytics_AICosts_WorkspaceScoped(t *testing.T) {
+	d := testutil.New(t)
+	wsA, wsB := d.Workspace(t), d.Workspace(t)
+	teamB := d.Team(t, wsB.ID)
+	seedCostIssue(t, d, wsB.ID, teamB.ID, "BCOST", 1, 101)
+	h := analytics.NewHandler(analytics.New(d.Pool))
+
+	decode := func(t *testing.T, rr *httptest.ResponseRecorder) analytics.AICostTrends {
+		t.Helper()
+		var got analytics.AICostTrends
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode ai-costs body %q: %v", rr.Body.String(), err)
+		}
+		return got
+	}
+
+	rr := httptest.NewRecorder()
+	h.AICosts(rr, analyticsReq("/v1/workspaces/"+wsA.ID+"/analytics/ai-costs", wsA.ID))
+	got, body := decode(t, rr), rr.Body.String()
+
+	if got.TotalCostUSD != 0 || got.AvgCostPerIssue != 0 || got.ProjectedMonthly != 0 {
+		t.Errorf("CROSS-WS LEAK (totals): wsA saw wsB spend — total %v avg %v projected %v: %s",
+			got.TotalCostUSD, got.AvgCostPerIssue, got.ProjectedMonthly, body)
+	}
+	if len(got.DailyCosts) != 0 {
+		t.Errorf("CROSS-WS LEAK (daily series): wsA got %d day(s) of wsB spend: %s", len(got.DailyCosts), body)
+	}
+	if len(got.TopCostIssues) != 0 || strings.Contains(body, "BCOST-1") {
+		t.Errorf("CROSS-WS LEAK (top-cost leaderboard): wsA got %d wsB issue(s): %s", len(got.TopCostIssues), body)
+	}
+	if len(got.CostByTeam) != 0 || strings.Contains(body, teamB.Name) {
+		t.Errorf("CROSS-WS LEAK (cost by team): wsA got %d wsB team(s), name %q: %s", len(got.CostByTeam), teamB.Name, body)
+	}
+	if len(got.CostByLabel) != 0 || strings.Contains(body, "BCOST-label") {
+		t.Errorf("CROSS-WS LEAK (cost by label): wsA got %d wsB label(s): %s", len(got.CostByLabel), body)
+	}
+
+	// Positive, and load-bearing: every assertion above is satisfied by an EMPTY report, so
+	// without this half the whole test passes on a report that returns nothing — including one
+	// whose seed silently inserted no row. Control C6 breaks the scope the other way and only
+	// this half reds.
+	teamA := d.Team(t, wsA.ID)
+	seedCostIssue(t, d, wsA.ID, teamA.ID, "ACOST", 2, 55)
+	rrA := httptest.NewRecorder()
+	h.AICosts(rrA, analyticsReq("/v1/workspaces/"+wsA.ID+"/analytics/ai-costs", wsA.ID))
+	gotA, bodyA := decode(t, rrA), rrA.Body.String()
+	if rrA.Code != http.StatusOK || gotA.TotalCostUSD != 55 {
+		t.Errorf("own spend should total 55; got %d %v: %s", rrA.Code, gotA.TotalCostUSD, bodyA)
+	}
+	if len(gotA.DailyCosts) != 1 {
+		t.Errorf("own spend should be 1 day in the series; got %d: %s", len(gotA.DailyCosts), bodyA)
+	}
+	if len(gotA.TopCostIssues) != 1 || !strings.Contains(bodyA, "ACOST-2") {
+		t.Errorf("own issue should be on the leaderboard; got %d: %s", len(gotA.TopCostIssues), bodyA)
+	}
+	if len(gotA.CostByTeam) != 1 || !strings.Contains(bodyA, teamA.Name) {
+		t.Errorf("own team should be in cost-by-team; got %d: %s", len(gotA.CostByTeam), bodyA)
+	}
+	if len(gotA.CostByLabel) != 1 || !strings.Contains(bodyA, "ACOST-label") {
+		t.Errorf("own label should be in cost-by-label; got %d: %s", len(gotA.CostByLabel), bodyA)
+	}
+}
