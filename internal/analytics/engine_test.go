@@ -20,6 +20,19 @@ func newMockEngine(t *testing.T) (*Engine, pgxmock.PgxPoolIface) {
 	return newEngine(pool), pool
 }
 
+// ⚠ THE NAME IS ABOUT THE DIVISION AND NOT ABOUT THE COUNTS. This test FEEDS `total` and
+// `completed` (10/8, 8/8, 12/5) and asserts the RATIO the Go code derives from them — worth having,
+// and blind to every SQL term by construction: measured, seven one-term mutations of the shipped
+// statement left it and its two siblings green (scripts/w34-velocity-counting-controls-8f5c.py).
+// What `completed` counts, which cycles are returned, in what order, how many, and whether the
+// subqueries are still correlated to this cycle are asserted against real Postgres in
+// velocity_counting_realpg_test.go.
+//
+// ⚠ AND WHEN ONE OF THESE THREE DOES RED ON A VELOCITY CHANGE, READ WHY BEFORE BELIEVING IT.
+// `ExpectQuery("FROM cycles c\\s+WHERE c.team_id")` is a QUERY-TEXT fingerprint: it fails whenever
+// the SQL string stops matching that regex, whatever the new statement computes. Two spellings of
+// the team-scope control were discarded for exactly this — both scored CAUGHT by all three of these
+// tests while the neutralised scope shipped, because they had moved a bracket.
 func TestGetVelocity_ReturnsCompletionRates(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	now := time.Now().UTC()
