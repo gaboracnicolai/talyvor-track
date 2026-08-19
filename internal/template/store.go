@@ -168,6 +168,16 @@ func (s *Store) Create(ctx context.Context, t IssueTemplate) (*IssueTemplate, er
 		}
 	}
 
+	// default_assignee is the SECOND cross-object reference on this INSERT and it had no
+	// guard on either write path. It is `TEXT REFERENCES members(id)` (0013_templates.sql:21)
+	// and members are workspace-scoped, so the FK proves the member EXISTS and says nothing
+	// about WHOSE it is. Measured against real Postgres before this guard existed: a template
+	// in workspace B accepted a member of workspace A, on Create AND on Update.
+	// A nil/empty assignee is "no default" and skips the guard — there is no reference to check.
+	if err := s.assertAssigneeInWorkspace(ctx, t.DefaultAssignee, t.WorkspaceID); err != nil {
+		return nil, err
+	}
+
 	defaults, err := json.Marshal(t.FieldDefaults)
 	if err != nil {
 		return nil, fmt.Errorf("template: encode field_defaults: %w", err)
@@ -265,11 +275,58 @@ func (s *Store) getInWorkspace(ctx context.Context, id, workspaceID string) (*Is
 	return t, err
 }
 
+// assertAssigneeInWorkspace routes default_assignee through the shared cross-object
+// primitive, the same one team_id already used three lines above it. It is the ONE place
+// both write paths agree on, deliberately: Create and Update disagreeing about a tenancy
+// rule is how this reference came to be guarded on neither.
+//
+// A nil or empty assignee clears the default and is not a reference — the sibling guards
+// (team_id here, and issue.validateRefWorkspaces) skip on exactly that shape.
+func (s *Store) assertAssigneeInWorkspace(ctx context.Context, assignee *string, workspaceID string) error {
+	if assignee == nil || *assignee == "" {
+		return nil
+	}
+	return tenancy.AssertRefInWorkspace(ctx, s.pool, "members", *assignee, workspaceID)
+}
+
+// updateAssignee extracts default_assignee from a decoded PATCH body. The handler decodes
+// into map[string]any (handler.go:98), so a JSON string arrives as `string` and a JSON null
+// as `nil`; *string is accepted too because in-process callers construct the map directly.
+// The bool reports whether a reference is present and therefore needs guarding — an absent
+// key and an explicit clear both report false.
+func updateAssignee(updates map[string]any) (string, bool) {
+	raw, ok := updates["default_assignee"]
+	if !ok || raw == nil {
+		return "", false
+	}
+	switch v := raw.(type) {
+	case string:
+		return v, v != ""
+	case *string:
+		if v == nil || *v == "" {
+			return "", false
+		}
+		return *v, true
+	}
+	return "", false
+}
+
 // Update mutates a template only within workspaceID — SEC-5: a foreign id yields ErrNotFound.
 func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[string]any) (*IssueTemplate, error) {
 	if s.pool == nil {
 		return nil, errors.New("template: store has no pool")
 	}
+
+	// The allowlist below validates the KEY and never the VALUE, so without this the one
+	// cross-object reference it admits reached `SET default_assignee = $n` unchecked.
+	// workspaceID is the caller's authorized workspace — the same one the WHERE clause
+	// scopes the row to — so the reference is checked against the row's own tenant.
+	if assignee, present := updateAssignee(updates); present {
+		if err := s.assertAssigneeInWorkspace(ctx, &assignee, workspaceID); err != nil {
+			return nil, err
+		}
+	}
+
 	var (
 		set  []string
 		args []any
