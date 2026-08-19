@@ -49,9 +49,8 @@ import (
 // The four subtests are four different ways this can be got wrong, and each is here because a
 // plausible "fix" passes the others: dropping the column from the write path entirely passes
 // (1) and fails (2); keeping the caller's value on a done transition passes (1) and (2) and
-// fails (3); and (4) states the invariant in the database's own terms over every row the
-// earlier subtests left behind, so a future write path that reaches the column another way has
-// something to fail.
+// fails (3). (4) restates the invariant as the predicate analytics actually counts on — see
+// the measured note above it for what it does NOT do.
 func TestUpdateRoute_ACompletionTimeIsRecordedOnlyOnARowThatIsDone_RealPG(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
@@ -130,8 +129,15 @@ func TestUpdateRoute_ACompletionTimeIsRecordedOnlyOnARowThatIsDone_RealPG(t *tes
 	})
 
 	// The invariant in the database's own terms, over every row the subtests above left behind.
-	// It is deliberately NOT scoped to one issue: a future write path that reaches the column
-	// some other way has something here to fail.
+	//
+	// ⚠ WHAT THIS IS NOT, MEASURED RATHER THAN CLAIMED. Its first draft here said it gave "a
+	// future write path that reaches the column some other way something to fail". Control C3
+	// put that to the test — the defect reinstated and the FIRST subtest deleted — and this
+	// census scored NOT CAUGHT: it never creates a row, it only counts the ones the subtests
+	// above create, so with the producer gone there was nothing to count. It is a second
+	// assertion on the same row, not a second guard, and it is kept for the shape of the
+	// statement (`status <> 'done' AND completed_at IS NOT NULL` is the predicate analytics
+	// would count) rather than for independent reach.
 	t.Run("no row in this workspace holds a completion time without being done", func(t *testing.T) {
 		var n int
 		if err := d.Pool.QueryRow(ctx,

@@ -87,7 +87,11 @@ def apply_control(cid):
     if cid == "C3":
         guard.write_text(cut_block(guard.read_text(), FIRST_SUBTEST_ANCHOR))
     if cid == "C4":
-        guard.write_text(cut_block(guard.read_text(), CENSUS_ANCHOR))
+        # `ctx` is used only by the census query, so cutting the block alone stops the package
+        # compiling and the control scores a build break instead of a measurement.
+        s = cut_block(guard.read_text(), CENSUS_ANCHOR)
+        guard.write_text(s.replace(
+            "\tctx := context.Background()", "\tctx := context.Background()\n\t_ = ctx", 1))
     if cid == "C5":
         # completed_at never reaches the SET list at all — not even the server's own stamp.
         # `_ = serverStamped` keeps the package COMPILING, so the control measures the lazy
@@ -111,7 +115,11 @@ def apply_control(cid):
 CONTROLS = [
     ("C1", "the defect itself (gate reverted)", "CAUGHT"),
     ("C2", "C1 with the guard file DELETED", "NOT CAUGHT"),
-    ("C3", "C1 with the guard's FIRST subtest removed", "CAUGHT"),
+    # C3's prediction was CAUGHT and the measurement REFUTED it: the census subtest counts
+    # rows the first subtest creates and creates none of its own, so with the producer gone
+    # it has nothing to count. The prediction is corrected here to the measured value and the
+    # guard's own header now states the limit rather than the claim.
+    ("C3", "C1 with the guard's FIRST subtest removed", "NOT CAUGHT"),
     ("C4", "C1 with the guard's CENSUS subtest removed", "CAUGHT"),
     ("C5", "the lazy fix: completed_at never written at all", "CAUGHT"),
     ("C6", "a done transition keeps the caller's completed_at", "CAUGHT"),
