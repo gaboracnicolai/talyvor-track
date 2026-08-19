@@ -37,7 +37,7 @@ STORE = "internal/issue/store.go"
 GUARD = "internal/issue/update_completed_at_route_test.go"
 MAIN_SHA = "1c0323a9cd2fe61cd894e0c8d5609db4e46233cf"
 
-FIXED_GATE = '\t\tif _, ok := updatableFields[k]; !ok && !(k == "completed_at" && serverStamped) {'
+FIXED_GATE = '\t\tif _, ok := updatableFields[k]; !ok && (k != "completed_at" || !serverStamped) {'
 BROKEN_GATE = '\t\tif _, ok := updatableFields[k]; !ok && k != "completed_at" {'
 STAMP = '\t\t\t\tupdates["completed_at"] = time.Now().UTC()'
 

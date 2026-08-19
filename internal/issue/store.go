@@ -1084,7 +1084,7 @@ func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[
 		argN       int
 	)
 	for k, v := range updates {
-		if _, ok := updatableFields[k]; !ok && !(k == "completed_at" && serverStamped) {
+		if _, ok := updatableFields[k]; !ok && (k != "completed_at" || !serverStamped) {
 			continue
 		}
 		argN++
