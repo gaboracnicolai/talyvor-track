@@ -225,6 +225,24 @@ func (e *Engine) GetBurndown(ctx context.Context, cycleID, workspaceID string) (
 
 	now := time.Now().UTC()
 	currentRemaining := total
+
+	// ⚠ SEEDED true BECAUSE THE LOOP BELOW ASSIGNS IsOnTrack ONLY INSIDE `!day.After(now)`, SO A
+	// CYCLE WHOSE WINDOW HAS NOT STARTED SHIPPED Go's ZERO VALUE AS A VERDICT. MEASURED against
+	// real Postgres on clean main: a cycle starting in 7 days with 5 issues and none done reported
+	// is_on_track=false, as did one holding NO ISSUES AT ALL, while the same 5-issue cycle starting
+	// TODAY reported true — the flag moved because a date arrived, not because work did.
+	// frontend/src/components/cycle/BurndownChart.tsx renders the field as a two-state badge
+	// (`is_on_track ? "On track" : "Off track"`) in priority-urgent red with no third state, and
+	// cycle.Store.Create defaults a new cycle's status to "upcoming", so this was the ordinary
+	// state of a planned sprint rather than an edge case.
+	//
+	// THIS IS THE LOOP'S OWN RULE EVALUATED AT THE ONLY DAY AVAILABLE, NOT A CHOSEN VERDICT: at
+	// i=0 the ideal is `total - (total*0)/(days-1)` = total and remaining is `total - completed`,
+	// which can never exceed total, so day 0 is on-track by construction. Any day that HAS arrived
+	// overwrites this on the first iteration. Guarded by
+	// TestBurndown_OnTrackAndProjection_AreComputedNotDefaulted.
+	report.IsOnTrack = true
+
 	completed := 0
 	for i := 0; i < days; i++ {
 		day := start.AddDate(0, 0, i)
