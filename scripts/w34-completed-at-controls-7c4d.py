@@ -35,6 +35,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 TEST_CMD = ["go", "test", "-timeout", "300s", "-race", "-count=1", "./..."]
 STORE = "internal/issue/store.go"
 GUARD = "internal/issue/update_completed_at_route_test.go"
+MAIN_SHA = "1c0323a9cd2fe61cd894e0c8d5609db4e46233cf"
 
 FIXED_GATE = '\t\tif _, ok := updatableFields[k]; !ok && !(k == "completed_at" && serverStamped) {'
 BROKEN_GATE = '\t\tif _, ok := updatableFields[k]; !ok && k != "completed_at" {'
@@ -58,8 +59,21 @@ def cut_block(src, anchor):
     return src[:i] + src[end:]
 
 
-def revert_fix(store_src):
-    return store_src.replace(FIXED_GATE, BROKEN_GATE, 1)
+def revert_fix(_store_src):
+    """main's store.go verbatim.
+
+    ⚠ THE FIRST FORM OF THIS FUNCTION SCORED FIVE FALSE VOIDS AND IS RECORDED RATHER THAN
+    QUIETLY REPLACED. It reverted the GATE line only and left `serverStamped := false`
+    behind, so the package did not compile ("declared and not used"), the whole suite failed
+    to build, and all 13 baseline failures VANISHED because nothing ran. The run detector
+    reported BUILD BROKE, which is the only reason it was not read as five clean results.
+    A control that changes whether the tree COMPILES has not measured any test's assertion.
+    Taking main's file whole makes "the defect itself" exactly main's code and nothing else.
+    """
+    return subprocess.run(
+        ["git", "show", f"{MAIN_SHA}:{STORE}"],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    ).stdout
 
 
 def apply_control(cid):
@@ -76,8 +90,10 @@ def apply_control(cid):
         guard.write_text(cut_block(guard.read_text(), CENSUS_ANCHOR))
     if cid == "C5":
         # completed_at never reaches the SET list at all — not even the server's own stamp.
+        # `_ = serverStamped` keeps the package COMPILING, so the control measures the lazy
+        # fix rather than a build break (see revert_fix's note).
         s = store.read_text().replace(
-            FIXED_GATE, '\t\tif _, ok := updatableFields[k]; !ok {', 1
+            FIXED_GATE, "\t\t_ = serverStamped\n\t\tif _, ok := updatableFields[k]; !ok {", 1
         )
         store.write_text(s)
     if cid == "C6":
