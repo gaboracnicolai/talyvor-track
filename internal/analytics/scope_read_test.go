@@ -264,3 +264,176 @@ func TestAnalytics_AICosts_WorkspaceScoped(t *testing.T) {
 		t.Errorf("own label should be in cost-by-label; got %d: %s", len(gotA.CostByLabel), bodyA)
 	}
 }
+
+// GET .../analytics/workload[?team_id=] must be workspace-scoped — the LAST of the six analytics
+// reports to get that assertion, and the only one that had none anywhere.
+//
+// MEASURED, NOT INFERRED, at 0d29d90: `WHERE i.workspace_id = $1` in analytics.GetWorkload
+// neutralised to `= ANY(ARRAY[$1, i.workspace_id])` — the spelling #153 measured, which leaves the
+// text a pgxmock ExpectQuery regex matches byte-identical so a red can only be an assertion — and
+// `go test -race -count=1 ./...` came back with EXACTLY the 11 pre-existing internal/importer corpus
+// failures this machine has with an empty corpus dir, and nothing else. The whole repository, green,
+// with this report answering every workspace's workload to any caller.
+//
+// ⚠ THE REASON IS THE FIXTURE, NOT THE ASSERTIONS, WHICH IS WHY THE TEST NAMED FOR THIS REPORT'S
+// RULES COULD NOT SEE IT. workload_counting_realpg_test.go is a good test — five one-predicate
+// mutations of the shipped SQL are CAUGHT by it — and it seeds ONE workspace with two teams. Every
+// row it can see is in the workspace it asks about, so `workspace_id = $1` is TRUE for the whole
+// population and the term is unfalsifiable by construction. It is the same class as #158's burndown
+// ordering: not a missing assertion but a fixture whose incidental shape makes one term invisible.
+//
+// ⚠ WHY THIS ONE FELL THROUGH WHEN THE OTHER FIVE DID NOT — each of them is asserted somewhere and
+// the reason differs: Velocity, Burndown, Resolution and AICosts are the four tests directly above,
+// and Distribution's is `[D-TENANCY]` inside its own real-PG counting test, which seeds wsA AND wsB.
+// The workload report is the one whose counting test seeds a single workspace, and it is also the
+// one report of the six with no scope test here. Two independent misses of the same term.
+//
+// ⚠ IT IS A CONFUSED DEPUTY, NOT ONLY A FILTER. `team_id` is caller-supplied (handler.go passes
+// `r.URL.Query().Get("team_id")` straight through) exactly as in Velocity and Resolution above, and
+// frontend/src/pages/Analytics.tsx calls this route BOTH ways — with the selected team and, when no
+// team is selected, with none at all. So the two leak assertions below are the product's two real
+// calls rather than one call and one variation of it.
+//
+// ⚠ WHAT THE CONTROLS SAY ABOUT WHICH ASSERTION IS WORTH WHAT — measured, and reported including the
+// one that came out weaker than intended (scripts/w34-workload-tenancy-controls-b9d7.py, 8 controls,
+// each restored in a `finally` with engine.go's sha256 verified back to pristine every time):
+//
+//	C1  the workspace scope neutralised           -> [W-DEPUTY] [W-TENANCY] [W-OWN]
+//	C2  the workspace scope broken the other way  -> [W-OWN] [W-OWN-TEAM]        (the positives)
+//	C3  ` AND i.team_id` -> ` OR i.team_id`       -> [W-DEPUTY] ALONE
+//	C4  the team scope neutralised                -> NOTHING HERE (must-stay-green; the counting
+//	                                                 test's [A-SCOPE] catches it)
+//	C5  `$1 = i.workspace_id`, identical          -> NOTHING AT ALL (void control)
+//	C6  the scope survives only on the team path  -> [W-TENANCY] [W-OWN]
+//	C7  ` AND i.team_id <> $2`                    -> [W-OWN-TEAM] ALONE
+//	C8  the no-team branch answers nothing        -> [W-OWN] ALONE
+//
+// So `[W-DEPUTY]`, `[W-OWN-TEAM]` and `[W-OWN]` each have a mutation only they catch. ⚠ `[W-TENANCY]`
+// DOES NOT, AND THAT IS STATED RATHER THAN DRESSED UP: every mutation that reds it also reds
+// `[W-OWN]`, because a leak into the unscoped call both adds a stranger's row and breaks the
+// "exactly one row" count made later. It is kept because it is the only check made while the CALLER'S
+// workspace is still empty — the fresh-tenant state, in which every row the report can possibly
+// return is a foreign one, so the report's own emptiness cannot mask anything.
+//
+// ⚠ TWO PREDICTIONS WERE WRONG ON THE FIRST RUN AND BOTH ARE RECORDED IN THE HARNESS RATHER THAN
+// TUNED AWAY. The first spelling of this test fataled on its first failing check, so C1 stopped it
+// before `[W-TENANCY]` was ever evaluated and C2 before `[W-OWN-TEAM]` was — an assertion no control
+// can reach is justified by nothing, which is why the four checks are Errorf and the positive halves
+// read their member through a map instead of `got[0]`. And C1/C6's real catcher list is LONGER than
+// predicted (`[W-OWN]` too): the prediction under-listed, which is the direction that would have made
+// a catch-all look like a precise instrument.
+func TestAnalytics_Workload_WorkspaceScoped(t *testing.T) {
+	d := testutil.New(t)
+	ctx := context.Background()
+	wsA, wsB := d.Workspace(t), d.Workspace(t)
+	teamB := d.Team(t, wsB.ID)
+
+	// Workspace B's member is the leak canary: its NAME reaches the body (MemberWorkload carries
+	// name and avatar_url, which the Resolution report directly above has no equivalent of), and
+	// frontend/src/components/analytics/WorkloadView.tsx renders that name, so a leak here is a
+	// stranger's name on a customer's screen rather than only a number.
+	bravo := seedWorkloadMember(t, d, wsB.ID, "B-Only-Member", "b-only-scope@example.com")
+	seedWorkloadIssue(t, d, wsB.ID, teamB.ID, 101, "todo", "NOW() - INTERVAL '3 days'", &bravo, 9.75)
+	seedWorkloadIssue(t, d, wsB.ID, teamB.ID, 102, "in_progress", "NOW() - INTERVAL '2 days'", &bravo, 9.75)
+	seedWorkloadIssue(t, d, wsB.ID, teamB.ID, 103, "backlog", "NULL", &bravo, 9.75)
+
+	h := analytics.NewHandler(analytics.New(d.Pool))
+	decode := func(t *testing.T, rr *httptest.ResponseRecorder) []analytics.MemberWorkload {
+		t.Helper()
+		var got []analytics.MemberWorkload
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode workload body %q: %v", rr.Body.String(), err)
+		}
+		return got
+	}
+
+	// ── THE CONFUSED DEPUTY: a wsA member NAMES a wsB team. Same attack as Velocity's, and it is
+	// the call the page makes whenever a team is selected.
+	rr := httptest.NewRecorder()
+	h.Workload(rr, analyticsReq("/v1/workspaces/"+wsA.ID+"/analytics/workload?team_id="+teamB.ID, wsA.ID))
+	got, body := decode(t, rr), rr.Body.String()
+	if len(got) != 0 || strings.Contains(body, "B-Only-Member") {
+		// Errorf, NOT Fatalf, and that is measured rather than stylistic: the first spelling of this
+		// file fataled here, so control C1 stopped the test on this line and `[W-TENANCY]` below was
+		// never evaluated — an assertion no control can reach is justified by nothing. The four
+		// checks in this test are four independent claims and each must be able to report.
+		t.Errorf("[W-DEPUTY] CROSS-WS LEAK: wsA caller naming a wsB team got %d member row(s): %s",
+			len(got), body)
+	}
+
+	// ── THE UNSCOPED CALL: no team_id at all, which is what the page sends when no team is
+	// selected. The team predicate is absent from the statement entirely here, so the workspace
+	// predicate is the ONLY thing between this caller and every tenant's workload.
+	rrAll := httptest.NewRecorder()
+	h.Workload(rrAll, analyticsReq("/v1/workspaces/"+wsA.ID+"/analytics/workload", wsA.ID))
+	gotAll, bodyAll := decode(t, rrAll), rrAll.Body.String()
+	if len(gotAll) != 0 || strings.Contains(bodyAll, "B-Only-Member") {
+		t.Errorf("[W-TENANCY] CROSS-WS LEAK: wsA caller with no team_id got %d member row(s) — the "+
+			"workspace predicate is the whole of this report's tenancy: %s", len(gotAll), bodyAll)
+	}
+
+	// ── POSITIVE, AND LOAD-BEARING: both assertions above are satisfied by an empty report, so
+	// without this half a query returning nothing at all — or a seed that inserted no row — passes
+	// the leak checks silently. Alice's numbers are distinct from each other (open 2, in_progress 1,
+	// overdue 1, cost 5.00 over THREE rows including the done one) so a mutation cannot land on
+	// another term's expected value.
+	teamA := d.Team(t, wsA.ID)
+	alpha := seedWorkloadMember(t, d, wsA.ID, "A-Own-Member", "a-own-scope@example.com")
+	seedWorkloadIssue(t, d, wsA.ID, teamA.ID, 201, "todo", "NOW() - INTERVAL '4 days'", &alpha, 1.25)
+	seedWorkloadIssue(t, d, wsA.ID, teamA.ID, 202, "in_progress", "NOW() + INTERVAL '4 days'", &alpha, 1.25)
+	seedWorkloadIssue(t, d, wsA.ID, teamA.ID, 203, "done", "NOW() - INTERVAL '4 days'", &alpha, 2.50)
+
+	// Read through a map rather than an index, for the same reason the two checks above are Errorf:
+	// `gotOwn[0]` on an empty report panics the whole test binary, so the numbers below could never
+	// report on the run where the report came back empty — which is the run they exist for.
+	byMember := func(rows []analytics.MemberWorkload) map[string]analytics.MemberWorkload {
+		m := map[string]analytics.MemberWorkload{}
+		for _, r := range rows {
+			m[r.MemberID] = r
+		}
+		return m
+	}
+
+	rrOwn := httptest.NewRecorder()
+	h.Workload(rrOwn, analyticsReq("/v1/workspaces/"+wsA.ID+"/analytics/workload", wsA.ID))
+	gotOwn, bodyOwn := decode(t, rrOwn), rrOwn.Body.String()
+	own := byMember(gotOwn)[alpha]
+	if rrOwn.Code != http.StatusOK || len(gotOwn) != 1 || own.MemberID != alpha {
+		t.Errorf("[W-OWN] wsA's own unscoped workload should be exactly its own member; got %d row(s) "+
+			"status %d: %s", len(gotOwn), rrOwn.Code, bodyOwn)
+	}
+	if own.OpenIssues != 2 || own.InProgress != 1 || own.Overdue != 1 || own.AICostUSD != 5.00 {
+		t.Errorf("[W-OWN] own member = %+v, want open 2 / in_progress 1 / overdue 1 / cost 5.00", own)
+	}
+	if strings.Contains(bodyOwn, "B-Only-Member") {
+		t.Errorf("[W-OWN] wsB's member is in wsA's own report: %s", bodyOwn)
+	}
+
+	// ── POSITIVE ON THE TEAM-NAMED PATH TOO, because [W-DEPUTY] above is asserted on that path and
+	// an engine that answered EVERY team-named call with nothing would satisfy it. This is the half
+	// that says the deputy assertion measures the scope rather than the presence of a team_id.
+	rrOwnTeam := httptest.NewRecorder()
+	h.Workload(rrOwnTeam, analyticsReq("/v1/workspaces/"+wsA.ID+"/analytics/workload?team_id="+teamA.ID, wsA.ID))
+	gotOwnTeam, bodyOwnTeam := decode(t, rrOwnTeam), rrOwnTeam.Body.String()
+	if ownTeam := byMember(gotOwnTeam)[alpha]; rrOwnTeam.Code != http.StatusOK ||
+		len(gotOwnTeam) != 1 || ownTeam.MemberID != alpha || ownTeam.OpenIssues != 2 {
+		t.Errorf("[W-OWN-TEAM] wsA's own team-scoped workload should be exactly its own member with "+
+			"open 2; got %d row(s) status %d: %s", len(gotOwnTeam), rrOwnTeam.Code, bodyOwnTeam)
+	}
+
+	// ── THE POPULATION THE SCOPE IS HIDING, AS A NUMBER RATHER THAN A SENTENCE. Read straight from
+	// the database so a run whose seeds silently did nothing cannot report a clean scope: there IS
+	// assigned, open work in another workspace for this report to have leaked.
+	var openElsewhere int
+	if err := d.Pool.QueryRow(ctx, `
+        SELECT COUNT(*) FROM issues
+         WHERE workspace_id <> $1 AND assignee_id IS NOT NULL
+           AND status NOT IN ('done','cancelled')`, wsA.ID).Scan(&openElsewhere); err != nil {
+		t.Fatalf("count the open assigned work outside wsA: %v", err)
+	}
+	if openElsewhere != 3 {
+		t.Fatalf("[W-POPULATION] %d open assigned issue(s) outside wsA, want 3 — the leak assertions "+
+			"above are only meaningful against a non-empty other tenant, and this run does not have "+
+			"one", openElsewhere)
+	}
+}
