@@ -1051,7 +1051,18 @@ func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[
 		return s.getInWorkspace(ctx, id, workspaceID)
 	}
 
-	// Stamp completed_at based on the incoming status, if any.
+	// Stamp completed_at based on the incoming status, if any. serverStamped records that THIS
+	// function put the value in the map, and the loop below admits `completed_at` past
+	// updatableFields ONLY then. Without that distinction the by-name exemption admitted the
+	// column whoever supplied it: `updates` is the raw PATCH body (handler.go:337), this block
+	// runs only when the body names `status`, and so a body carrying `completed_at` and no
+	// status reached `SET completed_at = $1` with the caller's value on a row whose status never
+	// moved — the backlog-work-with-a-completion-time row that Create's own gate (line 244) and
+	// three importer comments say Track cannot produce, and that analytics' resolution stats
+	// count as delivered because they select on `completed_at IS NOT NULL` with no status
+	// predicate. A caller-supplied completed_at is now dropped, exactly as Create nils a
+	// CompletedAt handed to it on a row that is not done.
+	serverStamped := false
 	if rawStatus, ok := updates["status"]; ok {
 		if str, isStr := rawStatus.(string); isStr {
 			if str == string(model.StatusDone) {
@@ -1059,6 +1070,7 @@ func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[
 			} else {
 				updates["completed_at"] = nil
 			}
+			serverStamped = true
 		}
 	}
 
@@ -1072,7 +1084,7 @@ func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[
 		argN       int
 	)
 	for k, v := range updates {
-		if _, ok := updatableFields[k]; !ok && k != "completed_at" {
+		if _, ok := updatableFields[k]; !ok && (k != "completed_at" || !serverStamped) {
 			continue
 		}
 		argN++
