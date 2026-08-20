@@ -24,6 +24,15 @@ func wsReq(method, wsID, role, body string) *http.Request {
 	return r.WithContext(authz.WithAuthorizedRole(r.Context(), wsID, "m1", role))
 }
 
+func wsName(t *testing.T, d *testutil.DB, id string) string {
+	t.Helper()
+	var name string
+	if err := d.Pool.QueryRow(context.Background(), `SELECT name FROM workspaces WHERE id=$1`, id).Scan(&name); err != nil {
+		t.Fatalf("read workspace name: %v", err)
+	}
+	return name
+}
+
 func wsExists(t *testing.T, d *testutil.DB, id string) bool {
 	t.Helper()
 	var n int
@@ -60,7 +69,14 @@ func TestWorkspace_Delete_OwnerGated(t *testing.T) {
 	}
 }
 
-// PATCH /v1/workspaces/{wsID} is owner-only.
+// PATCH /v1/workspaces/{wsID} is owner-only: a member is refused AND the settings do not
+// change; an owner's rename lands.
+//
+// The 403 alone is not the property, and asserting it alone is why this gate was the one
+// owner-gated write in the repository that nothing could see go inert. writeErr does not
+// stop the handler: a gate that writes the refusal and falls through returns 403 with the
+// rename APPLIED. Measured on this file before the read-back existed — dropping the
+// `return` from the gate left the whole repository green, semgrep lock included.
 func TestWorkspace_Update_OwnerGated(t *testing.T) {
 	d := testutil.New(t)
 	h := workspace.NewHandler(workspace.NewStore(d.Pool))
@@ -71,10 +87,18 @@ func TestWorkspace_Update_OwnerGated(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("member update = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
+	if got := wsName(t, d, ws.ID); got != ws.Name {
+		t.Fatalf("a member's REFUSED update renamed the workspace: %q -> %q", ws.Name, got)
+	}
 
 	rr = httptest.NewRecorder()
 	h.Update(rr, wsReq(http.MethodPatch, ws.ID, authz.RoleOwner, `{"name":"Renamed"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("owner update = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	// Must-stay-green companion: without it the refusal assertion above would also pass
+	// on a handler that never writes at all, and would be justified by no mutation.
+	if got := wsName(t, d, ws.ID); got != "Renamed" {
+		t.Fatalf("owner update = 200 but the stored name is %q, want %q", got, "Renamed")
 	}
 }
