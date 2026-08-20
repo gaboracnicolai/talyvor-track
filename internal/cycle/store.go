@@ -272,12 +272,22 @@ func (s *Store) GetProgress(ctx context.Context, cycleID, workspaceID string) (*
 	return p, nil
 }
 
-// endOfDay is the burndown day boundary: 23:59:59 in the day's OWN location, which is the location
-// Postgres handed back with the cycle's start_date. Extracted from the loop it used to sit in so
-// the loop and the query that feeds it cannot drift apart on what "that day" means. The analytics
-// engine has the same helper for its own copy of this report.
-func endOfDay(day time.Time) time.Time {
-	return time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())
+// dayEndExclusive is the burndown day boundary: the FIRST instant of the following day, in the
+// day's OWN location, which is the location Postgres handed back with the cycle's start_date.
+// Extracted from the loop it used to sit in so the loop and the query that feeds it cannot drift
+// apart on what "that day" means. The analytics engine has the same helper for its own copy of
+// this report, and the two are kept identical DELIBERATELY — one rule written twice, pinned as one
+// by TestBurndown_BothPortsAgreeOnTheFinalSecond_RealPG.
+//
+// ⚠ IT IS EXCLUSIVE, AND EVERY COMPARISON AGAINST IT MUST BE STRICT. It used to return
+// 23:59:59.000000000 and both consumers compared with `<=`, which put the half-open second
+// [23:59:59.000000001, 23:59:59.999999999] OUTSIDE the day. completed_at is TIMESTAMPTZ and
+// issue.Store.Update stamps it from time.Now().UTC(), so sub-second values are the ordinary shape
+// of the data. On an interior day that lost second was a one-day lag; on the cycle's LAST day it
+// was terminal, because the read's own bound was that same instant and no later day existed to
+// absorb the row.
+func dayEndExclusive(day time.Time) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location()).AddDate(0, 0, 1)
 }
 
 type BurndownPoint struct {
@@ -326,9 +336,9 @@ func (s *Store) GetBurndown(ctx context.Context, cycleID, workspaceID string) ([
 	// unbounded. That is a number on a product surface, written up in the queue rather than chosen.
 	rows, err := s.pool.Query(ctx,
 		`SELECT completed_at FROM issues
-        WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at <= $2
+        WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at < $2
         ORDER BY completed_at`,
-		cycleID, endOfDay(c.StartDate.AddDate(0, 0, days-1)),
+		cycleID, dayEndExclusive(c.StartDate.AddDate(0, 0, days-1)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("cycle: burndown completions: %w", err)
@@ -351,8 +361,8 @@ func (s *Store) GetBurndown(ctx context.Context, cycleID, workspaceID string) ([
 	completed := 0
 	for i := 0; i < days; i++ {
 		day := c.StartDate.AddDate(0, 0, i)
-		eod := endOfDay(day)
-		for completed < len(completions) && !completions[completed].After(eod) {
+		eod := dayEndExclusive(day)
+		for completed < len(completions) && completions[completed].Before(eod) {
 			completed++
 		}
 
