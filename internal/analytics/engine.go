@@ -54,23 +54,39 @@ func New(pool *pgxpool.Pool) *Engine {
 
 func newEngine(db pgxDB) *Engine { return &Engine{pool: db} }
 
-// endOfDay is the burndown day boundary: 23:59:59 in the day's OWN location, which is the location
-// Postgres handed back with the cycle's start_date. Extracted from the loop it used to sit in so
-// the loop and the query that feeds it cannot drift apart on what "that day" means.
-func endOfDay(day time.Time) time.Time {
-	return time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, day.Location())
+// dayEndExclusive is the burndown day boundary: the FIRST instant of the following day, in the
+// day's OWN location, which is the location Postgres handed back with the cycle's start_date.
+// Extracted from the loop it used to sit in so the loop and the query that feeds it cannot drift
+// apart on what "that day" means.
+//
+// ⚠ IT IS EXCLUSIVE, AND EVERY COMPARISON AGAINST IT MUST BE STRICT. It used to return
+// 23:59:59.000000000 and both consumers compared with `<=`, which put the half-open second
+// [23:59:59.000000001, 23:59:59.999999999] OUTSIDE the day. completed_at is TIMESTAMPTZ and
+// issue.Store.Update stamps it from time.Now().UTC(), so sub-second values are the ordinary shape
+// of the data, not a constructed one. On an interior day that lost second showed up as a one-day
+// lag; on the cycle's LAST day it was terminal, because the read's own bound was that same instant
+// and no later day existed to absorb the row — a cycle that closed all its work reported issues
+// still remaining and drew the "Off track" badge. Guarded by
+// TestBurndown_TheFinalSecondOfADayIsInThatDay_RealPG.
+//
+// The name carries the requirement because that is the only thing that survives a refactor: a
+// helper called endOfDay invites `<=`, and `<=` against an exclusive bound is the same defect back.
+func dayEndExclusive(day time.Time) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location()).AddDate(0, 0, 1)
 }
 
-// completionsThrough returns the ordered completion instants of the cycle's issues up to and
-// including `through`. It is the single read that replaced the per-day COUNT(*) — see GetBurndown.
+// completionsThrough returns the ordered completion instants of the cycle's issues STRICTLY BEFORE
+// `through`. It is the single read that replaced the per-day COUNT(*) — see GetBurndown. The bound
+// is exclusive because dayEndExclusive is; it used to read "up to and including" against an
+// inclusive 23:59:59 and lost the final second of the day.
 //
-// ⚠ THE `<= through` BOUND IS AN EARLY-OUT, NOT A CORRECTNESS TERM: rows completed after the last
+// ⚠ THE `< through` BOUND IS AN EARLY-OUT, NOT A CORRECTNESS TERM: rows completed after the last
 // day of the window are excluded by the walk anyway. It is here so a cycle whose issues kept being
 // completed long after it ended does not ship rows nobody counts.
 func completionsThrough(ctx context.Context, db pgxDB, cycleID string, through time.Time) ([]time.Time, error) {
 	rows, err := db.Query(ctx,
 		`SELECT completed_at FROM issues
-        WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at <= $2
+        WHERE cycle_id = $1 AND completed_at IS NOT NULL AND completed_at < $2
         ORDER BY completed_at`, cycleID, through)
 	if err != nil {
 		return nil, err
@@ -213,12 +229,12 @@ func (e *Engine) GetBurndown(ctx context.Context, cycleID, workspaceID string) (
 	// CUMULATIVE count. So the completion instants are read once, ordered, and walked alongside the
 	// days below. THE BOUNDARIES ARE STILL COMPUTED IN Go, EXACTLY AS BEFORE — no date arithmetic
 	// moves into SQL, so nothing is reinterpreted in a timezone the old code did not use, and
-	// `!ct.After(eod)` is `completed_at <= eod` on the same two instants.
+	// `ct.Before(eod)` is `completed_at < eod` on the same two instants.
 	//
 	// ⚠ WHAT IS NOT FIXED HERE: the report still RENDERS one point per day, so a 365,000-day cycle
 	// still serialises 106,752 points. Bounding a cycle's span is a number on a product surface and
 	// is written up in the queue rather than chosen here.
-	completions, err := completionsThrough(ctx, e.pool, cycleID, endOfDay(start.AddDate(0, 0, days-1)))
+	completions, err := completionsThrough(ctx, e.pool, cycleID, dayEndExclusive(start.AddDate(0, 0, days-1)))
 	if err != nil {
 		return nil, fmt.Errorf("analytics: burndown completions: %w", err)
 	}
@@ -246,8 +262,8 @@ func (e *Engine) GetBurndown(ctx context.Context, cycleID, workspaceID string) (
 	completed := 0
 	for i := 0; i < days; i++ {
 		day := start.AddDate(0, 0, i)
-		eod := endOfDay(day)
-		for completed < len(completions) && !completions[completed].After(eod) {
+		eod := dayEndExclusive(day)
+		for completed < len(completions) && completions[completed].Before(eod) {
 			completed++
 		}
 		ideal := total
