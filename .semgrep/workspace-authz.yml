@@ -75,6 +75,13 @@ rules:
       authz.AuthorizeWorkspace(ctx, workspaceID) (-> 403 if not a member), as the importer does.
       NOTE: this catches the query form only; the body / tool-arg form (in.WorkspaceID) is
       provenance-dependent and NOT statically detectable — see this file's header.
+      SECOND LIMIT, MEASURED: this rule asserts the CALL IS PRESENT in the function and NOTHING
+      about what is done with its answer. Deleting the `if !ok { 403; return }` while leaving the
+      call scores NOT CAUGHT at all six production sites — so the refusal is enforced by the
+      tests, never by this rule. Four of the six are covered behaviourally (importer x3, realtime
+      ServeWS); the two integrations routes were covered by NOTHING until #174 added a refusal
+      test naming the FORBIDDEN code. Do not read "the IDOR lock covers this route" as "a
+      non-member is refused".
     patterns:
       - pattern: $R.URL.Query().Get("workspace_id")
       - pattern-not-inside: |
