@@ -2,9 +2,21 @@ rules:
   # Regression lock (multi-member tier model): the four privileged operations that are
   # owner-gated MUST call the authz owner gate and 403 a non-owner. Each rule is scoped by
   # paths.include to the single handler file that owns the op, matches the specific handler
-  # method, and flags it when the `if !authz.IsOwner(...)`/`IsOwnerRole(...)` guard is absent.
+  # method, and flags it when the `if !authz.IsOwner(...)`/`IsOwnerRole(...)` guard is absent
+  # OR PRESENT BUT INERT.
   # INVALIDATED IF the guard is removed, renamed, or the op stops reading r.Context()/m.Role
   # — any of which drops the tier check and lets a plain member perform the elevated action.
+  #
+  # EVERY pattern-not REQUIRES THE `return`, and that is the whole point of the shape. These
+  # rules used to assert only that a gate was WRITTEN; semgrep's `...` matches any body, so a
+  # gate that wrote 403 and then fell through satisfied the pattern-not and every rule stayed
+  # green. `writeErr` does not stop the handler — the client is told "owner role required"
+  # while execution continues into the store call, so the response says refused and the write
+  # LANDS. MEASURED at main 6ab790d, one `return` removed per site: all EIGHT rules scored NOT
+  # CAUGHT, and for workspace.Update and integrations.set NOTHING IN THE REPOSITORY caught it
+  # either (their tests asserted rr.Code == 403 and never read the effect back). Census and
+  # both directions: scripts/w34-inert-ownergate-census-7k2p.py. Gate-deleted controls:
+  # scripts/w34-ownergate-lock-controls-3w9m.py.
   - id: workspace-delete-requires-owner
     languages: [go]
     severity: ERROR
@@ -24,6 +36,7 @@ rules:
             ...
             if !authz.IsOwner(r.Context()) {
               ...
+              return
             }
             ...
           }
@@ -47,6 +60,7 @@ rules:
             ...
             if !authz.IsOwner(r.Context()) {
               ...
+              return
             }
             ...
           }
@@ -70,6 +84,7 @@ rules:
             ...
             if !authz.IsOwner(r.Context()) {
               ...
+              return
             }
             ...
           }
@@ -93,6 +108,7 @@ rules:
             ...
             if !authz.IsOwner(r.Context()) {
               ...
+              return
             }
             ...
           }
@@ -117,6 +133,7 @@ rules:
             ...
             if !authz.IsOwnerRole(m.Role) {
               ...
+              return
             }
             ...
           }
@@ -143,6 +160,10 @@ rules:
           func (h *MgmtHandler) Add(w http.ResponseWriter, r *http.Request) {
             ...
             $WS, $OK := h.requireOwner(w, r)
+            if !$OK {
+              ...
+              return
+            }
             ...
           }
 
@@ -164,6 +185,10 @@ rules:
           func (h *MgmtHandler) ChangeRole(w http.ResponseWriter, r *http.Request) {
             ...
             $WS, $OK := h.requireOwner(w, r)
+            if !$OK {
+              ...
+              return
+            }
             ...
           }
 
@@ -185,5 +210,9 @@ rules:
           func (h *MgmtHandler) Remove(w http.ResponseWriter, r *http.Request) {
             ...
             $WS, $OK := h.requireOwner(w, r)
+            if !$OK {
+              ...
+              return
+            }
             ...
           }
