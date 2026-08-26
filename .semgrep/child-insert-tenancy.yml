@@ -109,11 +109,34 @@ rules:
           }
       # SAFE when the function performs the inline parent-workspace comparison against the
       # authz-supplied workspaceID param (customfield.SetValue: SELECT workspace_id FROM the
-      # parent, then reject on mismatch). A future writer that forgets the check has no such
+      # parent, then reject on mismatch).
+      #
+      # ⚠ THE `return` IS REQUIRED, AND IT WAS NOT. This exemption read
+      # `if $X != workspaceID { ... }`, and semgrep's `...` matches ANY body — so a comparison
+      # that was WRITTEN but did nothing bought the exemption, the same defect #173 found in
+      # owner-gate.yml and #178 found in workspace-authz.yml rule A. MEASURED at f240c2f:
+      # making customfield.SetValue's SEC-5 check inert (`if issueWS != workspaceID { _ = issueWS }`)
+      # scored semgrep NOT CAUGHT. With `return` required it scores CAUGHT.
+      #
+      # ⚠⚠ RESIDUAL, MEASURED NOT ASSUMED — THE EXEMPTION STILL CANNOT SAY *WHICH* COMPARISON IT
+      # IS RELEASING. SetValue has TWO: the SEC-5 caller check (`issueWS != workspaceID`) and the
+      # field/issue check (`issueWS != field.WorkspaceID`). Only the first matches this pattern, so
+      # making the SECOND inert leaves the first buying the exemption and the rule stays green —
+      # scored NOT CAUGHT, and it stays NOT CAUGHT after this fix. That half is held behaviourally
+      # by customfield's TestSetValue_ObjectGraph_RejectsCrossWorkspace, which catches BOTH
+      # mutations. Closing it structurally needs the rule to bind the comparison to the INSERT's
+      # parent reference, which these patterns cannot express — stated here rather than left for
+      # the next reader to rediscover. scripts/w34-childinsert-exemption-controls-8x2m.py scores
+      # all of it.
+      #
+      # A future writer that forgets the check has no such
       # comparison and is still flagged.
       - pattern-not-inside: |
           func $F(...) $R {
             ...
-            if $X != workspaceID { ... }
+            if $X != workspaceID {
+              ...
+              return $E
+            }
             ...
           }
