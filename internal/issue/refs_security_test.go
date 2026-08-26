@@ -12,8 +12,17 @@ import (
 // TestIssueRefs_ObjectGraph_RejectCrossWorkspace — settable cross-object references
 // (parent_id / assignee_id on Update, team_id on Create) must point at an object in
 // the issue's OWN workspace; a reference from another workspace is refused, while a
-// same-workspace reference still works. project_id / cycle_id ride the identical
-// validation path. Real Postgres via the harness.
+// same-workspace reference still works. Real Postgres via the harness.
+//
+// ⚠ THIS HEADER USED TO SAY "project_id / cycle_id ride the identical validation path", AND THAT
+// WAS TRUE OF UPDATE ONLY. Update runs validateRefWorkspaces, which iterates the SHARED
+// issueRefQueries map, so every key in it is covered by one code path. CREATE DOES NOT: it loops
+// its OWN LITERAL field list, a second copy, and a field present in one and absent from the other
+// was exactly what nothing checked. MEASURED at ae57b43, one field dropped from CREATE's list at a
+// time: project_id, cycle_id, assignee_id and parent_id were ALL NOT CAUGHT by the whole
+// repository — including the two this file names, because both of its cases are Update-only.
+// Create's list is now held by create_refs_tenancy_realpg_test.go. A "rides the same path" claim
+// is a coverage claim, and this one was load-bearing for four guards while being false.
 func TestIssueRefs_ObjectGraph_RejectCrossWorkspace(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
