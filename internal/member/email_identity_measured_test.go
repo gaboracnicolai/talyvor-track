@@ -228,3 +228,44 @@ func TestMeasured_GuestsCanonicaliseAndMembersDoNot(t *testing.T) {
 			"is the outcome the queue item asks for. Rewrite this test to pin the new rule.", stored)
 	}
 }
+
+// TestMeasured_TheGatewayProducerStoresTheRawAddressToo closes a hole this file's own controls
+// found. PC5 of the merge review canonicalised ONLY `workspace.CreateWithOwner` — the GATEWAY
+// producer named in this file's header — and all three tests above stayed GREEN, because every
+// owner address they seed is already canonical. So the file's headline claim ("members is the only
+// email-keyed identity that is not canonicalised") could have become half true with its whole
+// guard green, and the next session would have read three passing tests as covering both writers.
+//
+// `CreateWithOwner` interpolates `ownerEmail` twice, raw, into `INSERT INTO members (…name, email…)`
+// (workspace/store.go:151). That is the IdP-supplied identity, so in practice it arrives
+// machine-cased and this is latent rather than firing — which is exactly why nothing else pins it.
+func TestMeasured_TheGatewayProducerStoresTheRawAddressToo(t *testing.T) {
+	d := testutil.New(t)
+	ctx := context.Background()
+
+	const fromIdP = "  Dave@Acme.Com  "
+	ws := newAcmeWorkspace(t, d, "acme-gateway", fromIdP)
+
+	var stored string
+	if err := d.Pool.QueryRow(ctx,
+		`SELECT email FROM members WHERE workspace_id=$1 AND role='owner'`, ws.ID).Scan(&stored); err != nil {
+		t.Fatalf("read owner email: %v", err)
+	}
+	if stored != fromIdP {
+		t.Errorf("CreateWithOwner stored %q for owner email %q — the GATEWAY producer now "+
+			"normalises. That is half the fix landing; the other half is member.AddMember, which "+
+			"the tests above pin. Update both rather than relaxing either.", stored, fromIdP)
+	}
+
+	// And the consequence, so this is a measurement of ACCESS and not of a string: the owner row
+	// exists and the address the IdP would send next time reaches nothing.
+	r := authz.NewPGResolver(d.Pool)
+	if mm, err := r.MembershipsByEmail(ctx, "dave@acme.com"); err != nil || len(mm) != 0 {
+		t.Errorf("MembershipsByEmail(%q) = %d, %v; measured 0 — the seeded owner is reachable "+
+			"only by the exact bytes the gateway sent.", "dave@acme.com", len(mm), err)
+	}
+	if mm, err := r.MembershipsByEmail(ctx, fromIdP); err != nil || len(mm) != 1 {
+		t.Errorf("MembershipsByEmail(%q) = %d, %v; want exactly 1 — this is the spelling that was "+
+			"stored, and it is the only one that resolves.", fromIdP, len(mm), err)
+	}
+}
