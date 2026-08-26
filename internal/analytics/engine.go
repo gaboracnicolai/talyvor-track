@@ -66,8 +66,19 @@ func newEngine(db pgxDB) *Engine { return &Engine{pool: db} }
 // of the data, not a constructed one. On an interior day that lost second showed up as a one-day
 // lag; on the cycle's LAST day it was terminal, because the read's own bound was that same instant
 // and no later day existed to absorb the row — a cycle that closed all its work reported issues
-// still remaining and drew the "Off track" badge. Guarded by
-// TestBurndown_TheFinalSecondOfADayIsInThatDay_RealPG.
+// still remaining and drew the "Off track" badge.
+//
+// ⚠ THE TWO HALVES OF THAT REQUIREMENT ARE GUARDED BY DIFFERENT TESTS, AND THIS COMMENT USED TO
+// NAME ONLY THE FIRST FOR BOTH:
+//   - the VALUE (exclusive midnight, not an inclusive 23:59:59) —
+//     TestBurndown_TheFinalSecondOfADayIsInThatDay_RealPG.
+//   - the STRICTNESS of every comparison against it —
+//     TestBurndown_AMidnightCompletionBelongsToTheDayItOPENS_RealPG.
+//
+// MEASURED at 2957231: turning the walk's `.Before(eod)` into `!.After(eod)` is NOT CAUGHT by the
+// final-second test. Its fixture sits at 23:59:59.5, which is strictly inside the day under BOTH
+// predicates once the boundary is midnight — the instant that discriminates moved when the
+// boundary did, and only a completion at EXACTLY midnight can tell the two apart.
 //
 // The name carries the requirement because that is the only thing that survives a refactor: a
 // helper called endOfDay invites `<=`, and `<=` against an exclusive bound is the same defect back.
@@ -83,6 +94,13 @@ func dayEndExclusive(day time.Time) time.Time {
 // ⚠ THE `< through` BOUND IS AN EARLY-OUT, NOT A CORRECTNESS TERM: rows completed after the last
 // day of the window are excluded by the walk anyway. It is here so a cycle whose issues kept being
 // completed long after it ended does not ship rows nobody counts.
+//
+// ⚠ THAT IS MEASURED, NOT REASONED, AND IT CUTS BOTH WAYS. Making this predicate fully inert
+// (`completed_at < $2 OR TRUE`) is NOT CAUGHT by the whole repository and the report is unchanged
+// — the claim above is true. It also means NOTHING HOLDS THIS LINE: `<` here could become `<=`,
+// or the bound could be dropped, and no test would say so. Deliberately unasserted rather than
+// unnoticed; the day the walk stops re-excluding these rows, this becomes a correctness term with
+// no guard. See burndown_midnight_boundary_realpg_test.go and its control N4.
 func completionsThrough(ctx context.Context, db pgxDB, cycleID string, through time.Time) ([]time.Time, error) {
 	rows, err := db.Query(ctx,
 		`SELECT completed_at FROM issues
