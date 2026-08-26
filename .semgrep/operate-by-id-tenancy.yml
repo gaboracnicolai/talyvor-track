@@ -76,12 +76,21 @@ rules:
       # "machine-proof over the whole by-id surface" claim holds for literal, concatenated, const- and
       # Sprintf-built statements, and NOT for runtime-assembled ones. Groups 1-4 scoped every user-facing by-id DELETE/UPDATE (AND workspace_id / join).
       #
-      # The only remaining suppressions are three INLINE `nosemgrep` lines, each with a written
-      # justification at the code, for by-id writes that are genuinely NOT workspace-membership
-      # scoped (a reviewer sees the reason in context, not hidden in a path glob):
+      # The remaining suppressions are INLINE `nosemgrep` lines, each with a written justification at
+      # the code, for by-id writes that are genuinely NOT workspace-membership scoped (a reviewer
+      # sees the reason in context, not hidden in a path glob):
       #   - workspace/store.go Delete   — self-scoping: id IS the authorized workspace (tenant root)
+      #   - workspace/store.go Update   — same, via the -sprintf companion rule
       #   - guest/store.go invite-accept — token-scoped: id resolved from a secret bearer token
       #   - featureboard/store.go vote×2 — public board: assertPostOnPublicBoard-guarded, email-identified
+      #
+      # ⚠ THIS LIST SAID "three" AND THERE WERE FIVE, WITH workspace/store.go's -sprintf SUPPRESSION
+      # MISSING FROM IT ENTIRELY. Counted at 74ca01b: FIVE on this rule family and NINE across all
+      # four locks (child-insert ×3, caller-workspace-id-query ×1). A prose census of holes goes
+      # stale the first moment somebody adds a hole, and nothing was checking this one. THE COUNT IS
+      # NO LONGER MAINTAINED HERE: internal/tenancy/suppression_census_test.go holds a per-rule
+      # CEILING and requires every suppression to carry an INVALIDATED IF clause. Adding one is now
+      # an edit to that map in the same commit; removing one is free.
       exclude: []
 
   - id: operate-by-id-write-requires-workspace-scope-sprintf
