@@ -394,8 +394,15 @@ func (s *Store) GetScoreSummary(ctx context.Context, workspaceID string) (*Score
             (SELECT COUNT(*) FROM issue_scores WHERE workspace_id = $1) AS total_scored,
             (SELECT COALESCE(AVG(rice_score), 0) FROM issue_scores WHERE workspace_id = $1 AND rice_score IS NOT NULL) AS avg_rice,
             (SELECT COALESCE(AVG(ice_score), 0) FROM issue_scores WHERE workspace_id = $1 AND ice_score IS NOT NULL) AS avg_ice,
-            (SELECT COALESCE(issue_id, '') FROM issue_scores WHERE workspace_id = $1
-                ORDER BY GREATEST(COALESCE(rice_score, 0), COALESCE(ice_score, 0)) DESC LIMIT 1) AS top_issue_id`,
+            -- ⚠ THE COALESCE IS OUTSIDE THE SUBQUERY ON PURPOSE. The four subqueries above are
+            -- AGGREGATES, and an aggregate over an empty table still returns one row, so a COALESCE
+            -- written inside them runs. This one is not an aggregate: on a workspace with no scores
+            -- it selects ZERO ROWS and the scalar subquery is NULL, and a COALESCE inside would have
+            -- no row to run on. Inside it was also DEAD in the other direction — issue_scores.issue_id
+            -- is NOT NULL (0015), so the argument could never be NULL on a row that exists.
+            -- Held by summary_empty_workspace_realpg_test.go, on real Postgres.
+            COALESCE((SELECT issue_id FROM issue_scores WHERE workspace_id = $1
+                ORDER BY GREATEST(COALESCE(rice_score, 0), COALESCE(ice_score, 0)) DESC LIMIT 1), '') AS top_issue_id`,
 		workspaceID,
 	).Scan(&totalIssues, &totalScored, &avgRice, &avgIce, &topIssueID)
 	if err != nil {
