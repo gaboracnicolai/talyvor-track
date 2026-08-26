@@ -110,6 +110,14 @@ func (h *Handler) Mount(r chi.Router) {
 		// drag-and-drop relies on this endpoint to apply column moves
 		// atomically.
 		r.Patch("/bulk-update", h.BulkUpdate)
+		// Resolve an issue by its human key (ENG-42). The store lookup already existed and is
+		// already workspace-scoped; nothing served it over /v1, so the CLI agent's Track client
+		// put an identifier in the {id} slot below and got 404 for issues that exist — measured
+		// on the wire, talyvor-code #57 (W3.6/W4.20). It is NOT ambiguous with /{id}: this path
+		// has two segments after /issues where /{id} has one, and chi resolves the literal
+		// "by-identifier" node before any param at that level. Asserted, not assumed — see
+		// by_identifier_route_test.go, which pins every neighbour.
+		r.Get("/by-identifier/{identifier}", h.GetByIdentifier)
 		r.Get("/{id}", h.Get)
 		r.Patch("/{id}", h.Update)
 		r.Delete("/{id}", h.Delete)
@@ -326,6 +334,31 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	// SEC-5: scoped read — foreign id → ErrNotFound → 404 (no disclosure, no oracle).
 	out, err := h.store.getInWorkspace(r.Context(), chi.URLParam(r, "id"), wsID)
 	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// GetByIdentifier resolves ENG-42 inside the caller's authorized workspace.
+//
+// ⚠ THE 404 IS THE WHOLE DESIGN AND IT MUST STAY INDISTINGUISHABLE. A foreign workspace's
+// identifier and an identifier nobody has answer the SAME status and the SAME body, exactly as
+// h.Get does for ids. Anything else is a cross-tenant existence oracle — and it would be worse
+// here than there, because identifiers are GUESSABLE (ENG-1, ENG-2, …) where uuids are not.
+// by_identifier_route_test.go compares the two bodies rather than only their statuses.
+//
+// The store call is the same one MCP and the GitHub automation already use, and it refuses an
+// empty workspace id itself ("an unscoped identifier lookup crosses tenants"), so the scope is
+// enforced twice: once by the route's authz context and once by the store.
+func (h *Handler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	out, err := h.store.GetByIdentifier(r.Context(), chi.URLParam(r, "identifier"), wsID)
+	if err != nil || out == nil {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
