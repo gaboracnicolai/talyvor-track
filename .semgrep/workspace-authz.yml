@@ -34,8 +34,30 @@ rules:
       Reading the workspace from chi.URLParam("wsID") trusts the caller-chosen URL — the pre-T10
       IDOR shape. Read the server-authorized workspace from authz.WorkspaceID(ctx) instead (set
       only after the T10 membership check). The ONLY allowed readers are guest-token routes that
-      validate the URL wsID against the token (if claims.WorkspaceID != wsID { reject }); the
-      exemption keys on that comparison, not on the guest package.
+      validate the URL wsID against the token AND RETURN on mismatch
+      (if claims.WorkspaceID != wsID { ...; return }); the exemption keys on that comparison
+      REFUSING, not on the guest package and not on the comparison merely being written.
+      ⚠ THE `return` IS REQUIRED AND THAT IS THE WHOLE SHAPE. This exemption used to end the
+      guard body with a bare `...`, which semgrep matches against ANY body — so a gate that
+      wrote its 403 and then FELL THROUGH bought the exemption and this rule stayed green.
+      writeErr does not stop the handler: it sets the status and execution continues into the
+      read, which is scoped by the CALLER'S URL workspace. Same defect #173 found in
+      owner-gate.yml; #174 strengthened those rules and never touched this one. MEASURED at
+      bceb6c5, one `return` deleted per site: GuestCreateComment / GuestListIssues /
+      GuestGetIssue all scored NOT CAUGHT by this rule, and the two READ routes were caught by
+      NOTHING in the repository until internal/guest/read_tenancy_test.go.
+      ⚠ AND THE EXEMPTION IS PINNED TO THE LITERAL `claims`, NOT A METAVARIABLE, FOR A MEASURED
+      REASON. It read `if $CLAIMS.WorkspaceID != $WS` and a metavariable matches ANY receiver —
+      so GuestGetIssue's OBJECT check (`if out.WorkspaceID != wsID { ...; return }`) and
+      GuestCreateComment's (`if iss.WorkspaceID != wsID { ...; return }`) BOUGHT THE EXEMPTION
+      while the TOKEN check above them was inert. MEASURED: with `return` required but the
+      receiver still a metavariable, only GuestListIssues — the one function with no second
+      comparison of that shape — was caught; the other two stayed green. A rule that cannot tell
+      WHICH comparison it is exempting is exempting the wrong one.
+      ⚠ HONEST LIMIT OF THE FIX: `claims` is a NAME. Renaming that binding blinds this exemption,
+      which fails OPEN (the rule then FIRES on a correct route) rather than closed — noisy, not
+      silent, and control C-NAME in scripts/w34-guest-inert-controls-8x2m.py scores it. The
+      behavioural half (internal/guest/read_tenancy_test.go) does not depend on the name.
     patterns:
       - pattern: chi.URLParam($R, "wsID")
       - pattern-not-inside: |
@@ -43,8 +65,9 @@ rules:
             ...
             $WS := chi.URLParam($RR, "wsID")
             ...
-            if $CLAIMS.WorkspaceID != $WS {
+            if claims.WorkspaceID != $WS {
               ...
+              return
             }
             ...
           }
