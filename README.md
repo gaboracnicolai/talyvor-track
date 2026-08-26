@@ -90,12 +90,42 @@ Twelve tools are exposed: `create_issue`, `update_issue`, `get_issue`, `list_iss
 
 `get_ai_costs` is unique to Track — no other issue tracker exposes per-workspace LLM cost data through MCP.
 
+## Calling /v1 directly
+
+Every `/v1` route above sits behind Track's auth boundary, and `docker compose up` publishes
+Track on `:3000` with **no gateway in front of it** — so a `curl` that omits the two headers
+below does not partly work, it is refused before it reaches a handler. Measured against a
+from-zero database with the workspace, member and team seeded:
+
+| what you send | what you get |
+| --- | --- |
+| neither header | `401 GATEWAY_AUTH_REQUIRED` |
+| `X-Gateway-Auth` only | `403 WORKSPACE_FORBIDDEN` |
+| `X-User-Email` only, or a wrong proof | `401 GATEWAY_AUTH_REQUIRED` |
+| both, email is a member of `workspace_id` | `200` |
+
+- **`X-Gateway-Auth`** is the transit proof: the value of `GATEWAY_AUTH_SECRET`, the same one
+  the server booted with. In production the edge gateway injects it after validating a Bearer
+  JWT, and it is what makes the identity headers trustworthy — anything that can reach the
+  port can *claim* to be you, only something that transited the gateway can prove it. There is
+  no default and there never will be: an earlier one was shipped in this repo's compose file
+  and is now permanently rejected, because git history cannot be un-published.
+- **`X-User-Email`** is the workspace-member join key. It must already be a member of the
+  `workspace_id` you are importing into; an unknown address is `403`, not an implicit invite.
+
+⚠ **On the imports specifically, read the body rather than the status code.** A row the mapper
+cannot place is reported, not thrown: a wrong `team_id` returns **`200`** with
+`{"imported":0,"skipped":1,"errors":["… team not found in workspace …"]}`. `imported` is the
+number that tells you the migration happened.
+
 ## Migrate from Linear
 
 ```bash
 # 1. Export from Linear: Settings → Export data → CSV
-# 2. Import to Track:
+# 2. Import to Track (see "Calling /v1 directly" below for the two headers):
 curl -X POST "http://localhost:3000/v1/import/linear?workspace_id=WS&team_id=TEAM" \
+  -H "X-Gateway-Auth: $GATEWAY_AUTH_SECRET" \
+  -H "X-User-Email: you@example.com" \
   -F "file=@linear-export.csv"
 ```
 
@@ -105,8 +135,10 @@ Status mapping: `Backlog → backlog`, `Todo → todo`, `In Progress → in_prog
 
 ```bash
 # 1. Export from Jira: Issues → Export → CSV (Current fields)
-# 2. Import to Track:
+# 2. Import to Track (see "Calling /v1 directly" below for the two headers):
 curl -X POST "http://localhost:3000/v1/import/jira?workspace_id=WS&team_id=TEAM" \
+  -H "X-Gateway-Auth: $GATEWAY_AUTH_SECRET" \
+  -H "X-User-Email: you@example.com" \
   -F "file=@jira-export.csv"
 ```
 
