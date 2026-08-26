@@ -52,25 +52,89 @@ rules:
           - pattern-either:
               - pattern: $Q.QueryRow($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES/", ...)
               - pattern: $Q.Exec($CTX, "=~/(?s).*INSERT\s+INTO\s+\w+\s*\([^)]*\bworkspace_id\b[^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\)\s*VALUES|.*INSERT\s+INTO\s+\w+\s*\([^)]*\b(team_id|project_id|board_id|member_id|issue_id|cycle_id|parent_id|assignee_id|milestone_id|source_id|target_id)\b[^)]*\bworkspace_id\b[^)]*\)\s*VALUES/", ...)
-      # Excluded when the enclosing function routes the reference through a workspace
-      # guard: the shared primitive, or a grandfathered per-store guard.
+      # Excluded when the enclosing function routes the reference through a workspace guard AND
+      # ACTS ON THE ANSWER: the shared primitive, or a grandfathered per-store guard.
+      #
+      # ⚠⚠ EVERY ARM BELOW REQUIRES THE `return`, AND THAT IS THE WHOLE POINT OF THE SHAPE. These
+      # arms used to release a function that merely CONTAINED a guard call — semgrep's `...`
+      # matches any body, so a guard whose refusal never fires satisfied the exemption and this
+      # rule stayed green. It is the identical defect #173 removed from owner-gate.yml ("a gate
+      # that wrote 403 and then fell through satisfied the pattern-not"), one rule over, and #174
+      # recorded the same limit for rule C and it was never re-measured here.
+      #
+      # MEASURED at `a0e9185`, per site: leave the call, disable its refusal
+      # (`if err := <guard>; err != nil && false {`), and ask semgrep. TWELVE SITES, semgrep
+      # CAUGHT **0 of 12** — every arm kept its exemption with the guard inert. With the arms
+      # below it is **10 of 12**, and the other two are two DIFFERENT things, both measured every
+      # run by scripts/w34-refguard-semgrep-census-m3r8.py rather than left as a shortfall:
+      #
+      #   · template/store.go:388 is in ApplyTemplate, which LOOKS UP and never INSERTs. This rule
+      #     is cross-object-INSERT-requires-tenancy-guard, so a function with no INSERT is outside
+      #     its population by construction. The census proves that is the reason rather than a
+      #     blind package: template's OTHER guard — Create/team_id, which DOES sit beside an
+      #     INSERT — is CAUGHT.
+      #   · notification/store.go guards TWO refs in ONE function (members :64, issues :68), and
+      #     `pattern-not-inside` is per-FUNCTION, not per-REFERENCE. Either intact guard releases
+      #     the whole function, so ONE inert guard hides behind its sibling. Shown both ways:
+      #     either alone NOT CAUGHT, both together CAUGHT. ⚠ THAT SITE IS STILL HELD — both of its
+      #     guards are caught by `go test ./internal/notification/`, measured in each direction.
+      #     Semgrep is blind there; the repository is not. Closing it inside semgrep would mean
+      #     binding the guarded reference to the inserted one, which these patterns cannot express,
+      #     or a per-file rule — the curated-list shape this repo has already been bitten by.
+      #
+      # ⚠ TWO SHAPES PER GUARD, BECAUSE THIS REPOSITORY WRITES BOTH AND A SINGLE ARM WOULD FIRE
+      # ON THE OTHER. `if err := X(...); err != nil { ... return ... }` is the common one; a bare
+      # `return X(...)` — template/store.go:289's assertAssigneeInWorkspace — propagates the
+      # error just as completely and is just as guarded. #183 named this trap explicitly
+      # ("a single tightened arm would FIRE ON THE SECOND"); the clean-tree scan is what proves
+      # it does not.
+      #
+      # ⚠ WHAT THESE ARMS STILL CANNOT SEE, stated rather than implied: a bare `return X(...)`
+      # cannot be made inert by the census's mutation, so the second shape is exempted on its
+      # form rather than on a measurement of it. Making THAT inert means `X(...); return nil`,
+      # which changes the return statement itself — a different mutation, and one no arm here
+      # would catch. Named, not fixed.
       - pattern-not-inside: |
           func $F(...) $R {
             ...
-            tenancy.AssertRefInWorkspace(...)
+            if $E := tenancy.AssertRefInWorkspace(...); $E != nil {
+              ...
+              return ...
+            }
             ...
           }
       - pattern-not-inside: |
           func $F(...) $R {
             ...
-            $G.assertRefInWorkspace(...)
+            return tenancy.AssertRefInWorkspace(...)
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            if $E := $G.assertRefInWorkspace(...); $E != nil {
+              ...
+              return ...
+            }
             ...
           }
       - pattern-not-inside: |
           func $F(...) $R {
             ...
-            $G.assertIssueInWorkspace(...)
+            return $G.assertRefInWorkspace(...)
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
             ...
+            if $E := $G.assertIssueInWorkspace(...); $E != nil {
+              ...
+              return ...
+            }
+            ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            return $G.assertIssueInWorkspace(...)
           }
       # dependency.Store.Create's proof that BOTH relation endpoints are in the caller's
       # authorized workspace. Added with source_id|target_id above: until they were in the
@@ -80,6 +144,14 @@ rules:
       - pattern-not-inside: |
           func $F(...) $R {
             ...
-            $G.assertIssuesShareWorkspace(...)
+            if $E := $G.assertIssuesShareWorkspace(...); $E != nil {
+              ...
+              return ...
+            }
             ...
+          }
+      - pattern-not-inside: |
+          func $F(...) $R {
+            ...
+            return $G.assertIssuesShareWorkspace(...)
           }
