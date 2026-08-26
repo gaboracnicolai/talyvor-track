@@ -55,12 +55,57 @@ func mountedAnalyticsPatterns(t *testing.T, h *analytics.Handler) []string {
 	sort.Strings(out)
 
 	// POPULATION FLOOR. A walk that returned nothing would make every assertion below unreachable
-	// and both halves green for the worst possible reason. The count is deliberately NOT pinned —
-	// a new analytics route should be swept, not rejected — but the set may not be empty.
+	// and both halves green for the worst possible reason.
 	if len(out) == 0 {
 		t.Fatal("the analytics router mounted ZERO routes — this sweep would assert nothing")
 	}
+
+	// ── SHRINKAGE FLOOR. `len(out) == 0` was the ONLY floor here and it is not enough, because
+	// this sweep takes its population FROM THE THING IT IS TESTING: whatever Mount registers is
+	// exactly what gets swept, so a route DELETED from Mount leaves a smaller sweep that is still
+	// perfectly green. The registration was its own witness.
+	//
+	// ⚠ MEASURED at 15468c7, one route removed from Mount at a time, whole repository, real
+	// Postgres: ALL SEVEN — velocity, burndown, distribution, resolution, ai-costs, workload AND
+	// export — are NOT CAUGHT BY ANYTHING. `go test ./...` stays green with an endpoint gone.
+	// export was predicted CAUGHT because export_refusal_test.go names the URL; it is not, because
+	// that file calls h.Export(rec, req) DIRECTLY and never routes — the path string in it is
+	// decorative. This sweep is the ONLY test in the package that goes through Mount.
+	//
+	// A COUNT would not be enough either: seven-minus-one-plus-one still counts seven. This asserts
+	// CONTAINMENT, which catches removal AND rename/substitution while leaving growth completely
+	// unconstrained — a new route needs no edit here, which is the property the walked population
+	// above exists to preserve. It is deliberately NOT an equality for that reason.
+	have := map[string]bool{}
+	for _, r := range out {
+		have[r] = true
+	}
+	for _, want := range mustStayMounted {
+		if !have[want] {
+			t.Errorf("route %q is NO LONGER MOUNTED. Every assertion in this sweep is derived from "+
+				"the mounted set, so losing a route SHRINKS the sweep instead of failing it — the "+
+				"endpoint disappears from the API and this file goes on reporting a clean result "+
+				"over what is left. Mounted now: %v", want, out)
+		}
+	}
 	return out
+}
+
+// mustStayMounted is every route the analytics handler served at 15468c7, measured by walking the
+// router rather than transcribed from Mount. It is a FLOOR, not the sweep's population: the sweep
+// still walks the live router, so a route added tomorrow is swept automatically and needs no edit
+// here. This list only says which routes may not silently VANISH.
+//
+// If a route is deliberately retired, delete its line here in the same commit — that is the point.
+// The removal then appears in a diff a reviewer reads, instead of in nothing at all.
+var mustStayMounted = []string{
+	"GET /workspaces/{wsID}/analytics/ai-costs",
+	"GET /workspaces/{wsID}/analytics/burndown",
+	"GET /workspaces/{wsID}/analytics/distribution",
+	"GET /workspaces/{wsID}/analytics/export",
+	"GET /workspaces/{wsID}/analytics/resolution",
+	"GET /workspaces/{wsID}/analytics/velocity",
+	"GET /workspaces/{wsID}/analytics/workload",
 }
 
 // requestFor turns a walked chi pattern into a concrete request path.
