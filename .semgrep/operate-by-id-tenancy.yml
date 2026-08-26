@@ -30,6 +30,29 @@ rules:
               - pattern: $Q.QueryRow($CTX, "=~/(?s).*(DELETE\s+FROM\s+\w+|UPDATE\s+\w+\s+SET).*\bWHERE\s+id\s*=\s*\$/", ...)
       # Excluded when the SAME statement is already workspace-scoped (…AND workspace_id = $n):
       # the by-id op provably acts within one workspace and is safe.
+      #
+      # ⚠ THE EXEMPTION REQUIRES AN EQUALITY (`\bworkspace_id\s*=`), NOT A MENTION, AND IT USED TO
+      # REQUIRE ONLY A MENTION. `(?s).*workspace_id` matched the WORD ANYWHERE in the statement —
+      # a RETURNING clause, a SET target, even a comment — so a genuinely unscoped by-id write that
+      # merely NAMED the column bought the exemption. MEASURED at 3eaf713 on project.Store.Delete:
+      # `DELETE FROM projects WHERE id = $1 AND $2 <> '' RETURNING workspace_id` — no workspace
+      # predicate at all — scored NOT CAUGHT. It scores CAUGHT now. Removing the word entirely was
+      # CAUGHT both before and after, which is the positive control proving the rule fires here.
+      #
+      # ⚠⚠ THIS IS THE FOURTH MEMBER OF ONE FAMILY IN THIS REPOSITORY, AND THE FIRST IN TEXT RATHER
+      # THAN AST FORM. #173 owner-gate: `...` matches any body, so an inert gate satisfies the
+      # pattern-not. #178 workspace-authz rule A: a metavariable receiver, so the WRONG INSTANCE of
+      # a repeated shape buys the exemption. #180 child-insert: both at once. Here: a substring
+      # match, so a MENTION buys it rather than a predicate. ROOT CAUSE EVERY TIME — THE EXEMPTION
+      # IS KEYED ON A CONSTRUCT BEING PRESENT, NOT ON IT DOING THE JOB.
+      #
+      # ⚠ RESIDUAL, MEASURED NOT ASSUMED: an equality is still not a FILTER.
+      # `UPDATE projects SET workspace_id = $2 WHERE id = $1` contains `workspace_id =` as an
+      # ASSIGNMENT and is unscoped; it scores NOT CAUGHT and stays so. Distinguishing a SET target
+      # from a WHERE predicate needs SQL parsing, which a regex over the literal cannot do. That
+      # shape is held behaviourally — TestSEC5_Group1_CrossTenantDelete catches all three mutations
+      # — and is stated here rather than left to be rediscovered.
+      # scripts/w34-operate-by-id-exemption-controls-8x2m.py scores P1/P2/P3.
       - pattern-not:
           pattern-either:
             - patterns:
@@ -38,10 +61,10 @@ rules:
                     - pattern: $Q.QueryRow($CTX, $SQL, ...)
                 - metavariable-regex:
                     metavariable: $SQL
-                    regex: (?s).*workspace_id
+                    regex: (?s).*\bworkspace_id\s*=
             - pattern-either:
-                - pattern: $Q.Exec($CTX, "=~/(?s).*workspace_id/", ...)
-                - pattern: $Q.QueryRow($CTX, "=~/(?s).*workspace_id/", ...)
+                - pattern: $Q.Exec($CTX, "=~/(?s).*\bworkspace_id\s*=/", ...)
+                - pattern: $Q.QueryRow($CTX, "=~/(?s).*\bworkspace_id\s*=/", ...)
     paths:
       # SEC-5. Empty exclude for THIS rule — but note its scope. It USED TO match only inline string
       # literal SQL, and was BLIND to `sql := fmt.Sprintf(...); Exec(ctx, sql, ...)` — exactly how issue
@@ -80,7 +103,7 @@ rules:
             - pattern: fmt.Sprintf($FMT, ...)
             - metavariable-regex:
                 metavariable: $FMT
-                regex: (?s).*workspace_id
+                regex: (?s).*\bworkspace_id\s*=
     paths:
       # Suppressed INLINE (nosemgrep + written reason) at the by-other-means-safe Sprintf sites — NOT a
       # path glob — so a reviewer sees the justification in context:
