@@ -381,6 +381,14 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	// BOTH halves of the client's identity come from the RESOLVED Membership, never from the
+	// query. The actor already did; the WORKSPACE did not — the socket was registered with the
+	// raw query string, and the workspace room is AUTO-JOINED from it on connect
+	// ("workspace:"+c.WorkspaceID, hub.go#handleRegister/#handleUnregister). That string was
+	// equal to the authorized workspace only because membershipFor matches on exact string
+	// equality, so no behavioural test could tell the two apart. The rule is held structurally
+	// instead:
+	// internal/authz/resolved_workspace_test.go.
 	memberID := m.MemberID
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -388,7 +396,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("realtime: ws upgrade failed", slog.String("err", err.Error()))
 		return
 	}
-	client := newClient(uuid.NewString(), workspaceID, memberID, conn)
+	client := newClient(uuid.NewString(), m.WorkspaceID, memberID, conn)
 	h.register <- client
 
 	go h.readPump(client)
