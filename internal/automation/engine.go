@@ -429,6 +429,18 @@ func (e *Engine) logRun(ctx context.Context, ruleID, issueID string, trigger Rul
 	if issueID != "" {
 		issuePtr = issueID
 	}
+	// actions_taken is TEXT[] NOT NULL DEFAULT '{}' (migration 0008), and a DEFAULT
+	// applies only to a column OMITTED from the INSERT — a parameter explicitly bound to
+	// NULL is still a NOT NULL violation. Fire appends to its slice only on SUCCESS, so a
+	// run in which EVERY action failed arrives here nil, and this row used to be refused
+	// with SQLSTATE 23502 and swallowed into the slog.Warn below. That made
+	// automation_logs empty exactly when a rule was completely broken, while a rule that
+	// failed only PARTLY was recorded — the worse the failure, the less of it was kept.
+	// Normalised here rather than in Fire because this is the function that knows the
+	// column's shape, so a future second caller cannot reintroduce it.
+	if actions == nil {
+		actions = []string{}
+	}
 	// SERVER-DRIVEN: logRun is called only from Engine.Fire() with rule_id from the per-workspace
 	// rule cache and issue_id from the triggering issue — never a client-supplied id. INVALIDATED
 	// IF logRun gains a caller that passes a client-controlled rule_id/issue_id (then it must gate
