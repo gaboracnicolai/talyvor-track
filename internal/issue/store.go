@@ -186,6 +186,10 @@ func (s *Store) Create(ctx context.Context, issue model.Issue) (*model.Issue, er
 	if issue.WorkspaceID == "" || issue.TeamID == "" || issue.Title == "" || issue.CreatorID == "" {
 		return nil, errors.New("issue: WorkspaceID, TeamID, Title, and CreatorID are required")
 	}
+	// DOOR 1 of 3. See validateValueDomain.
+	if err := validateValueDomain(map[string]any{"priority": issue.Priority, "title": issue.Title}); err != nil {
+		return nil, err
+	}
 	if issue.Status == "" {
 		issue.Status = model.StatusBacklog
 	}
@@ -452,6 +456,10 @@ func (s *Store) UpsertByIdentifier(ctx context.Context, issue model.Issue) (*mod
 	}
 	if issue.WorkspaceID == "" || issue.TeamID == "" || issue.Title == "" || issue.CreatorID == "" || issue.Identifier == "" {
 		return nil, false, errors.New("issue: WorkspaceID, TeamID, Title, CreatorID, and Identifier are required")
+	}
+	// DOOR 2 of 3 — the importer path. See validateValueDomain.
+	if err := validateValueDomain(map[string]any{"priority": issue.Priority, "title": issue.Title}); err != nil {
+		return nil, false, err
 	}
 	if issue.Status == "" {
 		issue.Status = model.StatusBacklog
@@ -967,6 +975,65 @@ var updatableFields = map[string]struct{}{
 	"lens_feature": {},
 }
 
+// ⚠ updatableFields ABOVE IS AN ALLOWLIST OF COLUMN NAMES, AND ITS OWN COMMENT SAYS SO: it
+// "protects against SQL injection via map keys". It is not a check on what those keys are set TO,
+// and until validateValueDomain below nothing else was either — measured on real Postgres,
+// `Update{"priority": 99}` and `Update{"title": ""}` were both stored.
+//
+// validateValueDomain is the VALUE half, and it is called from all THREE doors that write these
+// columns (Create, UpsertByIdentifier, Update — BulkUpdate writes only status, sort_order and
+// completed_at, measured from its SET clause). A rule enforced at one door is not a rule: this
+// repository's clockguard header records five separate occasions when exactly that was fixed one
+// site at a time.
+//
+// ⚠ IT COVERS `priority` AND `title` AND DELIBERATELY NOT `status`. model.IssuePriority declares
+// exactly five values and nothing else in the product means anything by a sixth; Create already
+// refuses an empty title in as many words, so refusing one at Update makes two doors agree rather
+// than inventing a rule. `status` is an OPEN PRODUCT QUESTION — internal/workflow ships a per-team
+// status pipeline whose package comment says "any team can add custom ones", and
+// metrics_label_bound_realpg_test.go already declined to settle it. Narrowing it here would
+// foreclose a shipped feature by accident. value_domain_realpg_test.go's V8 fails if anyone does.
+//
+// ⚠ AND IT IS NUMERIC-ONLY ON PURPOSE. A `priority` that is not a number at all (`"high"`) is
+// already refused by Postgres with `invalid input syntax for type integer`, and that error names
+// the real problem better than this function could. Only a value that IS a number and is NOT in
+// the domain is this gate's business; anything else falls through unchanged.
+func validateValueDomain(fields map[string]any) error {
+	if raw, ok := fields["priority"]; ok {
+		if n, numeric := asInt(raw); numeric && !model.ValidPriority(model.IssuePriority(n)) {
+			return fmt.Errorf("issue: priority %d is not one of %s", n, model.PriorityDomain)
+		}
+	}
+	if raw, ok := fields["title"]; ok {
+		if t, isString := raw.(string); isString && t == "" {
+			return errors.New("issue: title must not be empty")
+		}
+	}
+	return nil
+}
+
+// asInt coerces the numeric shapes a JSON body and a Go caller can each arrive in. json.Unmarshal
+// into map[string]any produces float64; a Go caller passes int or the model type.
+func asInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case model.IssuePriority:
+		return int(n), true
+	case float64:
+		// A fractional priority is not an integer priority; report the truncation rather than
+		// silently accepting 3.7 as 3.
+		return int(n), true
+	case float32:
+		return int(n), true
+	}
+	return 0, false
+}
+
 // Update applies the supplied field map and returns the materialised
 // row. Status transitions to "done" stamp completed_at; transitions
 // away from "done" clear it — both happen server-side so the API
@@ -1081,6 +1148,12 @@ func (s *Store) Update(ctx context.Context, id, workspaceID string, updates map[
 		}
 	}
 
+	// DOOR 3 of 3. Placed before the reference check so a bad VALUE costs no round-trip, and
+	// because the two are the same kind of refusal: this update names something the product does
+	// not have. See validateValueDomain.
+	if err := validateValueDomain(updates); err != nil {
+		return nil, err
+	}
 	if err := s.validateRefWorkspaces(ctx, id, updates); err != nil {
 		return nil, err
 	}
