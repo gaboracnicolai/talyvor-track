@@ -391,7 +391,24 @@ func (s *Store) GetScoreSummary(ctx context.Context, workspaceID string) (*Score
 	err := s.pool.QueryRow(ctx,
 		`SELECT
             (SELECT COUNT(*) FROM issues WHERE workspace_id = $1 AND status != 'cancelled') AS total_issues,
-            (SELECT COUNT(*) FROM issue_scores WHERE workspace_id = $1) AS total_scored,
+            -- THE TWO COVERAGE NUMBERS MUST BE COUNTED FROM THE SAME POPULATION, AND THEY WERE
+            -- NOT. total_issues above excludes cancelled issues; this counted every score row in
+            -- the workspace. Cancelling a SCORED issue leaves its issue_scores row exactly where it
+            -- was -- no cascade on status, nothing deletes it -- so the denominator dropped and the
+            -- numerator did not. MEASURED on real Postgres from zero: two issues both scored, one
+            -- cancelled, and this statement reported total_issues=1, total_scored=2,
+            -- coverage_pct=200. A ratio drawn from two different sets is wrong whichever set you
+            -- prefer, which is why the join matches total_issues' predicate rather than inventing
+            -- a third rule.
+            --
+            -- THE WORKSPACE SCOPE IS UNCHANGED AND STAYS ON issue_scores (s.workspace_id = $1),
+            -- deliberately: W3.10's tenancy guard is written against THIS predicate, and moving the
+            -- scope onto the joined table would satisfy that guard while changing which row decides
+            -- the tenancy. The join key is unique -- issue_scores.issue_id is TEXT UNIQUE NOT NULL
+            -- (migration 0015) -- so it cannot multiply rows.
+            (SELECT COUNT(*) FROM issue_scores s
+                JOIN issues i ON i.id = s.issue_id
+                WHERE s.workspace_id = $1 AND i.status != 'cancelled') AS total_scored,
             (SELECT COALESCE(AVG(rice_score), 0) FROM issue_scores WHERE workspace_id = $1 AND rice_score IS NOT NULL) AS avg_rice,
             (SELECT COALESCE(AVG(ice_score), 0) FROM issue_scores WHERE workspace_id = $1 AND ice_score IS NOT NULL) AS avg_ice,
             -- ⚠ THE COALESCE IS OUTSIDE THE SUBQUERY ON PURPOSE. The four subqueries above are
@@ -401,8 +418,19 @@ func (s *Store) GetScoreSummary(ctx context.Context, workspaceID string) (*Score
             -- no row to run on. Inside it was also DEAD in the other direction — issue_scores.issue_id
             -- is NOT NULL (0015), so the argument could never be NULL on a row that exists.
             -- Held by summary_empty_workspace_realpg_test.go, on real Postgres.
-            COALESCE((SELECT issue_id FROM issue_scores WHERE workspace_id = $1
-                ORDER BY GREATEST(COALESCE(rice_score, 0), COALESCE(ice_score, 0)) DESC LIMIT 1), '') AS top_issue_id`,
+            -- SAME POPULATION RULE, AND THIS IS THE SYMPTOM A READER SEES FIRST. Unfiltered, this
+            -- reported a CANCELLED issue as the workspace's top-scoring one -- MEASURED on real
+            -- Postgres: a live issue scored 10 and a cancelled one scored 20 returned the cancelled
+            -- id. A prioritisation surface pointing at dropped work is worse than a wrong count,
+            -- because a reader acts on it.
+            --
+            -- THE COALESCE STAYS OUTSIDE, for W3.9's reason unchanged by the join: this is the one
+            -- non-aggregate subquery here, so on zero matching rows it is NULL and a COALESCE
+            -- written inside would have no row to run on. The join can only make that MORE likely.
+            COALESCE((SELECT s.issue_id FROM issue_scores s
+                JOIN issues i ON i.id = s.issue_id
+                WHERE s.workspace_id = $1 AND i.status != 'cancelled'
+                ORDER BY GREATEST(COALESCE(s.rice_score, 0), COALESCE(s.ice_score, 0)) DESC LIMIT 1), '') AS top_issue_id`,
 		workspaceID,
 	).Scan(&totalIssues, &totalScored, &avgRice, &avgIce, &topIssueID)
 	if err != nil {
