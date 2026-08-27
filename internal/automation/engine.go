@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +60,58 @@ const (
 	ActionCloseIssue  RuleAction = "close_issue"
 	ActionMoveToCycle RuleAction = "move_to_cycle"
 )
+
+// The four closed vocabularies a rule is built from. AddRule refuses anything outside
+// them, because a rule the engine cannot act on is accepted with a 201, listed back by
+// GET /automation/rules, and then never runs — and three of the four fail SILENTLY (an
+// unknown condition field or operator falls off a switch to `return false`, so the rule
+// is skipped before logRun; an unknown trigger matches no Fire call ever made). Only an
+// unknown ACTION was ever loud. Same class as b2f282e one package over: the write path
+// validated the shape of an update and none of its values.
+//
+// TestVocabularyAllowlists_AgreeWithTheDispatch runs every entry below against the real
+// dispatch, so an allowlist entry whose switch arm was deleted is caught rather than
+// becoming this same defect one layer up.
+
+// firableTriggers is the set of triggers a production caller actually passes to Fire:
+// internal/issue/handler.go (issue.created, issue.updated, status.changed,
+// assignee.changed) and internal/automation/github.go (pr.merged, pr.opened).
+//
+// ⚠ THIS IS DELIBERATELY NOT THE SET OF DECLARED CONSTANTS. `TriggerScheduled` is
+// declared and NOTHING FIRES IT — there is no scheduler in this repository — so a rule
+// using it can never run, and accepting one would be advertising a capability the server
+// does not have. TestTriggerVocabulary_TheDeclaredSetIsNotTheFirableSet pins that gap
+// and tells you which line to change if a scheduler is ever built.
+var firableTriggers = map[RuleTrigger]bool{
+	TriggerIssueCreated:    true,
+	TriggerIssueUpdated:    true,
+	TriggerStatusChanged:   true,
+	TriggerAssigneeChanged: true,
+	TriggerPRMerged:        true,
+	TriggerPROpened:        true,
+}
+
+// executableActions mirrors executeAction's dispatch table.
+var executableActions = map[RuleAction]bool{
+	ActionSetStatus: true, ActionSetPriority: true, ActionSetAssignee: true,
+	ActionAddLabel: true, ActionRemoveLabel: true, ActionCreateIssue: true,
+	ActionNotifySlack: true, ActionCloseIssue: true, ActionMoveToCycle: true,
+}
+
+// evaluableConditionFields mirrors evaluateCondition's switch. Note "assignee", NOT
+// "assignee_id": the condition vocabulary is not the issue's JSON field names, it is
+// declared nowhere else, and there is no UI to discover it from — which is why the
+// refusal below names the closed set rather than only rejecting.
+var evaluableConditionFields = map[string]bool{
+	"status": true, "priority": true, "assignee": true, "label": true,
+}
+
+// applicableConditionOperators mirrors compare()/compareLabels(). There is no ordering
+// operator: "priority" is compared as a STRING, so gt/lt cannot be supported by simply
+// listing them here.
+var applicableConditionOperators = map[string]bool{
+	"eq": true, "neq": true, "contains": true, "not_contains": true,
+}
 
 type Rule struct {
 	ID          string            `json:"id"`
@@ -181,6 +234,32 @@ func (e *Engine) AddRule(ctx context.Context, rule Rule) (*Rule, error) {
 	if len(rule.Actions) > MaxActionsPerRule {
 		return nil, fmt.Errorf("automation: %d actions exceeds maximum %d", len(rule.Actions), MaxActionsPerRule)
 	}
+	// Vocabulary. Checked AFTER the count caps so the cap's error stays the one a caller
+	// sees for an oversized rule, and BEFORE any database work so a rule that can never
+	// run is never written. Every refusal names the offending value AND the closed set:
+	// this vocabulary is declared in no schema, no document and no UI, so a bare "invalid
+	// trigger" would leave the caller guessing at the very names they got wrong.
+	if !firableTriggers[rule.Trigger] {
+		return nil, fmt.Errorf("automation: trigger %q cannot fire; nothing in this server "+
+			"produces it. Supported: %s", rule.Trigger, sortedKeys(firableTriggers))
+	}
+	for _, a := range rule.Actions {
+		if !executableActions[a] {
+			return nil, fmt.Errorf("automation: action %q cannot be executed. Supported: %s",
+				a, sortedKeys(executableActions))
+		}
+	}
+	for _, c := range rule.Conditions {
+		if !evaluableConditionFields[c.Field] {
+			return nil, fmt.Errorf("automation: condition field %q cannot be evaluated. "+
+				"Supported: %s", c.Field, sortedKeys(evaluableConditionFields))
+		}
+		if !applicableConditionOperators[c.Operator] {
+			return nil, fmt.Errorf("automation: condition operator %q cannot be applied. "+
+				"Supported: %s", c.Operator, sortedKeys(applicableConditionOperators))
+		}
+	}
+
 	if rule.ActionData == nil {
 		rule.ActionData = map[string]string{}
 	}
@@ -496,4 +575,15 @@ func (e *Engine) ListRules(workspaceID string) []Rule {
 	out := make([]Rule, len(e.rules[workspaceID]))
 	copy(out, e.rules[workspaceID])
 	return out
+}
+
+// sortedKeys renders a closed vocabulary for a refusal message. Sorted so the message is
+// deterministic — an error string that reorders between runs is one nobody can assert on.
+func sortedKeys[T ~string](m map[T]bool) string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, string(k))
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
 }
