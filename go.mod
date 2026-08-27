@@ -2,6 +2,22 @@ module github.com/talyvor/track
 
 go 1.25
 
+// ⚠ THE VERSION THIS REPO SHIPS. A `toolchain` line is honoured ABOVE a lower setup-go pin, so
+// ci.yaml's `go-version: "1.25"` is upgraded to this and the released binary is built with exactly
+// it. Without this directive track built on whatever was installed (go1.26.3) and govulncheck
+// reported 11 CALLED vulnerabilities on main — while talyvor-lens, which gates on govulncheck every
+// build, reported zero and had already pinned this same version for the same reason. lens's go.mod
+// names the advisories. Written out in full rather than as GO-2026-{6218,6091,...}: the compressed
+// form is not greppable, so someone searching this estate for a specific advisory id would find
+// nothing here. >= 1.26.6 clears GO-2026-6218, GO-2026-6091, GO-2026-6090, GO-2026-6089,
+// GO-2026-6088, GO-2026-5972 and GO-2026-5026; >= 1.26.5 clears GO-2026-5856 (crypto/tls ECH
+// privacy leak).
+//
+// ⚠ TRACK NEVER GOT THE SIGNAL, SO IT NEVER GOT THE FIX — the diagnosis existed in a sibling repo
+// the whole time. Adding the CI gate that would have said so is W6.33 and needs the remaining pgx
+// advisory decided first, or the gate lands red on main.
+toolchain go1.26.6
+
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/go-chi/chi/v5 v5.3.0
