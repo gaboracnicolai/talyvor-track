@@ -65,6 +65,72 @@ const (
 	StatusCancelled  IssueStatus = "cancelled"
 )
 
+// StatusLabelOther is the Prometheus label every status OUTSIDE the six constants above is counted
+// under, and it is not itself a status — pinned by
+// issue.TestIssueMetrics_TheBucketIsNotItselfAStatus.
+//
+// ⚠ IT EXISTS BECAUSE `status` IS THE ONE LABEL ON track_issues_created_total /
+// track_issues_updated_total THAT A CALLER CHOOSES. internal/metrics/metrics.go's header states the
+// rule — "Keep label cardinality bounded — workspace ID is fine (one workspace = one tenant), but
+// never use issue ID or arbitrary user-supplied values" — and `workspace` and `team` obey it because
+// they are server-generated ids. `status` did not: `issues.status` is TEXT NOT NULL DEFAULT
+// 'backlog' with NO CHECK constraint, `status` is in issue.updatableFields, and nothing between the
+// request body and the column compares the value to the constants above. MEASURED through the
+// shipped store on real Postgres: Create with "Deployed to prod 🚀" is accepted and produces
+// track_issues_created_total{status="Deployed to prod 🚀"}; Update with "'; DROP TABLE issues; --"
+// is accepted and stored. Both doors, both counters.
+//
+// ⚠⚠ AND /metrics IS OUTSIDE THE AUTH BOUNDARY. cmd/track/main.go registers it at the TOP LEVEL —
+// above every r.Group/r.Route that installs gatewayauth + authz — so an authenticated workspace
+// member could mint an unbounded number of time-series carrying text they chose, readable by anyone
+// who can reach the endpoint. The cardinality half is what metrics.go's rule is about; the
+// publication half is worse and the rule does not name it.
+//
+// ⚠ IT BOUNDS THE LABEL AND NOT THE COLUMN, DELIBERATELY. BoundStatusLabel is called only from
+// issue.countCreated and issue.countUpdatedLabels — the two increment sites metrics_reach_test.go
+// pins as the only ones — and the write path is untouched: the tests assert the raw value still
+// reaches the column. Whether an arbitrary status may be WRITTEN is an open product question and
+// not a session's to answer: internal/workflow ships a per-team status pipeline whose package
+// comment says "any team can add custom ones", so narrowing the column would foreclose a feature
+// this repository already has code for. See the queue entry for what a decision there needs.
+//
+// ⚠ THE BUCKET PRESERVES THE TOTAL. An unknown status is still a create and still an update, which
+// is what these counters exist to total; dropping the increment instead would UNDERCOUNT, and
+// undercounting is the exact defect countCreated and countUpdatedLabels were each written to end.
+const StatusLabelOther = "other"
+
+// issueStatuses is the closed set, in the column's own spelling. It is derived from the constants
+// above rather than restated so the two cannot disagree.
+var issueStatuses = []IssueStatus{
+	StatusBacklog, StatusTodo, StatusInProgress, StatusInReview, StatusDone, StatusCancelled,
+}
+
+// IssueStatuses returns the closed set of issue statuses. A copy, so a caller cannot edit the set
+// every metric label and every enumeration test reads.
+func IssueStatuses() []IssueStatus {
+	out := make([]IssueStatus, len(issueStatuses))
+	copy(out, issueStatuses)
+	return out
+}
+
+// BoundStatusLabel maps a status to the Prometheus label it may be counted under: itself when it is
+// one of the six, StatusLabelOther otherwise.
+//
+// ⚠ THE COMPARISON IS EXACT, NOT CASE-FOLDED OR TRIMMED, and that is the point rather than an
+// oversight. "Done" is not "done": internal/workflow seeds every team six workflow_statuses named
+// "Backlog"/"Todo"/"In Progress"/"In Review"/"Done"/"Cancelled" — Title Case, spaces — while this
+// column and internal/analytics's `status IN ('done','cancelled')` filters use the snake_case
+// spellings above. Folding here would quietly assert those two vocabularies are the same set, which
+// is the very question nothing in this repository currently answers.
+func BoundStatusLabel(status string) string {
+	for _, s := range issueStatuses {
+		if string(s) == status {
+			return status
+		}
+	}
+	return StatusLabelOther
+}
+
 // ImporterCreatorID is the creator_id the import pipeline stamps on every row it writes
 // (importer.run). It is the ONLY provenance Track has for "this issue came from a provider
 // import", and issue.Store.UpsertByIdentifier keys its re-import policy on it: a provider may
