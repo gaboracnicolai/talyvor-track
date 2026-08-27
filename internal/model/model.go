@@ -186,6 +186,25 @@ const (
 	PriorityLow    IssuePriority = 4
 )
 
+// ValidPriority reports whether p is one of the five priorities this type declares.
+//
+// ⚠ IT EXISTS BECAUSE THE DECLARATION ABOVE WAS THE ONLY THING SAYING SO. `issues.priority` is
+// `INTEGER NOT NULL DEFAULT 0` with no CHECK constraint, and nothing between a request body and
+// that column compared the value to these five constants — measured on real Postgres, `Create`
+// and `Update` both stored 99 and -7, and the product then draws a BLANK priority control for a
+// value it has no label for. A type whose domain only the reader enforces is a comment.
+//
+// ⚠ AND IT IS DELIBERATELY A PREDICATE ON THE MODEL, NOT A CHECK CONSTRAINT ON THE COLUMN. Rows
+// already carrying an out-of-domain value must keep loading — a constraint added to the table
+// would make them unreadable, turning a cosmetic defect into an outage. This gates WRITES.
+func ValidPriority(p IssuePriority) bool {
+	return p >= PriorityNone && p <= PriorityLow
+}
+
+// PriorityDomain is the human-readable domain, for error messages that tell a caller what to send
+// instead of only what was wrong.
+const PriorityDomain = "0 (none), 1 (urgent), 2 (high), 3 (medium), 4 (low)"
+
 // Issue is the atomic work unit. Issue numbers auto-increment per team
 // (not per workspace) so two teams can have ENG-1 and DES-1 in the
 // same workspace. Identifiers are NEVER reused — a cancelled issue
