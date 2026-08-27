@@ -40,6 +40,9 @@ var toolchainRe = regexp.MustCompile(`(?m)^toolchain go(\d+)\.(\d+)\.(\d+)$`)
 
 var advisoryRe = regexp.MustCompile(`GO-\d{4}-\d+`)
 
+// goVersionRe matches ci.yaml pins: `go-version: "1.26.6"` or `go-version: "1.25"`.
+var goVersionRe = regexp.MustCompile(`go-version:\s*"(\d+)\.(\d+)(\.\d+)?"`)
+
 func goMod(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -151,4 +154,55 @@ func atoiStr(t *testing.T, s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+// ⚠ THE LOCKSTEP, AND CI TAUGHT ME THIS ONE. go.mod's `toolchain` does NOT govern CI:
+// actions/setup-go exports GOTOOLCHAIN=local, so each job runs exactly the version its
+// `go-version:` pin installed. With go.mod at go1.26.6 and ci.yaml at "1.25", the test binary came
+// out go1.25.14 and golangci-lint refused to run at all — "the Go language version (go1.25) used
+// to build golangci-lint is lower than the targeted Go version (1.26.6)".
+//
+// So there are two numbers and nothing but a human keeps them equal. talyvor-lens carries a whole
+// package for this (internal/toolchainaudit) and its ci.yaml says the same thing in a comment.
+// This is track's version of that instrument: every go-version pin must be at least go.mod's
+// toolchain floor.
+func TestCIGoVersionPinsAreAtLeastTheToolchainFloor(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+	ci, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yaml"))
+	if err != nil {
+		t.Fatalf("read ci.yaml: %v", err)
+	}
+	pins := goVersionRe.FindAllStringSubmatch(string(ci), -1)
+	if len(pins) == 0 {
+		t.Fatal("ci.yaml declares no `go-version:` pin — either the workflow stopped installing Go " +
+			"or this parse is broken, and a broken parse reports perfect lockstep")
+	}
+
+	m := toolchainRe.FindStringSubmatch(goMod(t))
+	if m == nil {
+		t.Skip("no toolchain directive — TestGoModPinsTheToolchainAtOrAboveTheSecurityFloor reports it")
+	}
+	fMaj, fMin, fPat := atoi(t, m[1]), atoi(t, m[2]), atoi(t, m[3])
+
+	for _, p := range pins {
+		maj, min := atoi(t, p[1]), atoi(t, p[2])
+		pat := 0
+		if p[3] != "" {
+			pat = atoi(t, strings.TrimPrefix(p[3], "."))
+		}
+		below := maj < fMaj ||
+			(maj == fMaj && min < fMin) ||
+			(maj == fMaj && min == fMin && pat < fPat)
+		if below {
+			t.Errorf("ci.yaml pins go-version %q, below go.mod's toolchain floor go%d.%d.%d.\n"+
+				"    setup-go exports GOTOOLCHAIN=local, so this pin — not the directive — is what "+
+				"the job runs. Below the floor, golangci-lint refuses to start and the tests "+
+				"exercise a runtime the release is not built with.",
+				p[0], fMaj, fMin, fPat)
+		}
+	}
+	t.Logf("MEASURED: %d go-version pin(s) in ci.yaml, all >= go%d.%d.%d.", len(pins), fMaj, fMin, fPat)
 }

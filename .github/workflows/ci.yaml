@@ -63,7 +63,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "1.25"
+          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.6), and W6.34 learned this from CI rather
+          # than from a doc: golangci-lint REFUSES to run when it was built with a Go older than
+          # the module's targeted version — "the Go language version (go1.25) used to build
+          # golangci-lint is lower than the targeted Go version (1.26.6)". actions/setup-go also
+          # exports GOTOOLCHAIN=local, so go.mod's toolchain directive is NOT auto-fetched here:
+          # this pin is what the job actually runs, and the tests therefore exercise the runtime
+          # the release is built with. internal/migrate/toolchain_pin_test.go enforces the lockstep.
+          go-version: "1.26.6"
           cache: true
       # Format gate. There was none: golangci-lint v2 moved formatters OUT of `linters:`,
       # so .golangci.yml (which has no `formatters:` block) checked no formatting at all
@@ -116,7 +123,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "1.25"
+          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.6), and W6.34 learned this from CI rather
+          # than from a doc: golangci-lint REFUSES to run when it was built with a Go older than
+          # the module's targeted version — "the Go language version (go1.25) used to build
+          # golangci-lint is lower than the targeted Go version (1.26.6)". actions/setup-go also
+          # exports GOTOOLCHAIN=local, so go.mod's toolchain directive is NOT auto-fetched here:
+          # this pin is what the job actually runs, and the tests therefore exercise the runtime
+          # the release is built with. internal/migrate/toolchain_pin_test.go enforces the lockstep.
+          go-version: "1.26.6"
           cache: true
       - name: go vet
         run: go vet ./...

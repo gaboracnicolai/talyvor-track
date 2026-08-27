@@ -5,7 +5,8 @@ import hashlib, os, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOMOD = os.path.join(ROOT, "go.mod")
 TEST = os.path.join(ROOT, "internal/migrate/toolchain_pin_test.go")
-FILES = [GOMOD, TEST]
+CI   = os.path.join(ROOT, ".github/workflows/ci.yaml")
+FILES = [GOMOD, TEST, CI]
 
 def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
 
@@ -14,16 +15,20 @@ def run(test):
                        cwd=ROOT, capture_output=True, text=True)
     return r.returncode == 0, r.stdout + r.stderr
 
-def anchored(path, old, new):
+def anchored(path, old, new, count=1):
+    """count: how many occurrences the anchor is EXPECTED to have. ci.yaml carries the same
+    go-version pin in two jobs, and demanding uniqueness there was the control's bug, not the
+    file's — dropping ONE of two pins below the floor is exactly the regression to catch."""
     s = open(path).read()
     n = s.count(old)
-    if n != 1:
-        raise AssertionError("anchor appears %d times, want 1: %r" % (n, old[:60]))
+    if n != count:
+        raise AssertionError("anchor appears %d times, want %d: %r" % (n, count, old[:60]))
     open(path, "w").write(s.replace(old, new, 1))
 
 PIN = "TestGoModPinsTheToolchainAtOrAboveTheSecurityFloor"
 WHY = "TestTheToolchainPinCarriesItsReason"
 RUN = "TestTheRunningToolchainActuallyHonoursThePin"
+LCK = "TestCIGoVersionPinsAreAtLeastTheToolchainFloor"
 
 CONTROLS = [
     ("V1 the toolchain directive deleted", GOMOD,
@@ -53,6 +58,17 @@ CONTROLS = [
      'regexp.MustCompile(`(?m)^NEVERMATCH go(\\d+)\\.(\\d+)\\.(\\d+)$`)',
      PIN, None, "a parse that finds nothing must fail loudly, not report a pinned repo"),
 
+    # V7 is the control for the failure CI actually produced: ci.yaml below go.mod's floor makes
+    # golangci-lint refuse to start and the tests run a runtime the release is not built with.
+    ("V7 a ci.yaml pin dropped below the floor", CI,
+     '          go-version: "1.26.6"\n', '          go-version: "1.25"\n',
+     LCK, PIN, "the two version numbers nothing but a human keeps equal are now checked", 2),
+
+    ("V8 the ci.yaml pin parse finds nothing", TEST,
+     'regexp.MustCompile(`go-version:\\s*"(\\d+)\\.(\\d+)(\\.\\d+)?"`)',
+     'regexp.MustCompile(`NEVERMATCH:\\s*"(\\d+)\\.(\\d+)(\\.\\d+)?"`)',
+     LCK, PIN, "a parse that finds no pins must fail, not report perfect lockstep"),
+
     ("V6 the floor comparison inverted", TEST,
      "\tolder := major < wantMajor ||", "\tolder := false && major < wantMajor ||",
      None, PIN, "with the comparison disabled the guard still passes on a CORRECT pin — "
@@ -69,10 +85,12 @@ if not ok:
 print("\nbaseline: GREEN\n")
 
 results = []
-for name, path, old, new, red, green, proves in CONTROLS:
+for ctl in CONTROLS:
+    name, path, old, new, red, green, proves = ctl[:7]
+    expect = ctl[7] if len(ctl) > 7 else 1
     backup = open(path).read()
     try:
-        anchored(path, old, new)
+        anchored(path, old, new, expect)
         if red is None:
             # An "must still pass" control: the named green test must stay GREEN.
             green_ok, _ = run(green)
