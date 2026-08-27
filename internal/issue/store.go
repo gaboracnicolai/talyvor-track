@@ -335,7 +335,11 @@ func countCreated(out *model.Issue, err error) (*model.Issue, error) {
 	if err != nil || out == nil {
 		return out, err
 	}
-	metrics.IssuesCreated.WithLabelValues(out.WorkspaceID, out.TeamID, string(out.Status)).Inc()
+	// The status label is BOUNDED here and nowhere else: `status` is the one label on this
+	// collector that a caller chooses, and /metrics is outside the auth boundary. See
+	// model.StatusLabelOther for the measurement. The COLUMN is untouched — out.Status is
+	// returned to the caller and stored exactly as sent.
+	metrics.IssuesCreated.WithLabelValues(out.WorkspaceID, out.TeamID, model.BoundStatusLabel(string(out.Status))).Inc()
 	return out, nil
 }
 
@@ -378,7 +382,10 @@ func countUpdated(out *model.Issue, err error) (*model.Issue, error) {
 // in this file, which double-counts exactly as surely as two sites in two files. The reach guard
 // (metrics_reach_test.go) counts the references, so the shape is enforced rather than intended.
 func countUpdatedLabels(workspaceID, teamID, status string) {
-	metrics.IssuesUpdated.WithLabelValues(workspaceID, teamID, status).Inc()
+	// Bounded for the same reason as countCreated above, and it matters more here: this one line
+	// is the single increment site for FIFTEEN production update paths, so an unbounded label
+	// here was unbounded on every one of them.
+	metrics.IssuesUpdated.WithLabelValues(workspaceID, teamID, model.BoundStatusLabel(status)).Inc()
 }
 
 // identifierScanBound caps how far past MAX(number)+1 the allocator will look for a number whose derived
