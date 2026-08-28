@@ -61,6 +61,13 @@ type envRead struct {
 }
 
 // collectEnvReads enumerates every environment variable the NON-TEST tree reads, by PARSING.
+// It is shared: compose_env_reach_test.go's credential-forwarding guard reads the same
+// population, so "how this tree reads the environment" is defined exactly once.
+//
+// ⚠ _test.go IS SKIPPED, and the reason is carried here because the sentence that used to
+// state it lived in the regex this replaced: a test reading an env var says nothing about
+// what the DEPLOYMENT needs, and counting them would produce exemptions for names no
+// container ever wants and no operator should be handed.
 //
 // ⚠ IT RESOLVES CONSTANTS, AND THAT IS THE POINT RATHER THAN A FLOURISH. The sibling
 // compose_env_reach_test.go matches env reads with a regex that requires a STRING LITERAL
