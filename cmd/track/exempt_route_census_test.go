@@ -334,74 +334,28 @@ func contains(s []string, want string) bool {
 // ── (b) which of the fourteen does a test actually EXECUTE? ─────────────────────────────────────
 //
 // The header above says all fourteen carry their own auth and that this was measured one at a time.
-// It was — by READING each one. This second table records something different and it was measured
-// by RUNNING the suite: for SEVEN of the fourteen, no test ever executes the handler at all. Their
-// "carries its own auth" entry rests entirely on someone having read the code correctly, and
-// nothing in CI would notice if the check it describes stopped working.
+// It was — by READING. W3.39 measured the other half by RUNNING the suite and found that SEVEN of
+// the fourteen were executed by no test at all: their "carries its own auth" entry rested entirely
+// on someone having read the code correctly, and nothing in CI would have noticed if the check it
+// described stopped working.
 //
-// ⚠ THE SPLIT IS NOT RANDOM, WHICH IS WHY IT IS WORTH RECORDING RATHER THAN JUST COUNTING. Every
-// exempt route whose own auth is a CRYPTOGRAPHIC check is executed by a test — the two HMAC
-// webhooks, the two constant-time service bearers, and the three guest-token routes. The seven that
-// are never executed are exactly the ones whose auth is an OPAQUE TOKEN IN THE PATH (invite) or a
-// SQL FILTER (`AND b.public = true`, `board.AllowAnonymous`). The anonymous public-board surface
-// includes three WRITES, and `Post /v1/invite/{token}/accept` grants workspace access.
+// ⚠ THE SPLIT WAS NOT RANDOM, WHICH IS THE PART WORTH KEEPING. Every exempt route whose own auth is
+// a CRYPTOGRAPHIC check was already executed by a test — both HMAC webhooks, both constant-time
+// service bearers, all three guest-token routes. The seven that were not are exactly the ones whose
+// auth is an OPAQUE TOKEN IN THE PATH (invite) or a SQL FILTER (`AND b.public = true`,
+// `board.AllowAnonymous`) — including three anonymous WRITES and the route that grants workspace
+// access. The auth people write tests for is the auth that looks like auth.
 //
-// ⚠ HOW IT WAS MEASURED (W3.39, tab-c2m8, at 48fcca0), and it took two instruments because the
-// obvious one is wrong: `println` markers injected into every handler BODY, registration left
-// byte-identical, one `go test -v ./...` run. -v is load-bearing — `go test` discards the output of
-// passing packages without it, which would report every handler as never executed. Cross-checked
-// route-for-route against W3.28's one-at-a-time panic probe on 19 independently measured routes:
-// 8/8 executed agreed and 11/11 never-executed agreed. Re-measure with
-// ~/talyvor-queue/w339-execution-trace-c2m8.py.
+// ⚠ ALL FOURTEEN ARE NOW EXECUTED BY A TEST (W3.40, measured at 51b6f0b -> this commit: 69 handlers
+// executing before, 76 after). The seven are driven by unauthenticated_surface_realpg_test.go,
+// which mounts production's own Mount under /v1 with gwAuth+wsAuthz installed and the exempt
+// predicate PARSED OUT OF main.go, and sends requests carrying no credentials at all.
 //
-// ⚠ WHAT CI RE-VERIFIES: that each of the seven is still registered under an exempt prefix (from
-// the AST) and still carries an entry in exemptRoutes above, so the two tables cannot drift apart
-// and a route moving behind the auth chain reds. It does NOT re-derive the execution half — that
-// needs a mutated tree — so this table can go stale only by claiming a route is untested after
-// someone tests it, which over-reports the gap rather than hiding it.
-var exemptRoutesWithNoBehaviouralTest = map[string]string{
-	"Get /v1/invite/{token}":                                            "opaque token in the path; nothing executes InviteDetail",
-	"Post /v1/invite/{token}/accept":                                    "GRANTS WORKSPACE ACCESS; nothing executes AcceptInvite",
-	"Get /v1/public/boards/{wsSlug}/{boardSlug}/":                       "anonymous read, bounded only by `AND b.public = true`",
-	"Get /v1/public/boards/{wsSlug}/{boardSlug}/posts":                  "anonymous read, same filter",
-	"Post /v1/public/boards/{wsSlug}/{boardSlug}/posts":                 "ANONYMOUS WRITE, bounded by b.public + board.AllowAnonymous",
-	"Post /v1/public/boards/{wsSlug}/{boardSlug}/posts/{postID}/vote":   "ANONYMOUS WRITE, bounded by b.public",
-	"Delete /v1/public/boards/{wsSlug}/{boardSlug}/posts/{postID}/vote": "ANONYMOUS WRITE, bounded by b.public",
-}
-
-// exemptWithNoTestCount floors the table so it cannot be quietly gutted: every check below iterates
-// the table, so an empty one passes all of them.
-const exemptWithNoTestCount = 7
-
-func TestExemptRoutesWithNoBehaviouralTestAreStillExemptAndRecorded(t *testing.T) {
-	got := exemptSubset(t)
-	if len(got) == 0 {
-		t.Fatal("no exempt routes found — the resolver or the prefix parse is broken, and both " +
-			"failures report an empty unauthenticated surface")
-	}
-	for r, why := range exemptRoutesWithNoBehaviouralTest {
-		if _, ok := exemptRoutes[r]; !ok {
-			t.Errorf("%s is recorded here as untested but has no entry in exemptRoutes. The two "+
-				"tables describe the same fourteen routes and must not drift: either it is no "+
-				"longer exempt (drop it from both) or its auth entry was deleted.", r)
-		}
-		if !contains(got, r) {
-			t.Errorf("%s is recorded here and is no longer registered under an exempt prefix. If "+
-				"it moved behind gwAuth+wsAuthz that is good news and the row should go — an "+
-				"unauthenticated route nothing tests is the worst cell in this census, so a stale "+
-				"row overstates the risk.", r)
-		}
-		if strings.TrimSpace(why) == "" {
-			t.Errorf("%s is recorded with an empty reason", r)
-		}
-	}
-	if len(exemptRoutesWithNoBehaviouralTest) < exemptWithNoTestCount {
-		t.Fatalf("the table has %d rows; %d were MEASURED at 48fcca0. Shrinking it means an "+
-			"unauthenticated route gained a test, which is the direction this table exists to "+
-			"encourage — earn it: re-run w339-execution-trace-c2m8.py, confirm the handler now "+
-			"prints, and lower this constant in the commit that drops the row.",
-			len(exemptRoutesWithNoBehaviouralTest), exemptWithNoTestCount)
-	}
-	t.Logf("MEASURED at 48fcca0: %d exempt routes, %d of them executed by NO test.",
-		len(got), len(exemptRoutesWithNoBehaviouralTest))
-}
+// ⚠ W3.39 SHIPPED A TABLE HERE LISTING THE SEVEN, AND IT IS DELETED RATHER THAN EMPTIED. Every
+// check it made iterated that table, so with the gap closed the table has no rows and the test
+// could not fail for any reason — and a test that cannot fail is not a guard, which is the standard
+// this file applies to everything else. What replaced it is stronger than a record of absence: the
+// seven now have behavioural tests whose ability to fail was demonstrated by removing each auth
+// check from the PRODUCT in turn (the public filter, the AllowAnonymous gate, the cross-board post
+// assertion, the invite replay guard) and confirming each removal reds.
+// Re-measure execution with ~/talyvor-queue/w339-execution-trace-c2m8.py.
