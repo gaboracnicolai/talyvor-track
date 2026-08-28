@@ -228,8 +228,9 @@ func main() {
 	featureBoardStore := featureboard.NewStore(pool)
 	featureBoardHandler := featureboard.NewHandler(featureBoardStore, issueStore)
 	// Guest store: invite + accept lives here; the access tokens are
-	// stateless HMAC-signed. GUEST_SECRET seeds the HMAC key; empty
-	// generates a per-process random key (fine for dev, never prod).
+	// stateless HMAC-signed. TRACK_GUEST_SECRET seeds the HMAC key; empty
+	// generates a per-process random key (fine for dev, never prod) — see
+	// the fallback in guest.newStore and the entry in .env.example.
 	guestStore := guest.NewStore(pool, os.Getenv("TRACK_GUEST_SECRET"))
 	guestHandler := guest.NewHandler(guestStore, issueStore,
 		os.Getenv("TRACK_INVITE_BASE_URL"))
