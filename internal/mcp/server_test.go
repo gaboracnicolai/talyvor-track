@@ -754,8 +754,16 @@ func TestMCP_UnmappedTool_DeniedFailClosed(t *testing.T) {
 	if resp.Error == nil {
 		t.Fatal("expected a JSON-RPC error for an unmapped tool")
 	}
-	if resp.Error.Code != rpcErrUnauthorized {
-		t.Errorf("error code = %d, want %d (unauthorized — fail-closed deny before dispatch)", resp.Error.Code, rpcErrUnauthorized)
+	// ⚠ THE LITERAL IS THE POINT. This assertion used to read `!= rpcErrUnauthorized`,
+	// comparing the response against the same constant that produced it — both sides
+	// moved together, so it could not fail for any value of that constant. W3.42's
+	// defaults census measured it: rpcErrUnauthorized changed to -4570 (outside the
+	// JSON-RPC reserved space entirely) left the whole 42-package suite green, while
+	// this file's two neighbouring assertions — which compare against the literals
+	// -32602 and -32700 — both caught their mutations. The wire value is pinned here
+	// and, with its range and collision properties, in error_codes_test.go.
+	if resp.Error.Code != -32001 {
+		t.Errorf("error code = %d, want -32001 (unauthorized — fail-closed deny before dispatch)", resp.Error.Code)
 	}
 }
 
