@@ -293,6 +293,16 @@ export interface GuestRecord {
   role: GuestRole;
   active: boolean;
   created_at: string;
+  // ⚠ THE API HAS NEVER EMITTED THIS AND CANNOT TODAY — measured, not guessed. The
+  // `guests.last_seen_at` column (migration 0014, nullable, no default) has NO production
+  // writer: the four statements against the table INSERT five columns, SELECT, and set
+  // `active = false`. Nothing stamps it, so Go's `omitempty` on a nil *time.Time keeps the
+  // key out of every response. It is left declared rather than deleted because whether to
+  // wire it (a DB write on a request path the guest design deliberately keeps stateless —
+  // see internal/guest's package comment — and a question about tracking a collaborator's
+  // activity) or to drop it is a product decision. Do not build a "last active" column on
+  // it without checking that decision first. Guarded by
+  // internal/guest/last_seen_at_writerless_realpg_test.go, which reds in BOTH directions.
   last_seen_at?: string;
 }
 
