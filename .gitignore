@@ -1,0 +1,20 @@
+# Build artefacts this repo's own commands produce, and the one file that must never be
+# committed. frontend/.gitignore already covers the TypeScript side (node_modules/, dist/,
+# *.tsbuildinfo) — this is the Go side, which had nothing.
+#
+# ⚠ WHY IT EXISTS: `go build ./cmd/track` drops a `track` binary in the repo root, and
+# during W3.47 `git add -A` STAGED IT. Caught by reading `git status` before committing;
+# `git commit -a` would have put ~40 MB in main. cmd/track/gitignore_test.go keeps these
+# rules real and, just as importantly, keeps them from getting broad enough to hide source.
+
+# ⚠ LEADING SLASH IS LOAD-BEARING. Bare `track` would also match the DIRECTORY cmd/track —
+# the entire main package. The guard's mustBeTracked list asserts cmd/track/main.go is
+# still visible precisely because that mistake is one character away.
+/track
+/bin/
+
+# Local environment. .env.example is the committed template and is deliberately NOT matched
+# by this pattern; a real .env holds every credential .env.example documents.
+.env
+
+.DS_Store
