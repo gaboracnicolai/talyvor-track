@@ -123,6 +123,24 @@ func runMigrate(args []string) {
 	}
 }
 
+// version is the build stamp reported by /livez, /readyz, the MCP serverInfo and
+// `track version`. It is a VAR, not a const, and that is the entire point: the
+// Dockerfile builds with `-ldflags "-X main.version=${VERSION}"`, and the Go linker
+// SILENTLY IGNORES -X for a symbol it cannot find.
+//
+// ⚠ IT COULD NOT FIND ONE. Measured (W3.47) before this declaration existed: building
+// with the Dockerfile's exact flags and `-X main.version=W347PROBE` linked with exit 0,
+// the probe string appeared ZERO times in the binary, and the running server answered
+// /livez with {"status":"alive","version":"0.1.0"} — because both report sites held a
+// hardcoded literal instead. Every image, every tag, every deploy reported the same
+// constant, and it looked like an answer.
+//
+// The default below is what an un-stamped `go build` (the Makefile) produces; CI passes
+// the commit SHA it already tags the image with. version_stamp_test.go builds a binary
+// through the real ldflags path and requires the injected value to come back out, so
+// this cannot silently detach again.
+var version = "0.1.0"
+
 func main() {
 	// ⚠ THE LEVEL COMES FROM TRACK_LOG_LEVEL, which until now was parsed and thrown away: this
 	// handler took nil options, i.e. the package default of Info, so the documented knob did
@@ -133,9 +151,14 @@ func main() {
 	slog.SetDefault(logger)
 
 	// Subcommand: `track migrate up|status` runs the schema migrator and exits.
+	// `track version` prints the build stamp and exits.
 	// With no subcommand, track runs the API server (the default).
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		runMigrate(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println(version)
 		return
 	}
 
@@ -294,7 +317,7 @@ func main() {
 	// Track — no other tracker exposes LLM spend through MCP.
 	mcpServer := mcp.New(
 		issueStore, projectStore, cycleStore,
-		aiEngine, analyticsEngine, "0.1.0",
+		aiEngine, analyticsEngine, version,
 	).WithMembersPool(pool)
 
 	// CSV importer: lets new customers migrate from Linear or Jira in
@@ -374,7 +397,7 @@ func main() {
 	// (When realtime HA / T13 is enabled, add a Redis dep here too.) drainer is
 	// shared with the SIGTERM path below so /readyz flips to 503 on shutdown.
 	drainer := &health.Drainer{}
-	probes := health.New("0.1.0", drainer, health.PingDep("database", pool))
+	probes := health.New(version, drainer, health.PingDep("database", pool))
 	r.Get("/livez", probes.Live)
 	r.Get("/readyz", probes.Ready)
 

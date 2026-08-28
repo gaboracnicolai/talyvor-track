@@ -250,6 +250,15 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          # ⚠ THE STAMP. Dockerfile builds with `-ldflags "-X main.version=${VERSION}"`, and
+          # without this the ARG defaulted to `dev` — but it made no difference either way,
+          # because `main.version` did not exist and the Go linker silently ignores -X for a
+          # symbol it cannot find. Measured (W3.47): every image answered /livez with
+          # {"version":"0.1.0"}, so :latest and :<sha> were indistinguishable at runtime.
+          # The SHA is what the tags below already use, so the stamp and the tag agree by
+          # construction. cmd/track/version_stamp_test.go keeps the ldflags path working.
+          build-args: |
+            VERSION=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/talyvor-track:latest
             ghcr.io/${{ github.repository_owner }}/talyvor-track:${{ github.sha }}
