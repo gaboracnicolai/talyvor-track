@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,12 +25,18 @@ import (
 // author remembered, which is the failure being guarded against. Adding os.Getenv("X_TOKEN")
 // anywhere in the tree is what makes this fire; nobody has to remember to update it.
 //
-// WHAT IT GUARDS AND WHAT IT DELIBERATELY DOES NOT. The process reads 17 environment variables and
-// compose forwards 11. Most of the difference is fine — a tuning knob's absence is its documented
-// default. A CREDENTIAL's absence is different: it is a dead feature or an unarmed control, with
-// no error anywhere. So the class is credentials, chosen by a MECHANICAL name-suffix rule that
-// needs no judgement to apply and no memory to maintain. Judgement lives only in the exemptions,
-// and each one states its reason.
+// WHAT IT GUARDS AND WHAT IT DELIBERATELY DOES NOT. The process reads more variables than compose
+// forwards, and most of the difference is fine — a tuning knob's absence is its documented default.
+// A CREDENTIAL's absence is different: it is a dead feature or an unarmed control, with no error
+// anywhere. So the class is credentials, chosen by a MECHANICAL name-suffix rule that needs no
+// judgement to apply and no memory to maintain. Judgement lives only in the exemptions, and each
+// one states its reason.
+//
+// ⚠ THIS PARAGRAPH USED TO CARRY TWO COUNTS — "reads 17 ... forwards 11" — AND BOTH HAD GONE STALE
+// WITHOUT ANYTHING NOTICING. Measured 2026-08-28 (W3.46): 19 read, 14 forwarded. Worse, the 17 was
+// never a fact about the process; it was exactly what the OLD regex below could see, written down
+// as though it were a property of the tree. A number in a comment is a claim nothing checks, so
+// the shape is stated here and the counts are left to the assertions.
 
 // credentialExemptions are credential-shaped names that must NOT be forwarded to the `track:`
 // service, with the reason. An exemption is a decision; it is written here so the next person can
@@ -54,38 +59,36 @@ func looksLikeCredential(name string) bool {
 	return false
 }
 
-// envReadPat matches every way this tree reads an environment variable. getEnv/getEnvDuration are
-// internal/config's own helpers; missing them would make the guard blind to exactly the file that
-// reads the most variables.
-var envReadPat = regexp.MustCompile(`(?:os\.Getenv|os\.LookupEnv|getEnv|getEnvDuration)\(\s*"([A-Z][A-Z0-9_]*)"`)
-
-// readsEnvVars enumerates every environment variable the tree reads, from the SOURCE, mapped to
-// the first file that reads it so a failure can be acted on without a search.
+// readsEnvVars enumerates every environment variable the tree reads, mapped to the first site that
+// reads it so a failure can be acted on without a search.
 //
-// ⚠ _test.go IS SKIPPED. A test reading an env var says nothing about what the deployment needs,
-// and counting them would produce exemptions for names no container ever wants.
+// ⚠ IT DELEGATES TO collectEnvReads (env_example_census_test.go), WHICH PARSES AND RESOLVES
+// CONSTANTS, AND THAT REPLACED A REGEX THAT REQUIRED A STRING LITERAL. The old pattern could not
+// see `os.Getenv(config.LogLevelEnv)` in main.go or `os.Getenv(EnvDatabaseURL)` in
+// internal/testutil — so TRACK_LOG_LEVEL and TRACK_TEST_DATABASE_URL were absent from this
+// guard's population. Neither is credential-shaped, so this guard's green was CORRECT; it was
+// correct BY COINCIDENCE rather than by construction, and one `const MintKeyEnv = "..."` would
+// have dropped a credential out of the population with nothing going red.
+//
+// ⚠⚠ THE REPLACEMENT WAS MEASURED, NOT ASSUMED, BECAUSE DELETING A PATTERN FROM A SECURITY GUARD
+// IS A DELETION: name by name, the regex found 17, the parse finds 19, the parse loses NOTHING the
+// regex had, and it reports ZERO reads it cannot name. The two it gains are the two above.
+//
+// ⚠⚠⚠ AND THE TWO GUARDS NOW SHARE ONE ENUMERATION ON PURPOSE. Two copies of "how this tree reads
+// the environment" is precisely the drift a sibling merge (W3.43) added a coupling test for, and it
+// would be a poor joke to grow a second copy inside the file whose subject is drift.
 func readsEnvVars(t *testing.T) map[string]string {
 	t.Helper()
+	reads, unresolved := collectEnvReads(t)
+	if len(unresolved) > 0 {
+		t.Fatalf("%d environment read(s) could not be resolved to a variable name: %v\n"+
+			"A read this guard cannot name is a credential it cannot check.", len(unresolved), unresolved)
+	}
 	found := map[string]string{}
-	for _, root := range []string{"..", "../../internal"} {
-		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-			if strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			b, rerr := os.ReadFile(path)
-			if rerr != nil {
-				return nil
-			}
-			for _, m := range envReadPat.FindAllStringSubmatch(string(b), -1) {
-				if _, seen := found[m[1]]; !seen {
-					found[m[1]] = path
-				}
-			}
-			return nil
-		})
+	for _, r := range reads {
+		if _, seen := found[r.name]; !seen {
+			found[r.name] = r.site
+		}
 	}
 	return found
 }
