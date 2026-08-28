@@ -115,7 +115,7 @@ type Store struct {
 }
 
 // NewStore constructs the production store. secret is the HMAC key
-// used to sign access tokens — read from GUEST_SECRET at boot.
+// used to sign access tokens — read from TRACK_GUEST_SECRET at boot.
 // Empty secrets derive a per-process random key so dev environments
 // still work; production deployments must set the env var.
 func NewStore(pool *pgxpool.Pool, secret string) *Store {
@@ -129,8 +129,15 @@ func NewStore(pool *pgxpool.Pool, secret string) *Store {
 func newStore(db pgxDB, secret string) *Store {
 	if secret == "" {
 		// Random fallback. Tokens minted in this process are usable
-		// during its lifetime; a restart invalidates them all. Fine
-		// for dev, unacceptable for prod (operator must set GUEST_SECRET).
+		// during its lifetime; a restart invalidates them all, and a second
+		// instance rejects them outright ("signature mismatch"). Fine for
+		// dev, unacceptable for prod: the operator must set TRACK_GUEST_SECRET.
+		//
+		// ⚠ THE VARIABLE NAME HERE USED TO READ `GUEST_SECRET`, WHICH EXISTS
+		// NOWHERE IN THIS TREE. cmd/track/main.go reads TRACK_GUEST_SECRET.
+		// The one sentence telling an operator to set it named something they
+		// could not have found, and the real name was in no template until
+		// W3.44 added it to .env.example.
 		buf := make([]byte, 32)
 		_, _ = rand.Read(buf)
 		secret = hex.EncodeToString(buf)
@@ -390,7 +397,7 @@ func (s *Store) ListGuests(ctx context.Context, workspaceID string, projectID *s
 // RevokeGuest flips the active flag off. Stateless access tokens
 // remain in circulation until their own TTL expires — that's a
 // known trade-off for stateless auth; if you need immediate cutoff,
-// rotate GUEST_SECRET (invalidates every token in flight).
+// rotate TRACK_GUEST_SECRET (invalidates every token in flight).
 // ErrNotFound is the SEC-5 sentinel: a by-id guest op resolved to no row in the caller's authorized
 // workspace. The handler maps it to 404 (a foreign id and a nonexistent id are indistinguishable).
 var ErrNotFound = errors.New("guest: not found in workspace")
