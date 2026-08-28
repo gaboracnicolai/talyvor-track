@@ -312,7 +312,15 @@ func main() {
 	var integrationStore *integrations.Store
 	if len(cfg.IntegrationEncryptionKey) > 0 {
 		cipher, err := integrations.NewCipher(cfg.IntegrationEncryptionKey)
-		if err != nil { // unreachable (config validated the length) — fail loud rather than run broken crypto
+		// ⚠ NOT UNREACHABLE, AND THIS COMMENT USED TO SAY IT WAS. It is reached whenever
+		// config.IntegrationEncryptionKeyLen and NewCipher's own `len(key) != 32` disagree —
+		// two independently declared numbers that nothing compared until
+		// internal/config/integration_key_coupling_test.go. Measured by running this binary
+		// (W3.43): with the config constant at 16, 24 or 235 and a matching key, Track exits
+		// here rather than at config, and the operator is told "integrations: key must be 32
+		// bytes" for a TRACK_INTEGRATION_ENCRYPTION_KEY they set correctly. Failing loud is
+		// still right; the branch is a real backstop, not dead code.
+		if err != nil {
 			slog.Error("integrations: cipher init failed", slog.String("err", err.Error()))
 			os.Exit(1)
 		}
