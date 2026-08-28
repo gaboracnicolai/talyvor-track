@@ -179,7 +179,7 @@ func spaRequests(t *testing.T) []spaReq {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !(strings.HasSuffix(p, ".ts") || strings.HasSuffix(p, ".tsx")) {
+		if d.IsDir() || (!strings.HasSuffix(p, ".ts") && !strings.HasSuffix(p, ".tsx")) {
 			return nil
 		}
 		raw, err := os.ReadFile(p)
