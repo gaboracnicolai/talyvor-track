@@ -31,11 +31,21 @@ import (
 // documents TRACK_GUEST_SECRET, TRACK_MEMBER_SYNC_SECRET and
 // TRACK_INTEGRATION_ENCRYPTION_KEY (W3.44), so a real .env holds every credential this
 // service has.
+//
+// ⚠ THE DIRECTORY ENTRIES ARE PROBED VIA A PATH *INSIDE* THEM, AND THAT IS NOT COSMETIC —
+// THE FIRST VERSION OF THIS TEST WAS GREEN HERE AND RED IN CI. `frontend/.gitignore` uses
+// directory-only patterns (`dist/`, `node_modules/`). `git check-ignore` can only match a
+// directory-only pattern against a path it can tell IS a directory, which on a clean
+// checkout — every CI run — it cannot, because the directory does not exist yet. My local
+// green came from having run `npm ci` and `npm run build` minutes earlier: the check was
+// passing on STATE I had left behind, in a test whose own comment claimed it asked about
+// paths "rather than about files that happen to exist". Probing `frontend/dist/index.html`
+// matches the pattern against the directory COMPONENT and needs nothing to exist.
 var buildArtefacts = []string{
 	"track",
 	"bin/track",
-	"frontend/dist",
-	"frontend/node_modules",
+	"frontend/dist/index.html",
+	"frontend/node_modules/.package-lock.json",
 	".env",
 }
 
@@ -100,8 +110,21 @@ func TestNoBuildArtefactIsAlreadyTracked(t *testing.T) {
 		t.Fatalf("git ls-files returned only %d paths — this enumeration is broken, and a guard "+
 			"that enumerates nothing passes everything", len(tracked))
 	}
+	// Compare against the DIRECTORY the probe lives in as well as the probe itself, so a
+	// tracked file anywhere under an ignored directory is still reported.
+	// ⚠ THE IMMEDIATE PARENT, NOT THE FIRST COMPONENT. A first-component split turns the
+	// probe frontend/dist/index.html into the root `frontend`, which is a tracked source
+	// directory — and this test then reported that every file in it "protects nothing".
+	// Caught by running it, not by reading it.
+	roots := map[string]bool{}
+	for _, p := range buildArtefacts {
+		roots[p] = true
+		if i := strings.LastIndex(p, "/"); i > 0 {
+			roots[p[:i]] = true
+		}
+	}
 	for _, f := range tracked {
-		for _, p := range buildArtefacts {
+		for p := range roots {
 			if f == p || strings.HasPrefix(f, p+"/") {
 				t.Errorf("%q is TRACKED. Ignoring an already-tracked path has no effect, so the "+
 					"ignore rule for %q protects nothing until it is `git rm --cached`d.", f, p)
