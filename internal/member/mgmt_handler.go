@@ -46,9 +46,21 @@ func (h *MgmtHandler) requireOwner(w http.ResponseWriter, r *http.Request) (stri
 // memberView is the picker projection List returns — exactly what an assignee/@mention/
 // reviewer dropdown needs (id, name, email, role, avatar_url) and nothing more. It omits
 // model.Member's workspace_id (the caller already has it from the path) and created_at, so
-// the roster read never leaks beyond what the frontend needs. avatar_url IS included: a
-// picker shows avatars, Track already stores the field, and it is not sensitive (members can
-// already see each other's names and emails).
+// the roster read never leaks beyond what the frontend needs.
+//
+// ⚠ avatar_url IS ALWAYS THE EMPTY STRING, AND THE COMMENT THAT USED TO SIT HERE SAID
+// OTHERWISE. It justified shipping the field with "Track already stores the field" — Track
+// stores a COLUMN, and nothing writes it. `members.avatar_url` is TEXT NOT NULL with an
+// empty-string DEFAULT (migration 0001), and the complete set of production statements
+// against `members` is five;
+// not one names it, and internal/member has no dynamic update builder. So every caller of
+// this endpoint has always received "". Measured, not read: see migration 0027 and
+// internal/schemaguard/writerless_column_test.go, which reds if that stops being true.
+//
+// Nothing renders wrong today — the SPA's Avatar falls back to initials on an empty url —
+// and the field is not sensitive (members can already see each other's names and emails).
+// Whether Track should acquire an avatar source or stop shipping the field is a product
+// decision; the field is left exactly as it was until somebody takes it.
 type memberView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
