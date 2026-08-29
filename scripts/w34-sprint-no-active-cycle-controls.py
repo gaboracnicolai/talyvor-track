@@ -20,6 +20,8 @@ import hashlib
 import re
 import shutil
 import subprocess
+import os
+import signal
 import sys
 import tempfile
 from pathlib import Path
@@ -29,7 +31,23 @@ SERVER = REPO / "internal/mcp/server.go"
 CYCLE_HANDLER = REPO / "internal/cycle/handler.go"
 CYCLE_STORE = REPO / "internal/cycle/store.go"
 
-PG = "postgres://postgres:postgres@localhost:55437/postgres?sslmode=disable"
+# ⚠ THIS WAS A HARDCODED `localhost:55437`, AND NOTHING HAS LISTENED THERE SINCE THE SESSION THAT
+# WROTE IT. `run_tests` builds a CLEAN env containing only this DSN, so the port could not be
+# overridden from outside: on any other machine — or the same machine an hour later — the baseline
+# mass-failed and the script exited 1 before applying a single control. Measured 2026-08-29 while
+# giving this script its SIGTERM control (W6.41): `nc -z localhost 55437` refused, and the baseline
+# reported hundreds of failures that are simply "no database". Established as PRE-EXISTING by
+# reading the same line at HEAD.
+#
+# ⚠⚠ IT IS THE SAME FAMILY AS THE DRIFTED ANCHORS (W3.64/W3.65/W6.42) AND FAILS THE SAME WAY: a
+# control that CANNOT RUN looks nothing like a control that ran, unless somebody runs it and reads
+# the output. Nothing in CI runs this script either.
+#
+# The env var is the one CI already defines for the real-Postgres suite, so the script now works
+# wherever the suite does. The old literal is kept as the fallback rather than deleted: it costs
+# nothing and it is what a developer with that container still running would expect.
+PG = os.environ.get("TRACK_TEST_DATABASE_URL",
+                    "postgres://postgres:postgres@localhost:55437/postgres?sslmode=disable")
 
 NO_ACTIVE = "TestSprintStatus_NoActiveCycle_AnswersInsteadOfPanicking"
 ACTIVE = "TestSprintStatus_ActiveCycle_StillAnswers"
@@ -147,10 +165,38 @@ CONTROLS = [
 ]
 
 
+def restore_on_signal(snapshot):
+    """Put every snapshotted file back, then die of the signal we were sent.
+
+    A `finally` DOES NOT RUN ON SIGTERM. talyvor-suite W1.7 (78c69c8) lost a shell gate to exactly
+    this — a 2-minute command timeout killed a control mid-mutation, with a green suite and a
+    `git status` showing only files the session had edited on purpose. Re-raising with SIG_DFL keeps
+    the exit status honest. SIGKILL still strands and nothing in Python can change that.
+
+    Deliberately pasted rather than imported: scripts/check-restore-signal-handlers.py detects the
+    handler in this file's OWN ast, and an import is invisible to it.
+    """
+
+    def handler(signum, _frame):
+        for path, blob in snapshot.items():
+            try:
+                path.write_bytes(blob)
+            except OSError:
+                pass
+        sys.stderr.write("\n!! signal %d — restored %d mutated file(s) before exiting\n"
+                         % (signum, len(snapshot)))
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, handler)
+
+
 def main():
     saved = {}
     for p in (SERVER, CYCLE_HANDLER, CYCLE_STORE):
         saved[p] = p.read_bytes()
+    restore_on_signal(dict(saved))
     backup_dir = Path(tempfile.mkdtemp(prefix="w34-controls-"))
     for p, b in saved.items():
         (backup_dir / p.name).write_bytes(b)
@@ -178,11 +224,17 @@ def main():
             print(f"  ✗ ANCHOR COUNT = {n}, want exactly 1 — control NOT APPLIED, scored as INVALID")
             results.append((c["name"], "INVALID-ANCHOR"))
             continue
-        p.write_text(src.replace(c["old"], c["new"], 1))
-
-        ok, failed, passed, panicked, out = run_tests()
-        for pth, b in saved.items():
-            pth.write_bytes(b)
+        try:
+            p.write_text(src.replace(c["old"], c["new"], 1))
+            ok, failed, passed, panicked, out = run_tests()
+        finally:
+        # ⚠ THIS `finally` IS THE OTHER HALF AND IT IS NOT REDUNDANT WITH THE HANDLER.
+        # The handler covers a KILL; this covers an EXCEPTION — the guard subprocess
+        # blowing up, a KeyboardInterrupt inside it. Before this, the restore ran only
+        # on the happy path, which strands the tree on any error and is invisible to a
+        # population keyed on `finally`.
+            for pth, b in saved.items():
+                pth.write_bytes(b)
         assert sha(p) == baseline_sha[p], "restore failed — bytes differ from baseline"
 
         if not ok:
