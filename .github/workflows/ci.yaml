@@ -259,6 +259,25 @@ jobs:
         run: cd frontend && npm ci
       - name: Typecheck
         run: cd frontend && npm run typecheck
+      # The SPA's request surface — verb, path, query keys, body fields — regenerated from the
+      # TypeScript type checker and diffed against the committed JSON.
+      #
+      # ⚠ THIS STEP IS WHAT MAKES cmd/track/spa_request_body_contract_test.go HONEST, AND THE TWO
+      # HALVES DELIBERATELY LIVE IN DIFFERENT JOBS. The Go job has no node, so it reads the
+      # committed file; a committed file nothing regenerates is a snapshot of a tree that no longer
+      # exists, and the census over it would keep reporting a clean request contract while the SPA
+      # drifted underneath it. That is the exact failure this whole item is about — a green census
+      # over a dead endpoint. If this step ever has to be removed, the Go census must go with it.
+      - name: SPA request surface must match the committed census input
+        run: |
+          cd frontend
+          node scripts/spa-request-surface.mjs > testdata/spa-request-surface.json
+          if ! git diff --exit-code -- testdata/spa-request-surface.json; then
+            echo "::error::frontend/testdata/spa-request-surface.json is stale — regenerate it with"
+            echo "::error::  cd frontend && node scripts/spa-request-surface.mjs > testdata/spa-request-surface.json"
+            echo "::error::and commit the result. cmd/track's request-body and query censuses read this file."
+            exit 1
+          fi
       - name: Build
         run: cd frontend && npm run build
 
