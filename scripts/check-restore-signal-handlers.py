@@ -9,10 +9,9 @@ WHICH IS THE POINT OF PORTING IT. A 2-minute command timeout SIGTERM'd a control
 demand in talyvor-suite `5de27e3`: same kill, same file — with a handler nothing was stranded,
 without one the mutated file was left in the tree.
 
-⚠ NOTHING IN THIS REPOSITORY HAD EVER LOOKED FOR IT, AND THIS IS THE LARGEST POPULATION IN THE
-ESTATE. At 64f379d, 61 of this repo's scripts mutate-and-restore and ZERO installed a handler —
-the estate-wide count was 163 scripts and 3 protected, all three in the one repo that had been
-bitten. talyvor-track alone is more than a third of it.
+⚠ NOTHING IN THIS REPOSITORY HAD EVER LOOKED FOR IT. At f8e7236, 43 of this repo's scripts
+mutate-and-restore and ZERO installed a handler — the estate-wide count was 163 scripts and 3
+protected, all three in the one repo that had been bitten.
 
 ⚠ NOTHING ABOUT THAT TREE LOOKED WRONG. `pnpm test` had passed minutes earlier, `git status`
 showed only files the session had edited on purpose, and the diff was one line inside a table that
@@ -31,10 +30,9 @@ In talyvor-suite `grep -l signal scripts/*.py` reports a script as PROTECTED who
 occurrences of the word are four sentences of English in comments. A regex reads the documentation
 as the implementation; `ast` does not see comments.
 
-⚠ AND THE TWO POPULATIONS DIFFER HERE TOO, MEASURED ON THIS TREE AT 64f379d: `grep -l finally:
-scripts/*.py` counts 90, this walk counts 61. A `finally` that does not WRITE is not a restore, and
-twenty-nine scripts in this directory have one. The same divergence held in talyvor-suite (58 vs
-41) and talyvor-docs (60 vs 43) — a grep over-counts by roughly a third every time.
+⚠ AND THE TWO POPULATIONS DIFFER HERE TOO, MEASURED ON THIS TREE AT f8e7236: `grep -l finally:
+scripts/*.py` counts 60, this walk counts 43. A `finally` that does not WRITE is not a restore, and
+seventeen scripts in this directory have one.
 
 WHAT COUNTS AS A MUTATOR: a script containing a `try` whose `finally` performs a write —
 `.write_text` / `.write_bytes` / `.writelines` / `.write`, or `shutil`/`os` copy/move. That is the
@@ -77,15 +75,36 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
 
-# MUTATOR FLOOR. 61 scripts in this directory mutate-and-restore at 64f379d. It is a FLOOR on the
-# DETECTOR, not a target for the tree: if this walk stops recognising the shape it reports a clean
-# directory, which is the one failure mode a guard like this has. Deleting scripts is legitimate —
-# lower it in the same diff, with the deletions visible.
-MUTATOR_FLOOR = 58
+# ⚠⚠ ONE FLOOR PER DETECTOR, AND THIS IS THE MOST IMPORTANT LINE IN THE FILE.
+#
+# A SINGLE FLOOR OVER THE UNION OF TWO DETECTORS IS SATISFIED BY EITHER DETECTOR ALONE. Measured
+# by tab-r7k2 in bfa11f4: stubbing the WIDE detector to `return False` came back GREEN, because
+# the narrow one held the union count up — so the widened definition, the entire point of having
+# two, could have silently reverted with the guard green. A vacuity floor over a union is not a
+# vacuity floor. Controls G10/G11 blind each detector separately for exactly this reason.
+#
+# Both are FLOORS ON THE DETECTOR, not targets for the tree: a walk that stops recognising its
+# shape reports a clean directory. Deleting scripts is legitimate — lower the floor in the same
+# diff, with the deletions visible.
+NARROW_FLOOR = 92   # 95 restore-in-`finally` at 5a20312 (direct, indirect, context-manager, git)
+WIDE_FLOOR = 38     # 41 read-and-write scripts at 5a20312
 
-# The scripts that mutate-and-restore and do NOT yet install a handler, measured at 64f379d.
+# The scripts that mutate-and-restore and do NOT yet install a handler, measured at f17a584.
 # ⚠ THIS LIST MAY ONLY SHRINK. Adding to it is not a fix; R1 exists so that a new script cannot be
 # written without a handler, and R2 exists so that a fixed script cannot be left listed.
+# ⚠⚠ THIS LIST GREW FROM 60 TO 89 IN THE SAME MERGE THAT WIDENED THE DETECTOR, AND THAT IS NOT A
+# REGRESSION — READ THIS BEFORE CONCLUDING THE "MAY ONLY SHRINK" RULE WAS BROKEN.
+# The previous detector recognised a restore only as a write CALL syntactically inside a `finally`.
+# It therefore saw ~63 restoring scripts where there are 95: it was blind to a `finally` that calls
+# a helper (`finally: restore()`), to a CONTEXT MANAGER whose `__exit__` writes, and to a `finally`
+# that shells out to `git checkout --`. Those 29 scripts were ALWAYS unprotected; they were simply
+# not in the population, so nothing counted them. The number went up because the instrument got
+# better, not because the tree got worse — and a smaller list under a blinder detector is the
+# flattering direction, which is the one this whole class of guard exists to refuse.
+#
+# THE RULE STILL HOLDS AND IT IS THE SAME RULE: within a fixed detector this list may only SHRINK.
+# R2 fails on an entry that has been fixed, R1 on a new unprotected script, R4 on a stale entry.
+# If the detector is widened again, say so here in the same diff, with the before/after counts.
 UNPROTECTED = {
     "w310-scoring-tenancy-controls-m5x8.py",
     "w34-adf-blockcard-controls.py",
@@ -93,15 +112,21 @@ UNPROTECTED = {
     "w34-aicost-leaderboard-window-controls.py",
     "w34-aicost-null-series-controls.py",
     "w34-aicost-ordering-controls-b9d7.py",
+    "w34-aicosts-scope-controls-7b2c.py",
     "w34-analytics-index-claims-controls.py",
     "w34-analytics-scope-wiring-controls-2q7v.py",
     "w34-analytics-window-controls.py",
     "w34-api-created-controls.py",
     "w34-api-updated-controls.py",
     "w34-burndown-final-second-controls-9m4x.py",
+    "w34-burndown-ontrack-controls-3d9e.py",
+    "w34-burndown-ordering-controls-3d9e.py",
+    "w34-childinsert-exemption-controls-8x2m.py",
     "w34-column-index-trim-controls-r8x2.py",
+    "w34-completed-at-controls-7c4d.py",
     "w34-completed-divergence-controls.py",
     "w34-corpus-copies-controls.py",
+    "w34-create-refs-controls-8x2m.py",
     "w34-crossteam-identifier-controls.py",
     "w34-csv-clobbered-columns-controls.py",
     "w34-csv-clobbered-columns-same-import-controls.py",
@@ -113,33 +138,56 @@ UNPROTECTED = {
     "w34-expectquery-fingerprint-census-8f3d.py",
     "w34-getall-trim-controls-r8x2.py",
     "w34-groupby-gate-controls-5b91.py",
+    "w34-guest-inert-controls-8x2m.py",
     "w34-helper-wiring-controls-9m4x.py",
     "w34-inert-ownergate-census-7k2p.py",
     "w34-jira-api-adf-controls.py",
     "w34-jira-api-resolution-controls.py",
     "w34-jira-csv-bom-controls.py",
+    "w34-jira-csv-date-controls.py",
+    "w34-jira-csv-issue-key-controls.py",
     "w34-jira-csv-labels-controls.py",
+    "w34-jira-csv-resolution-controls.py",
     "w34-jira-csv-status-category-controls.py",
     "w34-jira-csv-updated-controls.py",
     "w34-jobs-upload-authz-order-controls.py",
     "w34-linear-csv-dates-controls.py",
     "w34-linear-csv-due-date-controls.py",
+    "w34-linear-csv-short-row-controls.py",
     "w34-linear-csv-tostring-controls.py",
+    "w34-linear-csv-updated-controls.py",
+    "w34-linear-date-controls.py",
     "w34-linear-description-controls-2q7v.py",
+    "w34-linear-null-team-controls.py",
+    "w34-linear-state-type-controls.py",
     "w34-member-email-identity-controls-r8x2.py",
+    "w34-midnight-boundary-controls-8x2m.py",
+    "w34-mount-shrinkage-controls-8x2m.py",
+    "w34-operate-by-id-exemption-controls-8x2m.py",
     "w34-ownergate-lock-controls-3w9m.py",
     "w34-pagination-termination-controls.py",
+    "w34-payload-lifetime-controls-r8kw.py",
     "w34-readme-transit-proof-controls-p3n7.py",
+    "w34-refguard-inert-controls-8x2m.py",
+    "w34-refguard-semgrep-census-m3r8.py",
     "w34-refused-rows-controls.py",
     "w34-report-ordering-controls-8f3d.py",
     "w34-resolution-arithmetic-controls-8d3f.py",
+    "w34-resolution-scope-controls-7b2c.py",
+    "w34-resolvedws-controls-8j5q.py",
     "w34-runner-shutdown-terminal-state-controls.py",
+    "w34-suppression-census-controls-8x2m.py",
+    "w34-template-assignee-controls-8f3b.py",
+    "w34-template-assignee-lock-controls-8f3b.py",
     "w34-tenancy-lock-visibility-controls.py",
+    "w34-terminal-write-controls-7a3e.py",
+    "w34-update-allowlist-controls-7c4d.py",
     "w34-updated-metric-controls-6b4d.py",
     "w34-upload-authz-order-controls.py",
     "w34-velocity-counting-controls-8f5c.py",
     "w34-via-render-population-controls.py",
     "w34-warning-bound-controls.py",
+    "w34-window-clamp-wiring-controls-6c1a.py",
     "w34-wire-contract-controls.py",
     "w34-workload-counting-controls-4c8e.py",
     "w34-workload-tenancy-controls-b9d7.py",
@@ -149,26 +197,148 @@ UNPROTECTED = {
     "w632-exempt-route-census-controls.py",
 }
 
+# HAPPY_PATH_ONLY holds the scripts the WIDE detector found that restore WITHOUT a `try` at all.
+# They are a WORSE failure than an entry in UNPROTECTED, not a lesser one: an unprotected `finally`
+# strands only on a signal, these strand on ANY exception. Measured at f17a584 — THREE of them
+# here, and the first version of this guard (ffe9063) could not see a single one.
+#
+# ⚠ THIS LIST MAY ONLY SHRINK, and it is kept SEPARATE from UNPROTECTED deliberately: folding the
+# two would let a script leave the harder list by acquiring a handler while still having no
+# `finally`. R2b fails on an entry that has gained one; R4b on one the detector no longer finds.
+HAPPY_PATH_ONLY: set[str] = set()
+
+# NOT_MUTATORS holds scripts the WIDE detector catches that do not actually restore a tracked
+# file — a wide net manufactures false positives, and parking one here without a REASON is a hole
+# rather than a classification. R7 fails on an unexplained entry; R4 fails on one that is no
+# longer a candidate. It is empty today: every one of the 11 the wide net found here is a genuine
+# happy-path restore, verified by reading them.
+NOT_MUTATORS: dict[str, str] = {
+    # Both REFRESH a testdata file from an external source. They read the OLD contents only to
+    # report what changed, then overwrite — there is no mutate-and-restore, so a `finally` and a
+    # handler would guard nothing. Verified by reading them, not by their names: the wide net
+    # matches them because "reads a file and writes a file" is deliberately broader than the
+    # hazard, and this map is where that breadth gets paid for with a human sentence.
+    "w34-jira-contract-snapshot.py":
+        "refreshes internal/importer/testdata/jira_search_contract.json from Atlassian's published "
+        "v3 spec; the read is a diff-for-reporting, the write is the product",
+    "w34-linear-schema-snapshot.py":
+        "refreshes internal/importer/testdata/linear_schema_snapshot.json from the real Linear API; "
+        "same shape as the Jira one",
+}
+
 _WRITE_ATTRS = {"write_text", "write_bytes", "writelines", "write"}
 _COPY_FUNCS = {"copy", "copy2", "copyfile", "move"}
+_READ_ATTRS = {"read_text", "read_bytes"}
+
+
+def _write_call(n: ast.AST) -> bool:
+    if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)):
+        return False
+    if n.func.attr in _WRITE_ATTRS:
+        return True
+    return (n.func.attr in _COPY_FUNCS and isinstance(n.func.value, ast.Name)
+            and n.func.value.id in ("shutil", "os"))
 
 
 def _writes(body) -> bool:
     """True if this statement list performs a filesystem write."""
-    for n in ast.walk(ast.Module(body=body, type_ignores=[])):
-        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)):
+    return any(_write_call(n) for n in ast.walk(ast.Module(body=body, type_ignores=[])))
+
+
+def _reads_and_writes(tree: ast.AST) -> bool:
+    """The WIDE net: the script both reads file content and writes it, `try` or no `try`."""
+    reads = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr in _READ_ATTRS for n in ast.walk(tree))
+    return reads and any(_write_call(n) for n in ast.walk(tree))
+
+
+def _writing_functions(tree: ast.AST) -> set:
+    """Names of functions defined in this module whose body performs a write.
+
+    ⚠ THIS EXISTS BECAUSE THE FIRST VERSION OF THIS DETECTOR WAS WRONG ABOUT TEN OF ELEVEN
+    SCRIPTS, AND THE FAILURE MESSAGE IT WOULD HAVE PRINTED WAS A FALSE STATEMENT ABOUT THEM.
+    `_writes(finalbody)` looks for a write CALL syntactically inside the `finally`. These scripts
+    restore INDIRECTLY — `finally: restore()`, `finally: revert(...)`, `finally: git_restore()` —
+    so the walk saw a `finally` with no write in it and classified them as having no `try` at all.
+    Ten of the eleven this repo's wide net first flagged are that shape; exactly one
+    (in talyvor-suite, w11-spa-cache-controls.py) genuinely had no `try`; here there are three.
+
+    One level of indirection is deliberately all this resolves. It is a syntactic guard, not an
+    interpreter, and a restore reached through two hops would be reported as happy-path — wrongly,
+    but LOUDLY and in the direction that asks a human to look, which is the safe direction here.
+    """
+    out = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _writes(n.body):
+            out.add(n.name)
+    return out
+
+
+def _restores_via_context_manager(tree: ast.AST) -> bool:
+    """A class whose `__exit__` writes, and a `with` that could be using it.
+
+    ⚠ A CONTEXT MANAGER IS AS EXCEPTION-SAFE AS A `finally` — that is what `with` is for — so
+    calling one "restores on the happy path only" is a false statement about the script. This is
+    the THIRD classification the population needed: keyed on a write inside `finally`, a restore
+    reached through a helper function was invisible; keyed on that too, a restore reached through
+    `__exit__` still was. `w31-viewguard-skip-controls-7e2b.py`'s own docstring says "Every
+    mutation is restored in a `finally`", and it is right — the `finally` is the `with` statement.
+
+    BOTH halves are required: defining the class is not using it. A script that defines a writing
+    `__exit__` and never writes a `with` is still reported, which is the loud direction.
+    """
+    has_exit = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and n.name == "__exit__" and _writes(n.body) for n in ast.walk(tree))
+    return has_exit and any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(tree))
+
+
+def _restores_via_git_in_finally(node: ast.Try) -> bool:
+    """A `finally` that shells out to `git checkout -- <path>`.
+
+    ⚠ THE FOURTH RESTORE IDIOM THIS POPULATION USES, AND THE FOURTH TIME THE COUNT MOVED.
+    A subprocess is not a Python write, so a `finally` that restores with git looked empty to the
+    walk. Both of this repo's remaining candidates are that shape, which takes talyvor-docs'
+    genuinely-happy-path count to ZERO. Estate-wide the count has gone 27 -> 13 (indirect calls)
+    -> 10 (context managers) -> 6 (this).
+
+    ⚠ THE PREDICATE IS DELIBERATELY TIGHT: a string literal containing "git" AND one containing
+    "checkout" or "restore", in the same call. A `finally` that merely runs some subprocess is NOT
+    a restore, and treating it as one would make this guard quieter than the truth.
+
+    ⚠ AND IT DOES NOT MAKE THE SCRIPT SAFE — it makes it EXCEPTION-safe. `git checkout` in a
+    `finally` still does not run on SIGTERM, so these scripts move from R6 to R1: they need a
+    handler, exactly like the rest.
+    """
+    for c in ast.walk(ast.Module(body=node.finalbody, type_ignores=[])):
+        if not isinstance(c, ast.Call):
             continue
-        if n.func.attr in _WRITE_ATTRS:
-            return True
-        if n.func.attr in _COPY_FUNCS and isinstance(n.func.value, ast.Name) \
-                and n.func.value.id in ("shutil", "os"):
+        lits = [x.value for x in ast.walk(c)
+                if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+        if any("git" in s for s in lits) and any(("checkout" in s or "restore" in s) for s in lits):
             return True
     return False
 
 
 def _restores_in_finally(tree: ast.AST) -> bool:
-    return any(isinstance(n, ast.Try) and n.finalbody and _writes(n.finalbody)
-               for n in ast.walk(tree))
+    if _restores_via_context_manager(tree):
+        return True
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Try) and n.finalbody and _restores_via_git_in_finally(n):
+            return True
+    writers = _writing_functions(tree)
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Try) and n.finalbody):
+            continue
+        if _writes(n.finalbody):
+            return True
+        # INDIRECT: the `finally` calls a function defined here that writes.
+        for c in ast.walk(ast.Module(body=n.finalbody, type_ignores=[])):
+            if isinstance(c, ast.Call):
+                f = c.func
+                name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else None)
+                if name in writers:
+                    return True
+    return False
 
 
 def _installs_handler(tree: ast.AST) -> bool:
@@ -182,7 +352,7 @@ def _installs_handler(tree: ast.AST) -> bool:
 
 
 def main() -> int:
-    mutators, protected, errors = set(), set(), []
+    narrow, wide, protected, errors = set(), set(), set(), []
     for path in sorted(SCRIPTS.glob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -192,44 +362,86 @@ def main() -> int:
             errors.append(f"R5: {path.name} could not be parsed, so it was NOT checked: {e}")
             continue
         if _restores_in_finally(tree):
-            mutators.add(path.name)
-            if _installs_handler(tree):
-                protected.add(path.name)
+            narrow.add(path.name)
+        if _reads_and_writes(tree):
+            wide.add(path.name)
+        if (path.name in narrow or path.name in wide) and _installs_handler(tree):
+            protected.add(path.name)
 
     fail = list(errors)
 
-    # R3 FLOOR FIRST, because every rule below is vacuous without a population.
-    if len(mutators) < MUTATOR_FLOOR:
+    # R3 FLOORS FIRST, PER DETECTOR, because every rule below is vacuous without a population and
+    # a union floor would let either detector die unnoticed.
+    if len(narrow) < NARROW_FLOOR:
         fail.append(
-            f"R3: found only {len(mutators)} mutate-and-restore scripts, floor is {MUTATOR_FLOOR}. "
-            "A detector that stops recognising the shape reports a clean directory rather than a "
-            "broken instrument. If scripts were deleted, lower the floor in the same diff.")
+            f"R3: the `finally`-restore detector found only {len(narrow)} scripts, floor is "
+            f"{NARROW_FLOOR}. A detector that stops recognising its shape reports a clean "
+            "directory rather than a broken instrument.")
+    if len(wide) < WIDE_FLOOR:
+        fail.append(
+            f"R3b: the read-and-write detector found only {len(wide)} scripts, floor is "
+            f"{WIDE_FLOOR}. This floor is SEPARATE from the one above on purpose: a single floor "
+            "over the union is satisfied by either detector alone, so the wide half could revert "
+            "to silence with the guard green.")
 
-    # R1: a mutator with no handler that nobody has accounted for.
-    for name in sorted(mutators - protected - UNPROTECTED):
+    # R1: a `finally`-restoring script with no handler that nobody has accounted for.
+    for name in sorted(narrow - protected - UNPROTECTED):
         fail.append(
             f"R1: {name} mutates a tracked file and restores it in a `finally`, but installs no "
-            "signal handler — a SIGTERM will strand the mutation in the working tree. The "
-            "shape to copy is in this file's own docstring, and the conversion needs its own "
-            "SIGTERM control.")
+            "signal handler — a SIGTERM will strand the mutation in the working tree. The shape "
+            "to copy is in this file's own docstring, and the conversion needs its own SIGTERM control.")
+
+    # R6: restoring only on the HAPPY PATH is worse than an unprotected `finally`, not better —
+    # it strands the tree on any exception, not merely on a signal.
+    for name in sorted(wide - narrow - NOT_MUTATORS.keys() - HAPPY_PATH_ONLY):
+        fail.append(
+            f"R6: {name} reads and writes tracked files, and this walk could NOT find a restore "
+            "in a `finally` — directly, through a helper it defines, through a `with`/__exit__, or "
+            "through a `git checkout`. Either there is none (any exception strands the mutation), "
+            "or the restore is reached in a way a syntactic walk cannot follow — two hops of "
+            "indirection, or an imported helper. READ IT BEFORE CONVERTING: the count has already "
+            "moved four times (27 -> 13 -> 10 -> 6 estate-wide) because each idiom was invisible "
+            "until somebody tried to convert one. If it does restore, classify it in NOT_MUTATORS "
+            "with the reason; if it does not, wrap it in a `finally` AND install a handler.")
 
     # R2: an entry that has been FIXED must leave the list, or the list rots into an excuse.
     for name in sorted(UNPROTECTED & protected):
         fail.append(
             f"R2: {name} now installs a handler but is still listed in UNPROTECTED. Remove the "
             "entry — this list may only shrink.")
-
-    # R4: an entry that is no longer a mutator (deleted, renamed, or restructured) is stale.
-    for name in sorted(UNPROTECTED - mutators):
+    for name in sorted(HAPPY_PATH_ONLY & narrow):
         fail.append(
-            f"R4: UNPROTECTED lists {name}, which is not a mutate-and-restore script here "
-            "(deleted, renamed, or no longer restoring in a `finally`). Remove the entry.")
+            f"R2b: {name} now restores in a `finally` but is still listed in HAPPY_PATH_ONLY. "
+            "Remove the entry — this list may only shrink.")
 
-    print(f"restore-signal-handlers: {len(mutators)} mutate-and-restore scripts, "
-          f"{len(protected)} protected, {len(UNPROTECTED)} listed as not yet fixed")
+    # R4: an entry that is no longer a candidate (deleted, renamed, restructured) is stale.
+    for name in sorted(UNPROTECTED - narrow):
+        fail.append(
+            f"R4: UNPROTECTED lists {name}, which is not a `finally`-restoring script here. "
+            "Remove the entry.")
+    for name in sorted(HAPPY_PATH_ONLY - wide):
+        fail.append(
+            f"R4b: HAPPY_PATH_ONLY lists {name}, which the read-and-write detector no longer "
+            "finds. Remove the entry.")
+    for name in sorted(set(NOT_MUTATORS) - wide):
+        fail.append(
+            f"R4c: NOT_MUTATORS lists {name}, which the read-and-write detector no longer finds. "
+            "Remove the entry.")
+
+    # R7: an unexplained exemption is a hole, not a classification.
+    for name, why in sorted(NOT_MUTATORS.items()):
+        if not why.strip():
+            fail.append(
+                f"R7: NOT_MUTATORS lists {name} with no reason. An entry nobody had to justify is "
+                "a hole in the population, not a classification.")
+
+    print(f"restore-signal-handlers: {len(narrow)} restore-in-`finally`, {len(wide)} read-and-write, "
+          f"{len(protected)} protected; {len(UNPROTECTED)} awaiting a handler, "
+          f"{len(HAPPY_PATH_ONLY)} awaiting a `finally`, {len(NOT_MUTATORS)} classified not-mutators")
     if fail:
+        ci = len(sys.argv) > 1 and sys.argv[1] == "--ci"
         for line in fail:
-            print(f"::error::{line}" if len(sys.argv) > 1 and sys.argv[1] == "--ci" else line)
+            print(f"::error::{line}" if ci else line)
         return 1
     print("restore-signal-handlers: ok")
     return 0

@@ -16,6 +16,8 @@ Run:  python3 scripts/w34-linear-query-schema-controls.py
 import hashlib
 import pathlib
 import subprocess
+import os
+import signal
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -49,13 +51,48 @@ def sub(path, old, new, expect=1):
     path.write_text(text.replace(old, new, 1))
 
 
+def restore_on_signal(snapshot):
+    """Put every snapshotted file back, then die of the signal we were sent.
+
+    A `finally` DOES NOT RUN ON SIGTERM. talyvor-suite W1.7 (78c69c8) lost a shell gate to exactly
+    this — a 2-minute command timeout killed a control mid-mutation, with a green suite and a
+    `git status` showing only files the session had edited on purpose. Re-raising with SIG_DFL keeps
+    the exit status honest. SIGKILL still strands and nothing in Python can change that.
+
+    Deliberately pasted rather than imported: scripts/check-restore-signal-handlers.py detects the
+    handler in this file's OWN ast, and an import is invisible to it.
+    """
+
+    def handler(signum, _frame):
+        for path, blob in snapshot.items():
+            try:
+                path.write_bytes(blob)
+            except OSError:
+                pass
+        sys.stderr.write("\n!! signal %d — restored %d mutated file(s) before exiting\n"
+                         % (signum, len(snapshot)))
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, handler)
+
+
 def control(name, path, old, new, expect_red=True):
     before = sha(path)
     original = path.read_text()
-    sub(path, old, new)
-    assert sha(path) != before, "control edited zero bytes"
-    code, out = run_guard()
-    path.write_text(original)
+    restore_on_signal({path: original.encode("utf-8")})
+    try:
+        sub(path, old, new)
+        assert sha(path) != before, "control edited zero bytes"
+        code, out = run_guard()
+    finally:
+        # ⚠ THIS `finally` IS THE OTHER HALF AND IT IS NOT REDUNDANT WITH THE HANDLER.
+        # The handler covers a KILL; this covers an EXCEPTION — the guard subprocess
+        # blowing up, a KeyboardInterrupt inside it. Before this, the restore ran only
+        # on the happy path, which strands the tree on any error and is invisible to a
+        # population keyed on `finally`.
+        path.write_text(original)
     if sha(path) != before:
         sys.exit(f"{name}: FAILED TO RESTORE {path.name} — sha differs after revert")
     red = code != 0
