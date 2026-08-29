@@ -28,6 +28,10 @@ yielded docs' ten dead arms. 33 reached, 223 anchors checked, and
     24 ANCHORS CARRYING 27 CONTROL ARMS ACROSS 10 SCRIPTS CANNOT BE APPLIED,
     THE OLDEST DEAD FOR 176 COMMITS, AND NOTHING IN THIS REPOSITORY COULD SEE IT.
 
+One has since been repaired (W6.55), so the live figure is 23 anchors / 26 arms / 9
+scripts. The list below is what the census found when it was introduced; KNOWN_DEAD is
+what is still outstanding, and R2 is what stops the two drifting apart.
+
   w34-jira-csv-created-controls.py     5 anchors  5 arms  oldest 176 commits
   w34-jira-csv-resolution-controls.py  4 anchors  5 arms  oldest 173 commits
   w34-burndown-ordering-controls-3d9e.py  4 anchors 4 arms       66 commits
@@ -36,7 +40,8 @@ yielded docs' ten dead arms. 33 reached, 223 anchors checked, and
   w34-api-updated-controls.py          1 anchor   2 arms         173 commits
   w34-burndown-ontrack-controls-3d9e.py 1 anchor  1 arm           66 commits
   w34-jira-api-resolution-controls.py  1 anchor   1 arm          164 commits
-  w34-update-allowlist-controls-7c4d.py 1 anchor  1 arm           74 commits  ⚠ NEVER RAN
+  w34-update-allowlist-controls-7c4d.py — REPAIRED, W6.55. Its G1 had never run; re-cut,
+                                        run, and CAUGHT. The list may only shrink.
   w39-summary-empty-population-controls-m5x8.py 2 anchors 3 arms   28 commits  ⚠ see below
 
 ⚠ THE MECHANISM IS THE SAME ONE DOCS FOUND AND IT PREDICTS WHERE THE NEXT ONE COMES
@@ -317,12 +322,6 @@ KNOWN_DEAD = {
         "INERT 85b3e1721 2026-08-10: importer: a Linear CSV export says when Linear last touched the issue and the  (count 1 -> 0, 160 commits ago)",
     ("w34-linear-csv-dates-controls.py", "9fb64b447745"):
         "INERT 9e7156eab 2026-08-10: importer: a quarter of real Linear CSV exports lose Created and Updated to a d (count 1 -> 0, 152 commits ago)",
-    ("w34-update-allowlist-controls-7c4d.py", "b19f92b0eae7"):
-        "INERT — ⚠ NEVER APPLICABLE. G1, the arm that asks 'does anything at all watch the gate?' "
-        "on internal/issue/store.go. Killed by 4eb06a27a 2026-08-19 'issue: a completion time is "
-        "recorded only on a row that is done' — WHICH IS THE COMMIT THAT ADDED THIS SCRIPT. The "
-        "anchor is the PRE-FIX text of a line the same commit rewrote, so the arm was inert on "
-        "arrival and has never run once in 74 commits. count at birth = 0.",
     # ⚠ THESE TWO WERE INVISIBLE TO THE FIRST VERSION OF THIS GUARD ON THE MACHINE THAT
     # WROTE IT AND VISIBLE IN CI — the census used to spawn subprocesses while reading
     # w39's module level, and whether that script loaded at all depended on an env var.

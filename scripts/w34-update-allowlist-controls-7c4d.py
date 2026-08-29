@@ -66,10 +66,35 @@ CONTROLS = [
     (
         "G1",
         "internal/issue/store.go",
-        '\t\tif _, ok := updatableFields[k]; !ok && k != "completed_at" {\n\t\t\tcontinue\n\t\t}\n',
-        "",
-        "?",
-        "issue: gate open — every caller key reaches SET",
+        # ⚠ RE-CUT 2026-08-29 (W6.55). The anchor this arm shipped with was
+        # `!ok && k != "completed_at"` — the PRE-FIX text of a line that 4eb06a2,
+        # THE COMMIT THAT ADDED THIS SCRIPT, had already rewritten. The arm scored
+        # HARNESS ERROR on every run for 74 commits and never once executed
+        # (W6.50, 77f70ac; count at that commit = 0). Verified red-first here:
+        # `ANCHOR NOT UNIQUE (0x)` with P1 CAUGHT by three tests in the same run,
+        # so the harness was sane and only this arm was dead.
+        # ⚠⚠ THE RE-CUT PRESERVES WHAT THE ARM PROVES AND THAT IS THE WHOLE
+        # CONSTRAINT: deleting today's block still means every caller-supplied key
+        # reaches the SET list, which is GATE-OPEN as defined above. Re-pointing an
+        # anchor at code that asks a DIFFERENT question is a control passing for a
+        # new reason, which is the failure this repository keeps paying for.
+        '\t\tif _, ok := updatableFields[k]; !ok && (k != "completed_at" || !serverStamped) {\n\t\t\tcontinue\n\t\t}\n',
+        # ⚠⚠⚠ THE REPLACEMENT IS NOT "" LIKE ITS FIVE SIBLINGS, AND THAT IS MEASURED
+        # RATHER THAN STYLISTIC. Deleting this block outright orphans `serverStamped`
+        # (`store.go:1139: declared and not used`) and the arm scores BUILD BROKE
+        # (control void) — a compile error is not a caught mutation, and a VOID arm is
+        # indistinguishable at a glance from a NOT CAUGHT one. This keeps the variable
+        # referenced and still removes the gate, so every caller-supplied key reaches
+        # the SET list, which is GATE-OPEN exactly as this file defines it above.
+        "\t\t_ = serverStamped // GATE OPEN: allowlist check removed\n",
+        # MEASURED 2026-08-29 (W6.55), THE FIRST TIME THIS ARM HAS EVER RUN. Was "?".
+        "CAUGHT",
+        "issue: gate open — every caller key reaches SET. CAUGHT by "
+        "TestStore_AnUpdateThatWroteNothingCountsNothing and "
+        "TestUpdateRoute_ACompletionTimeIsRecordedOnlyOnARowThatIsDone_RealPG (2 subtests). "
+        "⚠ BOTH CATCH IT INCIDENTALLY: neither is about the allowlist, and the second is the "
+        "test 4eb06a2 shipped alongside the very fix that killed this arm's anchor. The gate "
+        "is defended, and by accident — see the M* arms for the question that matters.",
     ),
     (
         "G2",
