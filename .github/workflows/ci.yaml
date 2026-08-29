@@ -217,6 +217,23 @@ jobs:
       # control can still be APPLIED, not that it still CATCHES; the campaign proves that.)
       - name: toolchain control anchors must still apply
         run: python3 scripts/w634-toolchain-pin-controls.py --check-anchors --ci
+      # The step above is ONE campaign checking its OWN three files. This one is the same
+      # question asked of the whole scripts/ directory, and the first time it was asked here
+      # the answer was 24 anchors carrying 27 arms across 10 scripts that can no longer be
+      # applied — the oldest dead for 176 commits, and one that has NEVER run: G1 of
+      # w34-update-allowlist-controls-7c4d.py anchors on the PRE-FIX text of a line the very
+      # commit that added the script had already rewritten.
+      # No mutation and no `go test`: it reads each script's module-level definitions in a
+      # throwaway namespace and counts literals. It proves each control can still be APPLIED,
+      # never that it still CATCHES.
+      # ⚠ "No mutation" IS ENFORCED, NOT ASSERTED, AND THE FIRST VERSION OF THIS STEP DID NOT
+      # ENFORCE IT: a module-level `ok, failed = run()` is an ASSIGNMENT, which the reader kept,
+      # so five scripts here spawned a real `subprocess.run` while being read — inside a job
+      # that has TRACK_TEST_DATABASE_URL set. Two layers now stop it and both are controlled;
+      # see the script's own header. The tell was this job redding while the author's machine
+      # was green, because coverage depended on the environment.
+      - name: every control script's anchors must still resolve
+        run: python3 scripts/check-control-anchors.py --ci
 
       - name: guard — the suite must not run in -short mode
         run: |
