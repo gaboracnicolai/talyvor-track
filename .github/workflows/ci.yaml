@@ -184,6 +184,28 @@ jobs:
       # can no longer produce a green run with the whole tenancy/IDOR suite silently
       # skipped. `-short` is the single deliberate escape — assert CI never uses it, so
       # nobody can turn a red gate green by adding a flag.
+      # A `finally` DOES NOT RUN ON SIGTERM, and 61 of this repo's control scripts mutate a
+      # tracked file and restore it in one — the LARGEST such population in the estate, more than
+      # a third of it. NONE installed a handler before this step.
+      #
+      # ⚠ ORG-LEVEL CLASS GUARD, NOT A TRACK GUARD — the same reasoning the compose-secrets job
+      # already states here. The hazard was measured in talyvor-suite (W1.7, 78c69c8): a 2-minute
+      # command timeout killed a control mid-mutation and left deploy/decision-expiry.sh reading
+      # `if true; then` WHERE A GATE HAD BEEN, with a green suite and a `git status` showing only
+      # files the session had edited on purpose. Reproduced on demand in suite 5de27e3, in
+      # talyvor-docs ffe9063, and AGAIN HERE while porting: same kill, and the file left mutated
+      # was go.mod.
+      #
+      # Estate-wide at 64f379d: 163 mutate-and-restore scripts, 3 protected — all three in the one
+      # repo that had been bitten. The script carries no Track-specific knowledge.
+      #
+      # The allowlist inside it may only SHRINK: R2 fails on an entry that has been fixed, R1 on a
+      # new unprotected script, R3 is a floor on the DETECTOR. Detection is `ast`, never grep — a
+      # regex counts the word "signal" in a COMMENT as a handler, and `grep -l finally:` counts 90
+      # scripts here where the real population is 61.
+      - name: control scripts must restore on SIGTERM, not only in a finally
+        run: python3 scripts/check-restore-signal-handlers.py --ci
+
       - name: guard — the suite must not run in -short mode
         run: |
           # Anchored to a line that STARTS with the invocation (optionally after `run:`)
