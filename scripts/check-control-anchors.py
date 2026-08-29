@@ -63,7 +63,15 @@ claim and this script cannot make it. W3.64 and W3.65 each ended by measuring th
 the gap was the CONTROL and not the guard. Re-pointing an anchor at moved code
 yields a control that passes for a NEW REASON unless somebody reads the guard and
 re-proves the must-red first, which needs a real Postgres and a `go test` per arm.
-That work is filed as W6.51, and G1 is where it should start.
+That work is filed as W6.55, and G1 is where it should start.
+⚠ IT WAS FILED AS W6.51 AND THAT NUMBER NOW BELONGS TO SOMETHING ELSE. Two tabs
+appended to the queue in the same hour; the number was taken from the file when this
+work was CLAIMED and written ~50 minutes later, and W6.51-W6.54 were filed in that
+window. The queue's own advice — take the number at WRITE time — is necessary and not
+sufficient, because the read and the write are still two operations over a file with no
+lock. Recorded here rather than silently corrected: a pointer that resolves to the WRONG
+item reads exactly like a correct one, which is the failure this repository keeps paying
+for (see the cross-repo line citations W1.1/#153 found pointing at unrelated constants).
 
 WHAT THIS PROVES AND WHAT IT DOES NOT
 =====================================
@@ -256,7 +264,8 @@ NOT_ANCHORS = {
 # ⚠⚠ THESE ARE NOT BUGS TO BE PATCHED BY RE-POINTING THE ANCHOR. Re-pointing an
 # anchor at moved code yields a control that passes for a NEW REASON unless
 # somebody reads the guard and re-proves the must-red first, which needs a real
-# Postgres and a `go test` per arm. That work is filed separately as W6.51.
+# Postgres and a `go test` per arm. That work is filed separately as W6.55 (filed as
+# W6.51; renumbered by a queue race — see the header).
 #
 # ⚠⚠⚠ EVERY "KILLED BY" BELOW WAS VERIFIED BY COUNTING THE ANCHOR AT BOTH THE
 # COMMIT AND ITS PARENT, never by reading `git log -S`'s output — `-S` reports a
