@@ -1,0 +1,779 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// spa_request_body_contract_test.go — every field the shipped SPA can put in a REQUEST BODY,
+// against the fields the handler that serves that route will actually accept.
+//
+// ⚠ THE DEFECT THIS EXISTS FOR IS NOT HYPOTHETICAL — IT SHIPPED, AND FOUR CENSUSES WERE GREEN OVER
+// IT (W3.68, `8359a30`). httpx.DecodeJSON calls dec.DisallowUnknownFields(), so a body field the
+// decode struct does not declare is a hard 400 BAD_JSON before a line of handler logic runs. SEC-5
+// retired the caller-supplied member id from the timer paths by DELETING it from the structs while
+// the SPA went on sending it, and `POST /timer/start` and `POST /time-entries` answered
+// `400 json: unknown field "member_id"` to every request the product made. The path was right, the
+// method was right and the response type was right, so:
+//
+//	spa_api_surface_census_test.go  (method + path, both directions)  — green
+//	spa_field_contract_test.go      (response fields)                 — green
+//	every Go handler test                                             — green; each BUILDS ITS OWN BODY
+//	`tsc --noEmit`                                                    — green; TS never sees the server
+//
+// This file closes the request direction. Its sibling closes the response direction; between them
+// the two halves of the wire are pinned.
+//
+// ⚠⚠ THE SPA HALF IS PRODUCED BY THE TYPESCRIPT COMPILER, NOT BY A SCAN, AND THAT IS THE PART WORTH
+// COPYING. Two regex censuses of this question were built and thrown away first (W3.69 records
+// both). A window bounded by a character count reads the NEXT function's body; a window bounded by
+// the next `/v1` literal STILL mis-attributes, because a TypeScript parameter type annotation
+// spelled `body: { … }` sits BEFORE its own function's request literal. Both produced confident,
+// different, wrong tables — and both were wrong in the flattering direction on the one endpoint
+// that was actually broken. No scan resolves `Partial<T>` or a `...spread` at all, and the shipped
+// defect was hiding in a spread: the api module's body was clean and the HOOK spread the retired
+// field in. `frontend/scripts/spa-request-surface.mjs` asks the type checker instead —
+// getTypeAtLocation(body).getProperties() is the set of keys an expression can carry, whatever
+// syntax produced it — and the frontend CI job regenerates the JSON and fails on drift, so this
+// test reads a file that cannot go stale without a red.
+//
+// ⚠ THE SPA SIDE IS AN UPPER BOUND AND THAT IS DELIBERATE. `issuesApi.create(wsID, Partial<Issue>)`
+// contributes every Issue property, not the ones some caller happens to pass today. If every key a
+// signature PERMITS is accepted, no future caller can 400; a census of what is passed today would
+// go stale the first time a form grows a field.
+//
+// ⚠ WHAT THIS DOES NOT COVER, STATED RATHER THAN LEFT TO BE INFERRED. The comparison is DEPTH 1.
+// Go's DisallowUnknownFields applies recursively, so a nested field is as fatal as a top-level one.
+// The generator reports which body properties are themselves objects so the residual is counted
+// rather than hand-waved: at 8359a30 it is TWO sites — `PATCH /issues/bulk-update` (`updates`) and
+// `PUT /issues/{}/score` (`rice`, `ice`) — and both were read by hand for W3.69:
+// TS BulkUpdateItem{id,status,sort_order} == Go BulkUpdateItem; TS RICEScore/ICEScore ==
+// Go RICEScore/ICEScore, field for field. TestBodyNestingResidualIsStillTwoSites below fails if a
+// third appears, so the hand-check cannot silently become inadequate.
+
+type spaSite struct {
+	File             string   `json:"file"`
+	Line             int      `json:"line"`
+	Verb             string   `json:"verb"`
+	Path             string   `json:"path"`
+	QueryFields      []string `json:"queryFields"`
+	QueryUnbounded   bool     `json:"queryUnbounded"`
+	HasBody          bool     `json:"hasBody"`
+	OptionsSpread    bool     `json:"optionsSpread"`
+	BodyFields       []string `json:"bodyFields"`
+	BodyUnbounded    bool     `json:"bodyUnbounded"`
+	BodyNestedFields []string `json:"bodyNestedFields"`
+}
+
+// ⚠ FLOORS. This census reports an ABSENCE of mismatches, and a generator that has gone blind
+// reports an empty site list — which agrees with everything. Measured at 8359a30: 65 request
+// sites, 22 with a body, 17 with a query string. Floored below those, not at them. The shorthand
+// bug that made the first generator report 10 bodies where there are 22 is exactly what the
+// middle floor catches.
+const (
+	minSPASites      = 55
+	minSPABodySites  = 18
+	minSPAQuerySites = 14
+)
+
+func spaRequestSurface(t *testing.T) []spaSite {
+	t.Helper()
+	p := filepath.Join(repoRoot(t), "frontend", "testdata", "spa-request-surface.json")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read %s: %v — this census's input is generated by "+
+			"frontend/scripts/spa-request-surface.mjs and committed; a missing input must fail, "+
+			"not report a clean request surface", p, err)
+	}
+	var doc struct {
+		Sites []spaSite `json:"sites"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", p, err)
+	}
+	nBody, nQuery := 0, 0
+	for _, s := range doc.Sites {
+		if s.HasBody {
+			nBody++
+		}
+		if len(s.QueryFields) > 0 {
+			nQuery++
+		}
+		if s.OptionsSpread {
+			t.Errorf("%s:%d spreads into the request options object, so its body cannot be "+
+				"bounded by reading the call site. Resolve it or narrow the SPA — an unbounded "+
+				"options object is an unknown request contract, which is what this file refuses.",
+				s.File, s.Line)
+		}
+	}
+	if len(doc.Sites) < minSPASites || nBody < minSPABodySites || nQuery < minSPAQuerySites {
+		t.Fatalf("the SPA request-surface generator went blind: %d sites, %d with a body, %d with "+
+			"a query, want >=%d/%d/%d. At 8359a30 it found 65/22/17. Do not lower these to make a "+
+			"red go green — find out why it stopped seeing the SPA's requests.",
+			len(doc.Sites), nBody, nQuery, minSPASites, minSPABodySites, minSPAQuerySites)
+	}
+	return doc.Sites
+}
+
+// ── the server half ─────────────────────────────────────────────────────────────────────────────
+
+type handlerRef struct {
+	pkgDir   string // directory of the package that registered the route
+	recvType string // receiver TYPE of the Mount method that registered it
+	method   string // method name on that receiver
+}
+
+// collectRouteHandlers is collectRoutes' sibling: same walk, same prefix accumulation, but it
+// records WHICH handler each verb+path was registered with rather than only the path.
+// ⚠ THE RECEIVER TYPE IS CARRIED, NOT JUST THE METHOD NAME, AND THE FIRST VERSION DID NOT CARRY IT.
+// `internal/issue` defines BOTH `func (h *Handler) Search` and `func (s *Store) Search`; a lookup
+// by method name alone resolved to whichever file the directory walk reached first — a coin flip —
+// and reported `q` and `limit` as parameters the search handler never reads, on a handler whose
+// third line is `r.URL.Query().Get("q")`. It happened to fail loudly here; the same coin flip in
+// the other direction resolves to a function that DOES read the key and reports a real inert
+// parameter as fine.
+func collectRouteHandlers(n ast.Node, prefix, pkgDir, recvName, recvType string, out map[string]handlerRef) {
+	ast.Inspect(n, func(nd ast.Node) bool {
+		call, ok := nd.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		lit, isLit := routeLiteral(call.Args[0])
+		if sel.Sel.Name == "Route" && isLit && len(call.Args) == 2 {
+			if fl, ok := call.Args[1].(*ast.FuncLit); ok {
+				collectRouteHandlers(fl.Body, prefix+lit, pkgDir, recvName, recvType, out)
+				return false
+			}
+		}
+		if httpVerbs[sel.Sel.Name] && isLit && strings.HasPrefix(lit, "/") && len(call.Args) == 2 {
+			key := strings.ToUpper(sel.Sel.Name) + " " + normPath(prefix+lit)
+			if h, ok := call.Args[1].(*ast.SelectorExpr); ok {
+				if x, ok := h.X.(*ast.Ident); ok && x.Name == recvName && recvType != "" {
+					out[key] = handlerRef{pkgDir: pkgDir, recvType: recvType, method: h.Sel.Name}
+				} else {
+					// registered on some other object (a hub, an mcp server, a webhook): the
+					// receiver type is not this Mount's, so do not guess one
+					out[key] = handlerRef{pkgDir: pkgDir, method: h.Sel.Name}
+				}
+			} else {
+				out[key] = handlerRef{pkgDir: pkgDir} // func literal / bare ident — method unknown
+			}
+		}
+		return true
+	})
+}
+
+func routeHandlers(t *testing.T) map[string]handlerRef {
+	t.Helper()
+	out := map[string]handlerRef{}
+	fset := token.NewFileSet()
+	err := filepath.Walk(repoRoot(t), func(p string, i os.FileInfo, e error) error {
+		if e != nil {
+			return e
+		}
+		if i.IsDir() {
+			switch i.Name() {
+			case ".git", "vendor", "node_modules", "frontend", "migrations", "scripts", "docs":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		f, perr := parser.ParseFile(fset, p, nil, 0)
+		if perr != nil {
+			return nil
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Body == nil {
+				continue
+			}
+			base, recvName, recvType := "", "", ""
+			if fd.Recv != nil && fd.Name.Name == "Mount" {
+				base = "/v1"
+				if len(fd.Recv.List) == 1 {
+					if len(fd.Recv.List[0].Names) == 1 {
+						recvName = fd.Recv.List[0].Names[0].Name
+					}
+					recvType = recvTypeName(fd.Recv.List[0].Type)
+				}
+			}
+			collectRouteHandlers(fd.Body, base, filepath.Dir(p), recvName, recvType, out)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	return out
+}
+
+// recvTypeName renders `*Handler` / `Handler` as "Handler".
+func recvTypeName(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.StarExpr:
+		return recvTypeName(v.X)
+	case *ast.Ident:
+		return v.Name
+	}
+	return ""
+}
+
+// methodMatches reports whether fd is the method handlerRef names, receiver type included.
+func methodMatches(fd *ast.FuncDecl, ref handlerRef) bool {
+	if fd.Recv == nil || fd.Body == nil || fd.Name.Name != ref.method || len(fd.Recv.List) != 1 {
+		return false
+	}
+	if ref.recvType == "" {
+		return true // registered on an object this walk could not type; name match is all there is
+	}
+	return recvTypeName(fd.Recv.List[0].Type) == ref.recvType
+}
+
+// jsonTag returns the wire name a struct field decodes from, and whether it participates at all.
+func jsonTag(f *ast.Field, name string) (string, bool) {
+	if f.Tag == nil {
+		return name, true
+	}
+	raw, err := strconv.Unquote(f.Tag.Value)
+	if err != nil {
+		return name, true
+	}
+	i := strings.Index(raw, `json:"`)
+	if i < 0 {
+		return name, true
+	}
+	v := raw[i+6:]
+	if j := strings.IndexByte(v, '"'); j >= 0 {
+		v = v[:j]
+	}
+	v = strings.SplitN(v, ",", 2)[0]
+	if v == "-" {
+		return "", false
+	}
+	if v == "" {
+		return name, true
+	}
+	return v, true
+}
+
+// structKeys collects the wire names a struct type accepts, following embedded fields. Named types
+// are resolved through `types`, a whole-tree index keyed "pkgname.TypeName" and "<dir>.TypeName".
+func structKeys(st *ast.StructType, pkgDir string, types map[string]*ast.StructType, depth int, out map[string]bool) {
+	if st == nil || depth > 4 {
+		return
+	}
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 { // embedded
+			var key string
+			switch tv := f.Type.(type) {
+			case *ast.Ident:
+				key = pkgDir + "." + tv.Name
+			case *ast.SelectorExpr:
+				if x, ok := tv.X.(*ast.Ident); ok {
+					key = x.Name + "." + tv.Sel.Name
+				}
+			case *ast.StarExpr:
+				if id, ok := tv.X.(*ast.Ident); ok {
+					key = pkgDir + "." + id.Name
+				}
+			}
+			if emb, ok := types[key]; ok {
+				structKeys(emb, pkgDir, types, depth+1, out)
+			}
+			continue
+		}
+		for _, n := range f.Names {
+			if !n.IsExported() {
+				continue
+			}
+			if name, ok := jsonTag(f, n.Name); ok {
+				out[name] = true
+			}
+		}
+	}
+}
+
+func typeIndex(t *testing.T) map[string]*ast.StructType {
+	t.Helper()
+	idx := map[string]*ast.StructType{}
+	fset := token.NewFileSet()
+	_ = filepath.Walk(repoRoot(t), func(p string, i os.FileInfo, e error) error {
+		if e != nil {
+			return e
+		}
+		if i.IsDir() {
+			switch i.Name() {
+			case ".git", "vendor", "node_modules", "frontend", "migrations", "scripts", "docs":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		f, perr := parser.ParseFile(fset, p, nil, 0)
+		if perr != nil {
+			return nil
+		}
+		dir := filepath.Dir(p)
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			idx[dir+"."+ts.Name.Name] = st
+			idx[f.Name.Name+"."+ts.Name.Name] = st
+			return true
+		})
+		return nil
+	})
+	return idx
+}
+
+type acceptance struct {
+	keys          map[string]bool
+	unconstrained bool // decode target is a map — any key decodes
+	resolved      bool
+}
+
+// acceptedBodyKeys finds the method's JSON decode target and returns the keys it accepts.
+func acceptedBodyKeys(t *testing.T, ref handlerRef, types map[string]*ast.StructType) acceptance {
+	t.Helper()
+	fset := token.NewFileSet()
+	ents, err := os.ReadDir(ref.pkgDir)
+	if err != nil {
+		return acceptance{}
+	}
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, filepath.Join(ref.pkgDir, e.Name()), nil, 0)
+		if perr != nil {
+			continue
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || !methodMatches(fd, ref) {
+				continue
+			}
+			// local ident -> declared type, for the `var in X` / `var in struct{…}` forms
+			local := map[string]ast.Expr{}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if vs, ok := n.(*ast.ValueSpec); ok && vs.Type != nil {
+					for _, nm := range vs.Names {
+						local[nm.Name] = vs.Type
+					}
+				}
+				return true
+			})
+			var target ast.Expr
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				name := ""
+				switch fn := call.Fun.(type) {
+				case *ast.SelectorExpr:
+					name = fn.Sel.Name
+				case *ast.Ident:
+					name = fn.Name
+				}
+				if name != "DecodeJSON" && name != "Unmarshal" && name != "Decode" {
+					return true
+				}
+				arg := call.Args[len(call.Args)-1]
+				un, ok := arg.(*ast.UnaryExpr)
+				if !ok || un.Op != token.AND {
+					return true
+				}
+				if id, ok := un.X.(*ast.Ident); ok {
+					if ty, ok := local[id.Name]; ok {
+						target = ty
+					}
+				}
+				return true
+			})
+			if target == nil {
+				return acceptance{resolved: true, keys: map[string]bool{}}
+			}
+			switch tv := target.(type) {
+			case *ast.MapType:
+				return acceptance{unconstrained: true, resolved: true}
+			case *ast.StructType:
+				keys := map[string]bool{}
+				structKeys(tv, ref.pkgDir, types, 0, keys)
+				return acceptance{keys: keys, resolved: true}
+			case *ast.Ident:
+				if st, ok := types[ref.pkgDir+"."+tv.Name]; ok {
+					keys := map[string]bool{}
+					structKeys(st, ref.pkgDir, types, 0, keys)
+					return acceptance{keys: keys, resolved: true}
+				}
+			case *ast.SelectorExpr:
+				if x, ok := tv.X.(*ast.Ident); ok {
+					if st, ok := types[x.Name+"."+tv.Sel.Name]; ok {
+						keys := map[string]bool{}
+						structKeys(st, ref.pkgDir, types, 0, keys)
+						return acceptance{keys: keys, resolved: true}
+					}
+				}
+			}
+			return acceptance{}
+		}
+	}
+	return acceptance{}
+}
+
+// ── the census ──────────────────────────────────────────────────────────────────────────────────
+
+func TestEverySPABodyFieldIsAcceptedByItsHandler(t *testing.T) {
+	sites := spaRequestSurface(t)
+	handlers := routeHandlers(t)
+	types := typeIndex(t)
+
+	var rejected, unresolved []string
+	checked := 0
+	for _, s := range sites {
+		if !s.HasBody {
+			continue
+		}
+		if s.BodyUnbounded {
+			// A body the checker cannot bound (`Record<string, unknown>`) is only safe against a
+			// decode target that accepts anything; anything else is an unchecked contract.
+			ref, ok := handlers[s.Verb+" "+s.Path]
+			if !ok {
+				unresolved = append(unresolved, fmt.Sprintf("%s %s (%s:%d) — no registered route",
+					s.Verb, s.Path, s.File, s.Line))
+				continue
+			}
+			acc := acceptedBodyKeys(t, ref, types)
+			if !acc.resolved {
+				unresolved = append(unresolved, fmt.Sprintf(
+					"%s %s (%s:%d) — handler %s in %s: decode target not resolvable",
+					s.Verb, s.Path, s.File, s.Line, ref.method, ref.pkgDir))
+				continue
+			}
+			if !acc.unconstrained {
+				rejected = append(rejected, fmt.Sprintf(
+					"%s %s (%s:%d) sends an UNBOUNDED body (the checker cannot enumerate its keys) "+
+						"at a handler whose decode target accepts only a fixed set — every key "+
+						"outside it is a 400",
+					s.Verb, s.Path, s.File, s.Line))
+			}
+			checked++
+			continue
+		}
+		ref, ok := handlers[s.Verb+" "+s.Path]
+		if !ok {
+			unresolved = append(unresolved, fmt.Sprintf("%s %s (%s:%d) — no registered route",
+				s.Verb, s.Path, s.File, s.Line))
+			continue
+		}
+		acc := acceptedBodyKeys(t, ref, types)
+		if !acc.resolved {
+			unresolved = append(unresolved, fmt.Sprintf(
+				"%s %s (%s:%d) — handler %s in %s: decode target not resolvable",
+				s.Verb, s.Path, s.File, s.Line, ref.method, ref.pkgDir))
+			continue
+		}
+		checked++
+		if acc.unconstrained {
+			continue
+		}
+		var bad []string
+		for _, f := range s.BodyFields {
+			if !acc.keys[f] {
+				bad = append(bad, f)
+			}
+		}
+		if len(bad) > 0 {
+			sort.Strings(bad)
+			accepted := make([]string, 0, len(acc.keys))
+			for k := range acc.keys {
+				accepted = append(accepted, k)
+			}
+			sort.Strings(accepted)
+			rejected = append(rejected, fmt.Sprintf(
+				"%s %s (%s:%d) can send %v — the handler (%s in %s) accepts %v",
+				s.Verb, s.Path, s.File, s.Line, bad, ref.method, ref.pkgDir, accepted))
+		}
+	}
+
+	// ⚠ A THIRD FLOOR, AND IT IS THE ONE THAT MATTERS MOST. Everything above passes trivially if
+	// the JOIN silently matches nothing — a normPath change on either side, a Mount that moves.
+	// The two halves are extracted by different tools from different trees, so the join is the
+	// weakest link and it must prove it did work.
+	if checked < minSPABodySites {
+		t.Fatalf("the JOIN went blind: only %d of the SPA's body-carrying sites resolved to a "+
+			"registered route and a decode target (want >=%d). A census that matches nothing "+
+			"reports no mismatches.", checked, minSPABodySites)
+	}
+	if len(unresolved) > 0 {
+		sort.Strings(unresolved)
+		t.Errorf("%d SPA request(s) with a body could not be joined to a handler's decode "+
+			"target — each is an UNCHECKED request contract, not a clean one:\n  %s",
+			len(unresolved), strings.Join(unresolved, "\n  "))
+	}
+	if len(rejected) > 0 {
+		sort.Strings(rejected)
+		t.Errorf("%d SPA request(s) can send a body field the handler will refuse. "+
+			"httpx.DecodeJSON uses DisallowUnknownFields, so each is a hard 400 BAD_JSON before "+
+			"any handler logic runs — the feature is dead in the shipped UI while the path, "+
+			"method and response-shape censuses all stay green (W3.68, `8359a30`):\n  %s",
+			len(rejected), strings.Join(rejected, "\n  "))
+	}
+}
+
+// TestBodyNestingResidualIsStillTwoSites pins the boundary of the census above. The comparison is
+// depth 1; Go's DisallowUnknownFields is recursive. The two sites whose body carries an object
+// property were read by hand for W3.69 and match field-for-field. A THIRD one appearing means the
+// hand-check no longer covers the surface, and that must be a red rather than a silent widening.
+func TestBodyNestingResidualIsStillTwoSites(t *testing.T) {
+	var nested []string
+	for _, s := range spaRequestSurface(t) {
+		if len(s.BodyNestedFields) > 0 {
+			nested = append(nested, fmt.Sprintf("%s %s %v", s.Verb, s.Path, s.BodyNestedFields))
+		}
+	}
+	sort.Strings(nested)
+	want := []string{
+		"PATCH /v1/workspaces/{}/issues/bulk-update [updates]",
+		"PUT /v1/workspaces/{}/issues/{}/score [ice rice]",
+	}
+	if strings.Join(nested, "\n") != strings.Join(want, "\n") {
+		t.Errorf("the depth-1 residual moved.\n got:\n  %s\nwant:\n  %s\n\n"+
+			"Each site listed here has a body property that is itself an object, so the depth-1 "+
+			"comparison in TestEverySPABodyFieldIsAcceptedByItsHandler does NOT cover its inner "+
+			"fields. The two above were verified by hand at 8359a30 (TS BulkUpdateItem == Go "+
+			"BulkUpdateItem; TS RICEScore/ICEScore == Go RICEScore/ICEScore). A new entry needs "+
+			"the same treatment — read it and add it here, or deepen the census.",
+			strings.Join(nested, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// ── the query arm ───────────────────────────────────────────────────────────────────────────────
+//
+// ⚠ THE OTHER HALF OF A REQUEST, AND THE ONE THE EXISTING CENSUS THROWS AWAY IN ONE LINE.
+// spa_api_surface_census_test.go's normPath says "the query string goes" — correctly, for the
+// question it asks. But a filter the UI offers and the handler never reads is a control that
+// changes nothing, and this estate has shipped that class before (an inert SQL filter; a captured
+// field with no join key). A query parameter fails SILENTLY rather than with a 400: the request
+// succeeds, the response is the UNFILTERED one, and nothing anywhere says so.
+//
+// Measured at 8359a30: 17 SPA request sites attach a query string, over 20 distinct keys, and
+// EVERY ONE is read by the handler that serves it — including `cycles` and `days`, which a
+// `Query().Get(` grep does not see because analytics reads them through `intParam(r, name, dflt)`.
+// That helper is exactly why this resolves callees instead of grepping: a census keyed on the
+// literal idiom would have reported four live parameters as inert.
+
+// queryHelpers finds package-local functions that read a query parameter NAMED BY A PARAMETER —
+// `func intParam(r *http.Request, name string, fallback int) int { … Query().Get(name) … }`. A call
+// to one of these passes a key through, and a census that only understands `.Get("literal")`
+// scores that key as unread.
+func queryHelpers(f *ast.File) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Body == nil || fd.Recv != nil {
+			continue
+		}
+		params := map[string]bool{}
+		for _, p := range fd.Type.Params.List {
+			for _, n := range p.Names {
+				params[n.Name] = true
+			}
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) != 1 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Get" {
+				return true
+			}
+			if !strings.Contains(exprText(sel.X), "Query()") {
+				return true
+			}
+			if id, ok := call.Args[0].(*ast.Ident); ok && params[id.Name] {
+				out[fd.Name.Name] = true
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// exprText renders an expression well enough to test for "Query()" in the receiver chain.
+func exprText(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		return exprText(v.X) + "." + v.Sel.Name
+	case *ast.CallExpr:
+		return exprText(v.Fun) + "()"
+	case *ast.IndexExpr:
+		return exprText(v.X)
+	}
+	return ""
+}
+
+// readQueryKeys returns the query parameter names a handler method actually reads.
+func readQueryKeys(t *testing.T, ref handlerRef) (map[string]bool, bool) {
+	t.Helper()
+	fset := token.NewFileSet()
+	ents, err := os.ReadDir(ref.pkgDir)
+	if err != nil {
+		return nil, false
+	}
+	files := map[string]*ast.File{}
+	helpers := map[string]bool{}
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, filepath.Join(ref.pkgDir, e.Name()), nil, 0)
+		if perr != nil {
+			continue
+		}
+		files[e.Name()] = f
+		for h := range queryHelpers(f) {
+			helpers[h] = true
+		}
+	}
+	for _, f := range files {
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || !methodMatches(fd, ref) {
+				continue
+			}
+			// idents assigned from r.URL.Query(), so `q := r.URL.Query(); q.Get("x")` resolves
+			qIdents := map[string]bool{}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				as, ok := n.(*ast.AssignStmt)
+				if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+					return true
+				}
+				if id, ok := as.Lhs[0].(*ast.Ident); ok && strings.Contains(exprText(as.Rhs[0]), "Query()") {
+					qIdents[id.Name] = true
+				}
+				return true
+			})
+			keys := map[string]bool{}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Get" && len(call.Args) == 1 {
+					recv := exprText(sel.X)
+					if strings.Contains(recv, "Query()") || qIdents[recv] {
+						if s, ok := routeLiteral(call.Args[0]); ok {
+							keys[s] = true
+						}
+					}
+					return true
+				}
+				if id, ok := call.Fun.(*ast.Ident); ok && helpers[id.Name] {
+					for _, a := range call.Args {
+						if s, ok := routeLiteral(a); ok {
+							keys[s] = true
+						}
+					}
+				}
+				return true
+			})
+			return keys, true
+		}
+	}
+	return nil, false
+}
+
+func TestEverySPAQueryParameterIsReadByItsHandler(t *testing.T) {
+	sites := spaRequestSurface(t)
+	handlers := routeHandlers(t)
+
+	var inert, unresolved []string
+	checked, distinct := 0, map[string]bool{}
+	for _, s := range sites {
+		if len(s.QueryFields) == 0 {
+			continue
+		}
+		if s.QueryUnbounded {
+			unresolved = append(unresolved, fmt.Sprintf("%s %s (%s:%d) — query keys not bounded",
+				s.Verb, s.Path, s.File, s.Line))
+			continue
+		}
+		ref, ok := handlers[s.Verb+" "+s.Path]
+		if !ok {
+			unresolved = append(unresolved, fmt.Sprintf("%s %s (%s:%d) — no registered route",
+				s.Verb, s.Path, s.File, s.Line))
+			continue
+		}
+		read, ok := readQueryKeys(t, ref)
+		if !ok {
+			unresolved = append(unresolved, fmt.Sprintf("%s %s (%s:%d) — handler %s in %s not found",
+				s.Verb, s.Path, s.File, s.Line, ref.method, ref.pkgDir))
+			continue
+		}
+		checked++
+		var dead []string
+		for _, k := range s.QueryFields {
+			distinct[k] = true
+			if !read[k] {
+				dead = append(dead, k)
+			}
+		}
+		if len(dead) > 0 {
+			sort.Strings(dead)
+			got := make([]string, 0, len(read))
+			for k := range read {
+				got = append(got, k)
+			}
+			sort.Strings(got)
+			inert = append(inert, fmt.Sprintf("%s %s (%s:%d) sends %v — %s in %s reads %v",
+				s.Verb, s.Path, s.File, s.Line, dead, ref.method, ref.pkgDir, got))
+		}
+	}
+	if checked < minSPAQuerySites || len(distinct) < 18 {
+		t.Fatalf("the query join went blind: %d sites joined over %d distinct keys, want >=%d "+
+			"over >=18. At 8359a30 it joined 17 sites over 20 keys. A join that matches nothing "+
+			"reports no inert parameters.", checked, len(distinct), minSPAQuerySites)
+	}
+	if len(unresolved) > 0 {
+		sort.Strings(unresolved)
+		t.Errorf("%d SPA request(s) with a query string could not be joined to a handler — each "+
+			"is an UNCHECKED filter, not a clean one:\n  %s",
+			len(unresolved), strings.Join(unresolved, "\n  "))
+	}
+	if len(inert) > 0 {
+		sort.Strings(inert)
+		t.Errorf("%d SPA request(s) attach a query parameter the handler never reads. This one "+
+			"does NOT 400 — the request succeeds and returns the UNFILTERED result, so a UI "+
+			"control that changes nothing looks like a UI control that works:\n  %s",
+			len(inert), strings.Join(inert, "\n  "))
+	}
+}

@@ -1,0 +1,1036 @@
+{
+  "sites": [
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 74,
+      "verb": "DELETE",
+      "path": "/v1/public/boards/{}/{}/posts/{}/vote",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "email"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/customFields.ts",
+      "line": 36,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/custom-fields/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 25,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/guests/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 23,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/issues/{}/relations",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "target_id",
+        "type"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/scoring.ts",
+      "line": 33,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/issues/{}/score",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 40,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/issues/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/templates.ts",
+      "line": 26,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/templates/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 51,
+      "verb": "DELETE",
+      "path": "/v1/workspaces/{}/time-entries/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 47,
+      "verb": "GET",
+      "path": "/v1/guest/workspaces/{}/issues/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 42,
+      "verb": "GET",
+      "path": "/v1/guest/workspaces/{}/projects/{}/issues",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 31,
+      "verb": "GET",
+      "path": "/v1/invite/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 52,
+      "verb": "GET",
+      "path": "/v1/public/boards/{}/{}/posts",
+      "queryFields": [
+        "order_by",
+        "status"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 42,
+      "verb": "GET",
+      "path": "/v1/public/boards/{}/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/analytics.ts",
+      "line": 21,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/analytics/ai-costs",
+      "queryFields": [
+        "days"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/analytics.ts",
+      "line": 16,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/analytics/burndown",
+      "queryFields": [
+        "cycle_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/analytics.ts",
+      "line": 31,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/analytics/distribution",
+      "queryFields": [
+        "days",
+        "group_by"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/analytics.ts",
+      "line": 11,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/analytics/velocity",
+      "queryFields": [
+        "cycles",
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/analytics.ts",
+      "line": 26,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/analytics/workload",
+      "queryFields": [
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/scoring.ts",
+      "line": 42,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/backlog/prioritized",
+      "queryFields": [
+        "limit",
+        "method",
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 93,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/boards/{}/stats",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 84,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/boards",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/customFields.ts",
+      "line": 6,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/custom-fields",
+      "queryFields": [
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 14,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/guests",
+      "queryFields": [
+        "project_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 29,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/{}/dependency-graph",
+      "queryFields": [
+        "depth"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/customFields.ts",
+      "line": 41,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/{}/fields",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 12,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/{}/relations",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/scoring.ts",
+      "line": 13,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/{}/score",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 57,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/{}/time-entries",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 22,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 25,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/search",
+      "queryFields": [
+        "q"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 45,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues/semantic-search",
+      "queryFields": [
+        "limit",
+        "q"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 17,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/issues",
+      "queryFields": [
+        "assignee_id",
+        "limit",
+        "offset",
+        "order_by",
+        "order_dir",
+        "priority",
+        "status",
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/projects.ts",
+      "line": 9,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/projects/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/projects.ts",
+      "line": 6,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/projects",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 37,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/relations/blocking",
+      "queryFields": [
+        "cycle_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 34,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/relations/stats",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/roadmap.ts",
+      "line": 12,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/roadmap",
+      "queryFields": [
+        "end_date",
+        "start_date",
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/scoring.ts",
+      "line": 47,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/scoring/summary",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/teams.ts",
+      "line": 9,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/teams/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/teams.ts",
+      "line": 6,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/teams",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/templates.ts",
+      "line": 11,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/templates/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/templates.ts",
+      "line": 6,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/templates",
+      "queryFields": [
+        "team_id"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 62,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/time-summary",
+      "queryFields": [
+        "since"
+      ],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 21,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/timer",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 101,
+      "verb": "PATCH",
+      "path": "/v1/workspaces/{}/boards/{}/posts/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "issue_id",
+        "status"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/customFields.ts",
+      "line": 30,
+      "verb": "PATCH",
+      "path": "/v1/workspaces/{}/custom-fields/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "name",
+        "options",
+        "required"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 34,
+      "verb": "PATCH",
+      "path": "/v1/workspaces/{}/issues/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": true,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 50,
+      "verb": "PATCH",
+      "path": "/v1/workspaces/{}/issues/bulk-update",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "updates"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": [
+        "updates"
+      ]
+    },
+    {
+      "file": "src/api/templates.ts",
+      "line": 20,
+      "verb": "PATCH",
+      "path": "/v1/workspaces/{}/templates/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "body",
+        "created_at",
+        "default_assignee",
+        "default_labels",
+        "default_priority",
+        "default_status",
+        "description",
+        "field_defaults",
+        "icon",
+        "id",
+        "name",
+        "team_id",
+        "title_format",
+        "updated_at",
+        "workspace_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 34,
+      "verb": "POST",
+      "path": "/v1/invite/{}/accept",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "name"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 68,
+      "verb": "POST",
+      "path": "/v1/public/boards/{}/{}/posts/{}/vote",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "email"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 62,
+      "verb": "POST",
+      "path": "/v1/public/boards/{}/{}/posts",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "author_email",
+        "author_name",
+        "description",
+        "title"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 112,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/boards/{}/posts/{}/convert",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "creator_id",
+        "team_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/featureboard.ts",
+      "line": 87,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/boards",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "allow_anonymous",
+        "created_at",
+        "description",
+        "id",
+        "name",
+        "public",
+        "slug",
+        "workspace_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/customFields.ts",
+      "line": 11,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/custom-fields",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "created_at",
+        "id",
+        "name",
+        "options",
+        "position",
+        "required",
+        "team_id",
+        "type",
+        "workspace_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/guests.ts",
+      "line": 19,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/guests/invite",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "email",
+        "project_id",
+        "role"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 42,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/issues/{}/relations/bulk",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "target_ids",
+        "type"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/relations.ts",
+      "line": 17,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/issues/{}/relations",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "target_id",
+        "type"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/issues.ts",
+      "line": 28,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/issues",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "ai_cost_usd",
+        "ai_tokens",
+        "assignee_id",
+        "completed_at",
+        "created_at",
+        "creator_id",
+        "cycle_id",
+        "description",
+        "due_date",
+        "field_values",
+        "ice_score",
+        "id",
+        "identifier",
+        "is_blocked",
+        "labels",
+        "lens_feature",
+        "number",
+        "parent_id",
+        "priority",
+        "project_id",
+        "rice_score",
+        "sort_order",
+        "status",
+        "team_id",
+        "template_id",
+        "time_tracked_sec",
+        "title",
+        "updated_at",
+        "workspace_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/templates.ts",
+      "line": 14,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/templates",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "body",
+        "created_at",
+        "default_assignee",
+        "default_labels",
+        "default_priority",
+        "default_status",
+        "description",
+        "field_defaults",
+        "icon",
+        "id",
+        "name",
+        "team_id",
+        "title_format",
+        "updated_at",
+        "workspace_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 45,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/time-entries",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "billable",
+        "description",
+        "issue_id",
+        "started_at",
+        "stopped_at"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 24,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/timer/start",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "description",
+        "issue_id"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/timetracking.ts",
+      "line": 30,
+      "verb": "POST",
+      "path": "/v1/workspaces/{}/timer/stop",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/customFields.ts",
+      "line": 46,
+      "verb": "PUT",
+      "path": "/v1/workspaces/{}/issues/{}/fields/{}",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "value"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
+      "file": "src/api/scoring.ts",
+      "line": 27,
+      "verb": "PUT",
+      "path": "/v1/workspaces/{}/issues/{}/score",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": true,
+      "optionsSpread": false,
+      "bodyFields": [
+        "ice",
+        "method",
+        "notes",
+        "rice"
+      ],
+      "bodyUnbounded": false,
+      "bodyNestedFields": [
+        "ice",
+        "rice"
+      ]
+    }
+  ]
+}
