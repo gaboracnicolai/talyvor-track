@@ -14,7 +14,7 @@ export function useTimer() {
 
   const query = useQuery({
     queryKey: ["timer", workspaceId, memberId],
-    queryFn: () => timeApi.getTimer(workspaceId, memberId),
+    queryFn: () => timeApi.getTimer(workspaceId),
     enabled: !!workspaceId && !!memberId,
     refetchInterval: 5_000,
     refetchOnWindowFocus: true,
@@ -38,12 +38,12 @@ export function useTimer() {
 }
 
 export function useStartTimer() {
-  const { workspaceId, memberId } = useWorkspace();
+  const { workspaceId } = useWorkspace();
   const qc = useQueryClient();
   const toast = useUIStore((s) => s.toast);
   return useMutation({
     mutationFn: ({ issueID, description = "" }: { issueID: string; description?: string }) =>
-      timeApi.startTimer(workspaceId, memberId, issueID, description),
+      timeApi.startTimer(workspaceId, issueID, description),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["time-entries"] });
@@ -54,11 +54,11 @@ export function useStartTimer() {
 }
 
 export function useStopTimer() {
-  const { workspaceId, memberId } = useWorkspace();
+  const { workspaceId } = useWorkspace();
   const qc = useQueryClient();
   const toast = useUIStore((s) => s.toast);
   return useMutation({
-    mutationFn: () => timeApi.stopTimer(workspaceId, memberId),
+    mutationFn: () => timeApi.stopTimer(workspaceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["time-entries"] });
@@ -78,7 +78,7 @@ export function useIssueTimeEntries(issueID: string | null) {
 }
 
 export function useLogTime(issueID: string) {
-  const { workspaceId, memberId } = useWorkspace();
+  const { workspaceId } = useWorkspace();
   const qc = useQueryClient();
   const toast = useUIStore((s) => s.toast);
   return useMutation({
@@ -90,7 +90,6 @@ export function useLogTime(issueID: string) {
     }) =>
       timeApi.logTime(workspaceId, {
         issue_id: issueID,
-        member_id: memberId,
         ...vars,
       }),
     onSuccess: () => {
