@@ -205,6 +205,18 @@ jobs:
       # scripts here where the real population is 61.
       - name: control scripts must restore on SIGTERM, not only in a finally
         run: python3 scripts/check-restore-signal-handlers.py --ci
+      # A control anchored on how many times a literal appears goes inert the day another
+      # job duplicates it — and the only thing that reports it is the control's own run,
+      # which is by hand. V7 of the toolchain campaign expected TWO `go-version` pins in
+      # this file and there are THREE; the campaign printed `7/8 controls CAUGHT` and
+      # nothing noticed, because an inert control looks exactly like a passing one.
+      # talyvor-docs had the identical defect and the same repair (#225).
+      # The full campaign mutates tracked files and runs the guard suite once per control,
+      # so it cannot go here. The ANCHOR check is pure counting over three files — no
+      # mutation, no `go test`, ~0.1s — and it is the half that rots. (It proves each
+      # control can still be APPLIED, not that it still CATCHES; the campaign proves that.)
+      - name: toolchain control anchors must still apply
+        run: python3 scripts/w634-toolchain-pin-controls.py --check-anchors --ci
 
       - name: guard — the suite must not run in -short mode
         run: |
