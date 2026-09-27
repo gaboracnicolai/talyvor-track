@@ -73,6 +73,7 @@ func dupJobWarningsMentioning(job *importer.Job, key string) []string {
 // working as designed and is not what this test asks to change); what must not stay true is that
 // the job says nothing about it.
 func TestJobRow_OneExportNamingTheSameIssueTwiceSaysSo(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -104,6 +105,7 @@ func TestJobRow_OneExportNamingTheSameIssueTwiceSaysSo(t *testing.T) {
 // same fixture shape with two different keys must produce NO duplicate-identifier line. A guard
 // that fires on every import is not a guard.
 func TestJobRow_TwoDistinctKeysAreNotReportedAsDuplicates(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -127,6 +129,7 @@ func TestJobRow_TwoDistinctKeysAreNotReportedAsDuplicates(t *testing.T) {
 // is the half that makes the warning worth rendering: the row left behind carries the later row's
 // title and the earlier row's status, which is a combination that appears on NO row of the export.
 func TestJobRow_TheSurvivingRowIsNeitherExportRow(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

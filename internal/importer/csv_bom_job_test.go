@@ -44,6 +44,7 @@ const jobJiraCSVNoBOMExport = "Summary,Issue key,Issue id,Issue Type,Status,Proj
 
 // TestJobRow_JiraCSV_ABOMdExportIsNotReportedAsAFailedImport is the operator-facing half.
 func TestJobRow_JiraCSV_ABOMdExportIsNotReportedAsAFailedImport(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -80,6 +81,7 @@ func TestJobRow_JiraCSV_ABOMdExportIsNotReportedAsAFailedImport(t *testing.T) {
 // TestJobRow_JiraCSV_ABOMdExportLandsItsRowsUnderTheProviderKey is the routing half, and it is the
 // assertion fakeIssueStore is structurally unable to make.
 func TestJobRow_JiraCSV_ABOMdExportLandsItsRowsUnderTheProviderKey(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -104,6 +106,7 @@ func TestJobRow_JiraCSV_ABOMdExportLandsItsRowsUnderTheProviderKey(t *testing.T)
 // #98 measured this for the un-BOM'd Jira export and fixed it; a BOM re-opens exactly that hole for
 // one file in five, because the key column is read through the same index the BOM displaces.
 func TestJobRow_JiraCSV_ReimportingABOMdExportDoesNotDuplicate(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

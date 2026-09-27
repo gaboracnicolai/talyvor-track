@@ -25,9 +25,15 @@ type integrationChecker interface {
 type JobHandler struct {
 	jobs         *JobStore
 	integrations integrationChecker // nil ⇒ live API (*_api) import disabled
+	// maxUpload is the largest file an upload may carry: jobMaxUploadBytes in production. It is a
+	// field only so the refusal can be tested with a small file (B18.34) — a 64 MiB multipart body
+	// under -race is what the importer's CI budget cannot afford.
+	maxUpload int64
 }
 
-func NewJobHandler(jobs *JobStore) *JobHandler { return &JobHandler{jobs: jobs} }
+func NewJobHandler(jobs *JobStore) *JobHandler {
+	return &JobHandler{jobs: jobs, maxUpload: jobMaxUploadBytes}
+}
 
 // WithIntegrationChecker enables *_api enqueue by wiring the credential store's existence check. Absent ⇒
 // an *_api enqueue returns a clean 409 (live API import unavailable), never a panic.
@@ -105,7 +111,7 @@ func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "not a member of this workspace")
 		return
 	}
-	if err := r.ParseMultipartForm(jobMaxUploadBytes); err != nil {
+	if err := r.ParseMultipartForm(h.maxUpload); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())
 		return
 	}
@@ -115,12 +121,12 @@ func (h *JobHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	payload, err := io.ReadAll(io.LimitReader(file, jobMaxUploadBytes+1))
+	payload, err := io.ReadAll(io.LimitReader(file, h.maxUpload+1))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "READ_FAILED", err.Error())
 		return
 	}
-	if len(payload) > jobMaxUploadBytes {
+	if int64(len(payload)) > h.maxUpload {
 		writeErr(w, http.StatusRequestEntityTooLarge, "TOO_LARGE", "payload exceeds 64MiB")
 		return
 	}

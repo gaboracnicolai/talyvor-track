@@ -162,6 +162,7 @@ func assertArrayNotNull(t *testing.T, report map[string]json.RawMessage, key, bo
 // "the row landed INSIDE the window" (then the null never happens and every assertion passes for
 // the wrong reason). Both are read straight out of the issues table before the report is called.
 func TestAICostReport_AMigratedBacklogIsNotAnsweredWithNull(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 
@@ -203,6 +204,7 @@ func TestAICostReport_AMigratedBacklogIsNotAnsweredWithNull(t *testing.T) {
 // `[]` from distribution and workload and `null` from ai-costs. The sibling assertions are the
 // reference point, so this test states what the file already believes instead of inventing it.
 func TestAICostReport_AnEmptyWorkspaceAnswersLikeItsSiblingEndpoints(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 

@@ -94,6 +94,7 @@ func linearIssuesInWorkspace(t *testing.T, d *testutil.DB, wsID string) int {
 // import the row must be addressable by the name Linear — and every human, commit message and agent
 // prompt in that workspace — calls it.
 func TestJobRow_LinearCSV_TheIssueKeepsTheKeyLinearGaveIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -125,6 +126,7 @@ func TestJobRow_LinearCSV_TheIssueKeepsTheKeyLinearGaveIt(t *testing.T) {
 // an operator re-running yesterday's export to pick up a few new tickets was told the import was
 // clean and got a second copy of their entire backlog.
 func TestJobRow_LinearCSV_ReimportingTheSameExportDoesNotDuplicate(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -152,6 +154,7 @@ func TestJobRow_LinearCSV_ReimportingTheSameExportDoesNotDuplicate(t *testing.T)
 // is a separate test on purpose: a re-import that duplicated nothing because it wrote nothing would
 // pass the count assertion above. This one proves the second job actually landed its content.
 func TestJobRow_LinearCSV_AReimportUpdatesTheRowItAlreadyWrote(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -180,6 +183,7 @@ func TestJobRow_LinearCSV_AReimportUpdatesTheRowItAlreadyWrote(t *testing.T) {
 // columns carries no `ID`; it must import exactly as it did before this merge, under a Track-derived
 // identifier, and must NOT be routed into the upsert on a fabricated key.
 func TestJobRow_LinearCSV_AKeylessExportStillImports(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -213,6 +217,7 @@ func TestJobRow_LinearCSV_AKeylessExportStillImports(t *testing.T) {
 // because it never landed on a human's identifier at all — it made a duplicate instead. Now that it
 // lands on the provider key, the refusal that protects a native issue has to be shown to apply here.
 func TestJobRow_LinearCSV_ARowAHumanOwnsIsRefusedNotOverwritten(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -250,6 +255,7 @@ func TestJobRow_LinearCSV_ARowAHumanOwnsIsRefusedNotOverwritten(t *testing.T) {
 // that LOOKS like a provider key while addressing the wrong thing (or, for the two project columns,
 // while making every issue in a project collide on one identifier).
 func TestJobRow_LinearCSV_TheNeighbouringIDColumnsAreNotTheKey(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

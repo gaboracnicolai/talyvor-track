@@ -123,6 +123,7 @@ func uploadReq(t *testing.T, wsID, teamID, email string) (*http.Request, *counti
 // what makes the non-member's zero mean "refused before reading" rather than "there was
 // nothing to read".
 func TestImporter_NonMemberUploadIsNotRead(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	wsA := d.Workspace(t)
 	teamA := d.Team(t, wsA.ID)

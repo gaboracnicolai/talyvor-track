@@ -76,6 +76,7 @@ func runJiraCSVCreatedImport(t *testing.T, d *testutil.DB, body string) (wsID st
 // TestJobRow_JiraCSV_ImportedIssueKeepsTheDateJiraOpenedIt is the column half: the row must carry
 // the instant the PROVIDER opened the issue, not the instant the import ran.
 func TestJobRow_JiraCSV_ImportedIssueKeepsTheDateJiraOpenedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, created, _ := jiraCSVCreatedFixture()
@@ -97,6 +98,7 @@ func TestJobRow_JiraCSV_ImportedIssueKeepsTheDateJiraOpenedIt(t *testing.T) {
 // It is the whole reason `created_at` is worth a merge: the number the product SHOWS is wrong, not
 // merely absent.
 func TestJobRow_JiraCSV_CycleTimeOfAnImportedIssueIsNotNegative(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, _, _ := jiraCSVCreatedFixture()

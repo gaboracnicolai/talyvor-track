@@ -81,6 +81,7 @@ func runJiraCSVUpdatedImport(t *testing.T, d *testutil.DB, body string) (wsID, t
 
 // TestJobRow_JiraCSV_ImportedIssueKeepsTheDateJiraLastUpdatedIt is the column half.
 func TestJobRow_JiraCSV_ImportedIssueKeepsTheDateJiraLastUpdatedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, _, updated := jiraCSVUpdatedFixture()
@@ -109,6 +110,7 @@ func TestJobRow_JiraCSV_ImportedIssueKeepsTheDateJiraLastUpdatedIt(t *testing.T)
 // imported row's timestamp is strictly LATER and the assertion fails deterministically — this is
 // not a tie whose order happens to vary.
 func TestJobRow_JiraCSV_AStaleImportDoesNotOutrankTodaysWork(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	store := issue.NewStore(d.Pool)

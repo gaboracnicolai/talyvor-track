@@ -104,6 +104,7 @@ func runLinearCSVUpdatedImport(t *testing.T, d *testutil.DB, body string) (wsID,
 
 // TestJobRow_LinearCSV_ImportedIssueKeepsTheDateLinearLastUpdatedIt is the column half.
 func TestJobRow_LinearCSV_ImportedIssueKeepsTheDateLinearLastUpdatedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, _, updated := linearCSVUpdatedFixture()
@@ -134,6 +135,7 @@ func TestJobRow_LinearCSV_ImportedIssueKeepsTheDateLinearLastUpdatedIt(t *testin
 // imported row's timestamp is strictly LATER and this fails deterministically — it is not a tie
 // whose order happens to vary.
 func TestJobRow_LinearCSV_AStaleImportDoesNotOutrankTodaysWork(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	store := issue.NewStore(d.Pool)

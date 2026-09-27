@@ -158,6 +158,7 @@ func num(t *testing.T, report map[string]any, key string) float64 {
 // must exist, carry the PROVIDER's created_at (not the import instant, which would put it INSIDE
 // the window and quietly re-test #83 instead of this) and a non-null completed_at.
 func TestResolutionReport_AnImportedBacklogOlderThanTheWindowIsNotAMeasuredZero(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 

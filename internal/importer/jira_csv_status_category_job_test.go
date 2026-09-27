@@ -44,6 +44,7 @@ func runJiraCSVStatusCategoryJob(t *testing.T, d *testutil.DB, body string) stri
 // THE STATUS COLUMN IN POSTGRES, per identifier. Asserting a count would let one row's status stand
 // in for another's; this says which issue got which answer — including the row that must NOT move.
 func TestJobRow_JiraCSV_StatusCategoryResolvesTheStatusInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsID := runJiraCSVStatusCategoryJob(t, d, jiraCSVStatusCategoryJobBody)
@@ -69,6 +70,7 @@ func TestJobRow_JiraCSV_StatusCategoryResolvesTheStatusInPostgres(t *testing.T) 
 // `completed_at IS NOT NULL`, so a Done-category row whose status imported as backlog was withheld
 // from delivered work entirely — and the abandoned row must still be withheld.
 func TestJobRow_JiraCSV_StatusCategoryDoneLandsTheCompletionTime(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsID := runJiraCSVStatusCategoryJob(t, d, jiraCSVStatusCategoryJobBody)
@@ -96,6 +98,7 @@ func TestJobRow_JiraCSV_StatusCategoryDoneLandsTheCompletionTime(t *testing.T) {
 // with no category column and one whose categories resolved every row must not produce the same
 // report.
 func TestJobRow_JiraCSV_StatusCategoryIsNamedInTheJobWarnings(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsID := runJiraCSVStatusCategoryJob(t, d, jiraCSVStatusCategoryJobBody)

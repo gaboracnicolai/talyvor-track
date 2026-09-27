@@ -40,6 +40,7 @@ func insertAPIJob(t *testing.T, d *testutil.DB, wsID, teamID, sourceType string)
 // linearSource fetches (canned) → UpsertByIdentifier lands issues with provider-key identifiers in the job's
 // workspace. Workspace comes ONLY from the job row (Build-B re-enforcement).
 func TestRunner_LinearAPI_EndToEnd(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -85,6 +86,7 @@ func TestRunner_LinearAPI_EndToEnd(t *testing.T) {
 // (h) NO-INTEGRATION: a linear_api job for a workspace with no integration → job fails cleanly (clear error),
 // no panic. And with the credential store entirely absent (configs nil), likewise.
 func TestRunner_LinearAPI_NoIntegration_FailsCleanly(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

@@ -264,6 +264,7 @@ func TestJiraSource_EndlessEmptyPagesEndAsAnErrorNotALoop(t *testing.T) {
 // first page is empty-but-not-last recorded `succeeded, imported=0` with ZERO rows in `issues` —
 // an import that read one page of a project and reported itself complete.
 func TestJobRow_JiraAPI_AnEmptyFirstPageIsNotACompletedImport(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

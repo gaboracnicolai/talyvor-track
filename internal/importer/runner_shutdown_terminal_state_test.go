@@ -67,6 +67,7 @@ const shutdownCSV = "Title,Description,Status,Priority,Labels\n" +
 // asserts BOTH that Create was reached and that the context really was cancelled, because a
 // terminal status written under a LIVE context proves nothing about the case this exists for.
 func TestRunner_ShutdownMidImport_DoesNotLeaveTheJobRunningForever(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	setup := context.Background()
 	ws := d.Workspace(t)

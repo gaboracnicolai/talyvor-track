@@ -40,6 +40,7 @@ func hasPayload(t *testing.T, d *testutil.DB, jobID string) bool {
 // ---------------------------------------------------------------------------------------------
 
 func TestPayload_DeletedWhenTheImportSucceeds(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -75,6 +76,7 @@ func TestPayload_DeletedWhenTheImportSucceeds(t *testing.T) {
 // ---------------------------------------------------------------------------------------------
 
 func TestPayload_FailedImportKeptSevenDaysThenPruned(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -122,6 +124,7 @@ func TestPayload_FailedImportKeptSevenDaysThenPruned(t *testing.T) {
 // Pinning the two sets by name is deliberate: a new workspace-scoped table inherits one of these
 // policies silently, and this is the only place that makes the choice visible.
 func TestMeasured_TheWorkspaceChildTablesThatRefuseADelete(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 

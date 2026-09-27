@@ -103,6 +103,7 @@ type importedResolutionRow struct {
 }
 
 func TestJobRow_JiraAPI_AbandonedWorkLandsCancelledAndUncountedInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -208,6 +209,7 @@ func TestJobRow_JiraAPI_AbandonedWorkLandsCancelledAndUncountedInPostgres(t *tes
 // is the point: the only thing that distinguishes "Track read your resolutions" from "Track recorded
 // every abandoned issue as delivered" is this line in the job's warnings.
 func TestJobRow_JiraAPI_AResponseWithNoResolutionFieldSaysSoInTheJobRow(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

@@ -84,6 +84,7 @@ func issueTitle(t *testing.T, d *testutil.DB, wsID, identifier string) string {
 // ignore"). It holds for a first import of DISTINCT keys and fails for exactly the duplicate-key
 // population, which is why it needs its own fixture rather than another assertion on that one.
 func TestJobRow_JiraCSV_AFirstImportNamingOneIssueTwiceIsNotReportedAsARe_import(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -128,6 +129,7 @@ func TestJobRow_JiraCSV_AFirstImportNamingOneIssueTwiceIsNotReportedAsARe_import
 // TestJobRow_JiraCSV_ARe_importNamingOneIssueTwiceCountsTheIssueOnce — the count half. The issue IS
 // already in Track here, so the sentence is TRUE; the number in it is not.
 func TestJobRow_JiraCSV_ARe_importNamingOneIssueTwiceCountsTheIssueOnce(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

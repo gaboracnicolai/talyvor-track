@@ -109,6 +109,7 @@ func jobPayloadLen(t *testing.T, d *testutil.DB, jobID string) int {
 // row of at least that size — which is what makes the non-member's zero mean "refused
 // before reading" rather than "there was nothing to read".
 func TestJobHandler_NonMemberUploadIsNotRead(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	wsA := d.Workspace(t)
 	teamA := d.Team(t, wsA.ID)

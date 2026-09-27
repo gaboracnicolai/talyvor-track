@@ -80,6 +80,7 @@ func importReq(t *testing.T, wsID, teamID, email string) *http.Request {
 // same request shape — only membership differs, so the deny SOURCE is membership (the
 // caller-supplied workspace_id checked against Memberships), not the URL or a header.
 func TestImporter_MemberOfA_CannotImportIntoB(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
 	teamA := d.Team(t, wsA.ID)
@@ -111,6 +112,7 @@ func TestImporter_MemberOfA_CannotImportIntoB(t *testing.T) {
 
 // TestImporter_NoMembership_403 — a verified user with no membership row → 403.
 func TestImporter_NoMembership_403(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	wsA := d.Workspace(t)
 	teamA := d.Team(t, wsA.ID)
@@ -129,6 +131,7 @@ func TestImporter_NoMembership_403(t *testing.T) {
 // store's EXISTING tenancy (team must belong to the workspace) rejects every row, so
 // nothing lands in A. Proves T5b still guards the import path — asserted, not rebuilt.
 func TestImporter_TeamFromOtherWorkspace_RejectedByStore(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
 	teamB := d.Team(t, wsB.ID) // a team in the OTHER workspace

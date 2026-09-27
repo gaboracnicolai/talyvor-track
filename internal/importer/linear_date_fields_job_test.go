@@ -22,6 +22,7 @@ import (
 // So it is read back per identifier from the real columns instead.
 
 func TestJobRow_LinearAPI_DateFieldsLandInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

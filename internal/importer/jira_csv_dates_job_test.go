@@ -71,6 +71,7 @@ func readIssueDatesByTitle(t *testing.T, d *testutil.DB, wsID string) map[string
 }
 
 func TestJobRow_JiraCSV_DatesLandInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -147,6 +148,7 @@ func TestJobRow_JiraCSV_DatesLandInPostgres(t *testing.T) {
 // ⚠⚠ IT USED TO ASSERT "AND SAYS NOTHING", AND THAT HALF WAS FALSE. See the corrected comment on
 // the fixture below: the silence was measured, not reasoned, and it was the defect.
 func TestJobRow_JiraCSV_NoDateColumnsIsCleanAndSilent(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

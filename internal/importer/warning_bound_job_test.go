@@ -38,6 +38,7 @@ func csvWithDistinctBadDates(n int) string {
 }
 
 func TestJobRow_WarningsAreBoundedInPostgres(t *testing.T) {
+	t.Parallel()
 	const rows = 1200
 	d := testutil.New(t)
 	ctx := context.Background()
@@ -91,6 +92,7 @@ func TestJobRow_WarningsAreBoundedInPostgres(t *testing.T) {
 // The other direction, so the bound cannot pass by emptying the report: an import whose degraded
 // values REPEAT still produces its one line with its full count, however many rows carry it.
 func TestJobRow_ARepeatedValueStillReportsItsFullCount(t *testing.T) {
+	t.Parallel()
 	const rows = 1200
 	d := testutil.New(t)
 	ctx := context.Background()

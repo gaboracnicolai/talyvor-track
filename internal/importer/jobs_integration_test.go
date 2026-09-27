@@ -44,6 +44,7 @@ func jobStatus(t *testing.T, d *testutil.DB, id string) *importer.Job {
 // workspace could sneak in is closed — the CSV even carries a workspace_id column set to B, and it is
 // IGNORED (the mapper reads only known fields; the runner reads the workspace from the JOB ROW = A).
 func TestRunner_WritesOnlyIntoJobWorkspace(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
@@ -112,6 +113,7 @@ func createReq(wsID, teamID, sourceType, email, csv string) *http.Request {
 // ANOTHER workspace is REJECTED at creation (wrapped ErrCrossWorkspace), and ZERO rows are written — no orphan
 // job, no orphan payload. (Without the guard, the cross-tenant job row + payload would persist.)
 func TestJobStore_Create_RejectsCrossWorkspaceTeam(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
@@ -134,6 +136,7 @@ func TestJobStore_Create_RejectsCrossWorkspaceTeam(t *testing.T) {
 // (guard, HTTP) fail-fast: the async create endpoint returns 400 for a cross-workspace team_id (before any
 // row is written), not a silent downstream skip.
 func TestJobCreate_CrossWorkspaceTeam_400(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
 	teamB := d.Team(t, wsB.ID)
@@ -155,6 +158,7 @@ func TestJobCreate_CrossWorkspaceTeam_400(t *testing.T) {
 // (b) STATUS TENANCY: a member of the job's workspace can read it; a non-member is DENIED (403), never shown
 // the data.
 func TestJobStatus_TenancyScoped(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
@@ -187,6 +191,7 @@ func TestJobStatus_TenancyScoped(t *testing.T) {
 // (c) PARTIAL OBSERVABILITY: a CSV with good rows + a malformed row ends status=partial with accurate
 // imported/failed counts — durable + readable, the state a 30s-kill would lose.
 func TestRunner_PartialImport_Observable(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -241,6 +246,7 @@ func issuePriorities(t *testing.T, d *testutil.DB, wsID string) []int {
 // (which maps only "urgent"; "blocker" → None/0). So a jira job landing priority 1 proves source_type picked
 // the jira mapper.
 func TestRunner_EndToEnd_SourceTypeSelectsMapper(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsL, wsJ := d.Workspace(t), d.Workspace(t)
@@ -271,6 +277,7 @@ func TestRunner_EndToEnd_SourceTypeSelectsMapper(t *testing.T) {
 // (e) CONCURRENCY: two jobs in different workspaces run concurrently — no cross-workspace, no count
 // corruption. -race.
 func TestRunner_ConcurrentJobs_NoCrossWorkspace(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws1, ws2 := d.Workspace(t), d.Workspace(t)
@@ -299,6 +306,7 @@ func TestRunner_ConcurrentJobs_NoCrossWorkspace(t *testing.T) {
 // the payload with the job; and Get (the status poll) does NOT read the payload table (works even with the
 // payload deleted).
 func TestJob_PayloadAtomicityAndCascade(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

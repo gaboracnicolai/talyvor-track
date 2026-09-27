@@ -225,6 +225,7 @@ func assertCycleTimeIsTrue(t *testing.T, d *testutil.DB, wsID, transport string)
 // ── JIRA API ──────────────────────────────────────────────────────────────────────────────────
 
 func TestJobRow_JiraAPI_ImportedIssueKeepsTheDateJiraOpenedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, resolved := apiCreatedInstants()
 	wsID, _ := runJiraAPICreatedImport(t, d, jiraIssueAPICreatedJSON("PROJ-1", "Opened long before the import",
@@ -240,6 +241,7 @@ func TestJobRow_JiraAPI_ImportedIssueKeepsTheDateJiraOpenedIt(t *testing.T) {
 }
 
 func TestJobRow_JiraAPI_CycleTimeOfAnImportedIssueIsNotNegative(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, resolved := apiCreatedInstants()
 	wsID, _ := runJiraAPICreatedImport(t, d, jiraIssueAPICreatedJSON("PROJ-1", "Opened long before the import",
@@ -252,6 +254,7 @@ func TestJobRow_JiraAPI_CycleTimeOfAnImportedIssueIsNotNegative(t *testing.T) {
 // recorded every one of these as opened today" are BYTE-IDENTICAL in the report — because the
 // column is defaulted, there is no null anywhere for anyone to notice.
 func TestJobRow_JiraAPI_MissingCreatedIsReportedNotDefaulted(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	_, resolved := apiCreatedInstants()
 	_, jobID := runJiraAPICreatedImport(t, d,
@@ -280,6 +283,7 @@ func TestJobRow_JiraAPI_MissingCreatedIsReportedNotDefaulted(t *testing.T) {
 // ── LINEAR API ────────────────────────────────────────────────────────────────────────────────
 
 func TestJobRow_LinearAPI_ImportedIssueKeepsTheDateLinearOpenedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, resolved := apiCreatedInstants()
 	wsID, _ := runLinearAPICreatedImport(t, d, linNodeCreated("ENG-1", "Done", "completed",
@@ -293,6 +297,7 @@ func TestJobRow_LinearAPI_ImportedIssueKeepsTheDateLinearOpenedIt(t *testing.T) 
 }
 
 func TestJobRow_LinearAPI_CycleTimeOfAnImportedIssueIsNotNegative(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, resolved := apiCreatedInstants()
 	wsID, _ := runLinearAPICreatedImport(t, d, linNodeCreated("ENG-1", "Done", "completed",
@@ -304,6 +309,7 @@ func TestJobRow_LinearAPI_CycleTimeOfAnImportedIssueIsNotNegative(t *testing.T) 
 // so a null here does not mean "this issue has no opening time"; it means the transport changed.
 // That is a different sentence from Jira's absent-column case and is reported as one.
 func TestJobRow_LinearAPI_NullCreatedAtIsReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	_, resolved := apiCreatedInstants()
 	_, jobID := runLinearAPICreatedImport(t, d, linNodeCreated("ENG-1", "Done", "completed",

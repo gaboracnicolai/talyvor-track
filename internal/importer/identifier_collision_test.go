@@ -43,6 +43,7 @@ func teamWithIdentifier(t *testing.T, d *testutil.DB, workspaceID, id string) *m
 // overwrite. ENG-1 written by a user in Track and ENG-1 imported from Linear are DIFFERENT issues that
 // happen to collide in a namespace Track never namespaced.
 func TestImport_DoesNotClobberANativeIssueSharingTheProviderKey(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -103,6 +104,7 @@ func TestImport_DoesNotClobberANativeIssueSharingTheProviderKey(t *testing.T) {
 // the IMPORTER created is still the provider's to update (the C.2 re-import policy: clobber title /
 // description / labels, preserve status / priority).
 func TestImport_ReImportStillUpdatesItsOwnRow(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -147,6 +149,7 @@ func TestImport_ReImportStillUpdatesItsOwnRow(t *testing.T) {
 // and hit the UNIQUE constraint. Because MAX(number) does not advance when the INSERT fails, the SAME number
 // is retried forever: the team cannot create another issue, permanently.
 func TestNativeIssueCreation_SurvivesAnImportedKeyInItsNumberRange(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

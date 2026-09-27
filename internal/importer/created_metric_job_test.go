@@ -70,6 +70,7 @@ func createdTotalFor(t *testing.T, d *tt.DB, wsID, teamID string) float64 {
 // assertion: the number an import puts in the issues table and the number it puts in the counter
 // that claims to total issue creation are the same number.
 func TestJobRow_JiraCSV_EveryIssueTheImportCreatesIsCountedInIssuesCreatedTotal(t *testing.T) {
+	t.Parallel()
 	d := tt.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

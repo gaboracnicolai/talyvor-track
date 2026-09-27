@@ -72,6 +72,7 @@ func jobRowCount(t *testing.T, d *testutil.DB, wsID string) int {
 // (a) HAPPY PATH: with a seeded integration, POST linear_api (no file) → 202 + job_id; an import_jobs row
 // exists (linear_api, workspace A) with NO import_job_payloads row.
 func TestAPIEnqueue_HappyPath(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -104,6 +105,7 @@ func TestAPIEnqueue_HappyPath(t *testing.T) {
 
 // (b) FAIL-FAST NO-INTEGRATION: POST linear_api for a workspace with no linear integration → 400, no job row.
 func TestAPIEnqueue_NoIntegration_400(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -127,6 +129,7 @@ func TestAPIEnqueue_NoIntegration_400(t *testing.T) {
 // B's integrations — B has linear configured, A does not, so A's enqueue is 400 NO_INTEGRATION (not a false
 // 202 off B's integration).
 func TestAPIEnqueue_Tenancy(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
@@ -158,6 +161,7 @@ func TestAPIEnqueue_Tenancy(t *testing.T) {
 // (d) TEAM GUARD: an *_api job whose team_id is from another workspace → 400, zero rows (the AssertRefInWorkspace
 // guard, same as Build B).
 func TestAPIEnqueue_TeamGuard_400(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsA, wsB := d.Workspace(t), d.Workspace(t)
@@ -180,6 +184,7 @@ func TestAPIEnqueue_TeamGuard_400(t *testing.T) {
 
 // (f) INTEGRATIONS-DISABLED: no encryption key (no checker wired) → *_api enqueue → clean 409, no panic.
 func TestAPIEnqueue_IntegrationsDisabled_409(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

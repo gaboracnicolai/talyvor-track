@@ -75,6 +75,7 @@ func runLinearCSVDatesImport(t *testing.T, d *testutil.DB, body string) (wsID st
 
 // TestJobRow_LinearCSV_ImportedIssueKeepsTheDatesLinearRecorded is the column half of both fields.
 func TestJobRow_LinearCSV_ImportedIssueKeepsTheDatesLinearRecorded(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, created, completed := linearCSVDatesFixture()
@@ -108,6 +109,7 @@ func TestJobRow_LinearCSV_ImportedIssueKeepsTheDatesLinearRecorded(t *testing.T)
 // satisfies the report's `IS NOT NULL` predicate at all), and a NEGATIVE median is what reading
 // only `Completed` produces.
 func TestJobRow_LinearCSV_CycleTimeOfAnImportedIssueIsRealAndPositive(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, _, _ := linearCSVDatesFixture()
@@ -137,6 +139,7 @@ func TestJobRow_LinearCSV_CycleTimeOfAnImportedIssueIsRealAndPositive(t *testing
 // column is the only channel this reaches, and a clean-looking job row is exactly what made every
 // earlier instance of this defect invisible.
 func TestJobRow_LinearCSV_ADatelessExportSaysSoInTheJobROW(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsID := runLinearCSVDatesImport(t, d,

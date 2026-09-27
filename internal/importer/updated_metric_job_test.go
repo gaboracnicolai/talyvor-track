@@ -57,6 +57,7 @@ func updatedTotalFor(t *testing.T, d *tt.DB, wsID, teamID string) float64 {
 }
 
 func TestJobRow_JiraCSV_EveryIssueAReImportOverwritesIsCountedInIssuesUpdatedTotal(t *testing.T) {
+	t.Parallel()
 	d := tt.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

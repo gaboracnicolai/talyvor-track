@@ -155,6 +155,7 @@ func assertInstant(t *testing.T, label string, got, want time.Time) {
 // measured zone-name variants and on BOTH date columns — four independent assertions, so a fix
 // that reaches one variant and not the other cannot pass.
 func TestJobRow_LinearCSV_ToStringDatesLandOnTheirColumns(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	body, created, updated := toStringDatesFixture()
 	wsID, _ := runToStringDatesImport(t, d, body)
@@ -177,6 +178,7 @@ func TestJobRow_LinearCSV_ToStringDatesLandOnTheirColumns(t *testing.T) {
 // row is DESIGNED to keep producing one, so a test that merely counted would pass on a fix that
 // silenced the channel instead of parsing the date.
 func TestJobRow_LinearCSV_ToStringDatesAreNoLongerReportedUnparseable(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	body, _, _ := toStringDatesFixture()
 	_, job := runToStringDatesImport(t, d, body)
@@ -207,6 +209,7 @@ func TestJobRow_LinearCSV_ToStringDatesAreNoLongerReportedUnparseable(t *testing
 // that stripped any parenthetical, or a layout that accepted a bare `dd/mm/yyyy`, would take that
 // away, and only this row says so.
 func TestJobRow_LinearCSV_AnUnknownDateShapeIsStillRefusedAndReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	body, _, _ := toStringDatesFixture()
 	wsID, job := runToStringDatesImport(t, d, body)

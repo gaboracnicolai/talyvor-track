@@ -58,6 +58,7 @@ func readIssueDates(t *testing.T, d *testutil.DB, wsID string) map[string]issueD
 //	PROJ-3 todo      + duedate only     → due only, nothing reported
 //	PROJ-4 todo      + neither          → both NULL, nothing reported
 func TestJobRow_JiraAPI_DatesLandInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -158,6 +159,7 @@ func TestJobRow_JiraAPI_DatesLandInPostgres(t *testing.T) {
 // ⚠ THIS TEST PASSED THE FIRST TIME IT RAN, so it was positive-controlled rather than trusted:
 // adding either column to the DO UPDATE set turns it red. See scripts/w34-date-controls.py.
 func TestJobRow_JiraAPI_ReimportDoesNotMoveTheDateColumns(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
