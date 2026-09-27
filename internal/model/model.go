@@ -20,6 +20,10 @@ type Workspace struct {
 	Plan      string    `json:"plan"       db:"plan"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	// DeletedAt and RestorableUntil are set only on a deleted workspace (the owner's list of
+	// deleted workspaces and the delete/restore responses); a live workspace omits both.
+	DeletedAt       *time.Time `json:"deleted_at,omitempty"       db:"deleted_at"`
+	RestorableUntil *time.Time `json:"restorable_until,omitempty" db:"-"`
 }
 
 // Team is a group of members within a workspace. Each team has a

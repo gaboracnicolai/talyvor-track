@@ -46,7 +46,7 @@ import (
 // Measured at 74ca01b. A ceiling per rule id: a new suppression on any of these locks is an edit
 // to this map, in the same commit, where a reviewer sees it.
 var suppressionCeiling = map[string]int{
-	"operate-by-id-write-requires-workspace-scope":         4,
+	"operate-by-id-write-requires-workspace-scope":         5, // +1 B18.30: workspace Restore (Delete became a soft-delete UPDATE)
 	"operate-by-id-write-requires-workspace-scope-sprintf": 1,
 	"child-insert-requires-parent-workspace-guard":         3,
 	"caller-workspace-id-query-needs-authorization":        1,

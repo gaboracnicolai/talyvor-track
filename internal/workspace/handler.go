@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -31,6 +33,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/{wsID}", h.Get)
 		r.Patch("/{wsID}", h.Update)
 		r.Delete("/{wsID}", h.Delete)
+		r.Post("/{wsID}/restore", h.Restore)
 	})
 }
 
@@ -75,6 +78,23 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ms, ok := authz.Memberships(r.Context())
 	if !ok {
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "no verified identity")
+		return
+	}
+	// ?deleted=true lists the workspaces the caller OWNS that are deleted and not yet purged — the
+	// ones they can still restore — each with deleted_at and restorable_until.
+	if r.URL.Query().Get("deleted") == "true" {
+		owned := make([]string, 0, len(ms))
+		for _, m := range ms {
+			if authz.IsOwnerRole(m.Role) {
+				owned = append(owned, m.WorkspaceID)
+			}
+		}
+		out, err := h.store.ListDeletedByIDs(r.Context(), owned)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	ids := make([]string, 0, len(ms))
@@ -128,6 +148,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// Delete marks the workspace deleted: from then on every route answers 410 WORKSPACE_DELETED except
+// restore, and the owner can restore it intact for 14 days (RestoreWindow); after that the purge sweep
+// removes it and everything it owns. Owner only, and it must be confirmed: the body carries the
+// workspace's slug, {"confirm": "<slug>"}, so a stray DELETE cannot remove a workspace.
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	wsID, ok := authz.WorkspaceID(r.Context())
 	if !ok {
@@ -138,9 +162,50 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "OWNER_REQUIRED", "owner role required")
 		return
 	}
-	if err := h.store.Delete(r.Context(), wsID); err != nil {
+	ws, err := h.store.GetByID(r.Context(), wsID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	var in struct {
+		Confirm string `json:"confirm"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&in) // an absent or malformed body is an unconfirmed delete
+	}
+	if in.Confirm != ws.Slug {
+		writeErr(w, http.StatusBadRequest, "CONFIRMATION_REQUIRED",
+			fmt.Sprintf(`deleting %q removes every issue, project and member in it after 14 days; to confirm, send {"confirm": %q}`, ws.Name, ws.Slug))
+		return
+	}
+	out, err := h.store.Delete(r.Context(), wsID)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// Restore brings a deleted workspace back exactly as it was, while its restore window is open. Owner
+// only. authz lets this one route through for a deleted workspace.
+func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	if !authz.IsOwner(r.Context()) {
+		writeErr(w, http.StatusForbidden, "OWNER_REQUIRED", "owner role required")
+		return
+	}
+	out, err := h.store.Restore(r.Context(), wsID)
+	if errors.Is(err, ErrNotRestorable) {
+		writeErr(w, http.StatusConflict, "NOT_RESTORABLE", "this workspace is not deleted, or its 14 days to restore have passed")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "RESTORE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

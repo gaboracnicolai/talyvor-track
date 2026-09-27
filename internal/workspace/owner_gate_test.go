@@ -42,6 +42,15 @@ func wsExists(t *testing.T, d *testutil.DB, id string) bool {
 	return n > 0
 }
 
+func wsDeleted(t *testing.T, d *testutil.DB, id string) bool {
+	t.Helper()
+	var deleted bool
+	if err := d.Pool.QueryRow(context.Background(), `SELECT deleted_at IS NOT NULL FROM workspaces WHERE id=$1`, id).Scan(&deleted); err != nil {
+		t.Fatalf("read deleted_at: %v", err)
+	}
+	return deleted
+}
+
 // DELETE /v1/workspaces/{wsID} is owner-only: a member is refused and the workspace
 // survives; an owner deletes it.
 func TestWorkspace_Delete_OwnerGated(t *testing.T) {
@@ -54,18 +63,18 @@ func TestWorkspace_Delete_OwnerGated(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("member delete = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
-	if !wsExists(t, d, wsMem.ID) {
-		t.Fatal("a member's delete removed the workspace")
+	if wsDeleted(t, d, wsMem.ID) {
+		t.Fatal("a member's delete deleted the workspace")
 	}
 
 	wsOwn := d.Workspace(t)
 	rr = httptest.NewRecorder()
-	h.Delete(rr, wsReq(http.MethodDelete, wsOwn.ID, authz.RoleOwner, ""))
+	h.Delete(rr, wsReq(http.MethodDelete, wsOwn.ID, authz.RoleOwner, `{"confirm":"`+wsOwn.Slug+`"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("owner delete = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	if wsExists(t, d, wsOwn.ID) {
-		t.Fatal("owner delete did not remove the workspace")
+	if !wsDeleted(t, d, wsOwn.ID) {
+		t.Fatal("owner delete did not delete the workspace")
 	}
 }
 

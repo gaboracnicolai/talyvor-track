@@ -365,6 +365,12 @@ func main() {
 	}
 	go importRunner.Start(ctx, 0)
 
+	// B18.30 — retention sweeps, hourly: a workspace deleted more than 14 days ago is removed with
+	// everything it owns, and a failed/partial import's uploaded file is deleted 7 days after it finished
+	// (a succeeded one is deleted by the runner the moment it succeeds).
+	go workspaceStore.StartPurge(ctx, time.Hour)
+	go importJobs.StartPayloadPrune(ctx, time.Hour)
+
 	// Preload rules for every workspace at startup so the first
 	// matching event doesn't pay for an on-demand DB read.
 	if ids, err := workspaceStore.ListIDs(ctx); err == nil {

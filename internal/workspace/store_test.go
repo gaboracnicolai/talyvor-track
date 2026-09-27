@@ -96,14 +96,3 @@ func TestUpdate_ChangesPlan(t *testing.T) {
 		t.Errorf("plan = %q, want enterprise", out.Plan)
 	}
 }
-
-func TestDelete_RemovesWorkspace(t *testing.T) {
-	store, pool := newMockStore(t)
-	pool.ExpectExec(`DELETE FROM workspaces`).
-		WithArgs("ws-1").
-		WillReturnResult(pgxmock.NewResult("DELETE", 1))
-
-	if err := store.Delete(context.Background(), "ws-1"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-}

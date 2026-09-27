@@ -68,7 +68,7 @@ CONTROLS = [
      REC, MNT, "a broken walk reports zero routes rather than a clean census"),
 
     ("Z8 the recorded route total drifts", TEST,
-     "const totalRoutes = 136", "const totalRoutes = 100",
+     "const totalRoutes = 137", "const totalRoutes = 100",
      RES, REC, "the census cannot silently start covering a fraction of the tree"),
 ]
 

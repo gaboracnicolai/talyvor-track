@@ -324,6 +324,7 @@ var routesWithNoSPACaller = map[string]string{
 	"DELETE /v1/workspaces/{}/labels/{}":             "NO CALLER ANYWHERE IN THE ESTATE",
 	"DELETE /v1/workspaces/{}/members/{}":            "path appears in track-nonsrc (PATH-level grep; the verb was NOT matched)",
 	"DELETE /v1/workspaces/{}/projects/{}":           "path appears in track-nonsrc (PATH-level grep; the verb was NOT matched)",
+	"POST /v1/workspaces/{}/restore":                 "NO CALLER ANYWHERE IN THE ESTATE (B18.30 — the suite's workspace settings are the intended caller)",
 	"DELETE /v1/workspaces/{}/teams/{}":              "path appears in track-nonsrc (PATH-level grep; the verb was NOT matched)",
 	"DELETE /v1/workspaces/{}/teams/{}/statuses/{}":  "NO CALLER ANYWHERE IN THE ESTATE",
 	"GET /healthz":                                             "probe — deploy/k8s only",
