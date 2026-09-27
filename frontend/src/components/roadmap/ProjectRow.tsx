@@ -1,5 +1,7 @@
+import clsx from "clsx";
 import { Sparkles } from "lucide-react";
 import type { RoadmapProject } from "~/api/types";
+import { describeForecast } from "./forecast";
 import { MilestoneMarker } from "./MilestoneMarker";
 import {
   LEFT_PANEL_WIDTH,
@@ -15,10 +17,12 @@ interface ProjectRowProps {
   onClick?: () => void;
 }
 
-// One full row: left panel (name + team + completion) plus the
-// timeline portion (bar + milestone diamonds + AI cost badge). The
-// bar is a plain rounded <rect>; the completion fill is a second
-// <rect> with a clip path to the same shape.
+// One full row: left panel (name + team + completion + forecast) plus
+// the timeline portion (bar + forecast range + milestone diamonds + AI
+// cost badge). The bar is a plain rounded <rect>; the completion fill
+// is a second <rect> with a clip path to the same shape. The forecast
+// is a dot on the likely finish day with a dashed run to the 85% day,
+// drawn only when those days fall inside the visible window.
 export function ProjectRow({ project, cfg, onClick }: ProjectRowProps) {
   const startDate = project.start_date ? new Date(project.start_date) : null;
   const endDate = project.target_date ? new Date(project.target_date) : null;
@@ -28,6 +32,11 @@ export function ProjectRow({ project, cfg, onClick }: ProjectRowProps) {
   const barWidth = Math.max(8, barEnd - barX);
   const completion = Math.max(0, Math.min(100, project.completion_pct));
   const fill = projectColor(project.status);
+  const forecast = describeForecast(project);
+  const inWindow = (d?: Date) => !!d && d >= cfg.start && d <= cfg.end;
+  const likelyX = inWindow(forecast?.likely) ? xForDate(forecast!.likely!, cfg) : null;
+  const safeX = inWindow(forecast?.safe) ? xForDate(forecast!.safe!, cfg) : cfg.width;
+  const forecastY = ROW_HEIGHT / 2 + 16;
 
   return (
     <div
@@ -44,6 +53,17 @@ export function ProjectRow({ project, cfg, onClick }: ProjectRowProps) {
           <span>{project.team_name}</span>
           <span>{Math.round(completion)}%</span>
         </div>
+        {forecast ? (
+          <div
+            className={clsx(
+              "truncate text-[10px]",
+              forecast.late ? "text-priority-urgent" : "text-muted",
+            )}
+            title={forecast.detail}
+          >
+            {forecast.text}
+          </div>
+        ) : null}
       </div>
 
       <div className="relative flex-1">
@@ -81,6 +101,25 @@ export function ProjectRow({ project, cfg, onClick }: ProjectRowProps) {
               >
                 {project.name}
               </text>
+            </g>
+          ) : null}
+
+          {forecast && likelyX !== null ? (
+            <g>
+              <title>{`${forecast.text}. ${forecast.detail}`}</title>
+              {safeX > likelyX ? (
+                <line
+                  x1={likelyX}
+                  x2={safeX}
+                  y1={forecastY}
+                  y2={forecastY}
+                  stroke={fill}
+                  strokeWidth={2}
+                  strokeDasharray="3 3"
+                  opacity={0.6}
+                />
+              ) : null}
+              <circle cx={likelyX} cy={forecastY} r={3.5} fill={fill} />
             </g>
           ) : null}
 
