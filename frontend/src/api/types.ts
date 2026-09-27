@@ -414,6 +414,23 @@ export interface Project {
   target_date?: string;
 }
 
+// CyclePlan mirrors internal/cycle/plan.go: the cycle's forecast from its
+// team's recent pace, and the estimated AI cost of its planned work priced
+// from what comparable finished work was charged.
+export interface CyclePlan {
+  cycle_id: string;
+  end_date: string;
+  forecast: ProjectForecast;
+  cost: {
+    spent_usd: number;
+    estimated_open_usd: number;
+    estimated_total_usd: number;
+    open_issues: number;
+    comparable_issues: number;
+    priced: boolean;
+  };
+}
+
 export interface CycleVelocity {
   cycle_id: string;
   cycle_name: string;

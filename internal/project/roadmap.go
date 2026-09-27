@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/talyvor/track/internal/forecast"
 	"github.com/talyvor/track/internal/milestone"
 	"github.com/talyvor/track/internal/model"
 )
@@ -21,7 +22,7 @@ type RoadmapProject struct {
 	CompletedCount int                `json:"completed_count"`
 	CompletionPct  float64            `json:"completion_pct"`
 	AICostUSD      float64            `json:"ai_cost_usd"`
-	Forecast       *Forecast          `json:"forecast,omitempty"`
+	Forecast       *forecast.Forecast `json:"forecast,omitempty"`
 }
 
 // RoadmapMilestone is one diamond on the timeline. Embeds the

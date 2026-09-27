@@ -545,6 +545,19 @@
       "bodyNestedFields": []
     },
     {
+      "file": "src/api/cycles.ts",
+      "line": 6,
+      "verb": "GET",
+      "path": "/v1/workspaces/{}/teams/{}/cycles/{}/plan",
+      "queryFields": [],
+      "queryUnbounded": false,
+      "hasBody": false,
+      "optionsSpread": false,
+      "bodyFields": [],
+      "bodyUnbounded": false,
+      "bodyNestedFields": []
+    },
+    {
       "file": "src/api/teams.ts",
       "line": 9,
       "verb": "GET",
