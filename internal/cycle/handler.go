@@ -26,6 +26,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/{id}/complete", h.Complete)
 		r.Get("/{id}/progress", h.Progress)
 		r.Get("/{id}/burndown", h.Burndown)
+		r.Get("/{id}/plan", h.Plan)
 	})
 }
 
@@ -181,4 +182,23 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, pts)
+}
+
+// Plan is the cycle's forecast and the estimated AI cost of its planned work (see GetPlan).
+func (h *Handler) Plan(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := authz.WorkspaceID(r.Context())
+	if !ok {
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "workspace not authorized")
+		return
+	}
+	p, err := h.store.GetPlan(r.Context(), chi.URLParam(r, "id"), wsID, time.Now().UTC())
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "PLAN_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }

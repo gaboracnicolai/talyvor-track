@@ -196,7 +196,8 @@ var exemptRoutes = map[string]string{
 
 // totalRoutes is recorded so the census cannot silently start covering a fraction of the tree.
 // +1 B18.30: POST /v1/workspaces/{wsID}/restore
-const totalRoutes = 137
+// +1 B18.36: GET /v1/workspaces/{wsID}/teams/{teamID}/cycles/{id}/plan
+const totalRoutes = 138
 
 func exemptSubset(t *testing.T) []string {
 	t.Helper()

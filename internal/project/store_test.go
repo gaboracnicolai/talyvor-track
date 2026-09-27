@@ -7,6 +7,7 @@ import (
 
 	"github.com/pashagolub/pgxmock/v4"
 
+	"github.com/talyvor/track/internal/forecast"
 	"github.com/talyvor/track/internal/model"
 )
 
@@ -127,7 +128,7 @@ func TestGetRoadmap_ReturnsProjectsInDateRange(t *testing.T) {
 
 	// Forecast history query, one row per project; no finished work returned here.
 	pool.ExpectQuery(`weeks_ago`).
-		WithArgs([]string{"p-1", "p-2"}, pgxmock.AnyArg(), ForecastHistoryWeeks).
+		WithArgs([]string{"p-1", "p-2"}, pgxmock.AnyArg(), forecast.HistoryWeeks).
 		WillReturnRows(pgxmock.NewRows([]string{"id", "history_start", "weeks_ago"}))
 
 	// Per-project milestone rollup. The implementation issues one
@@ -200,7 +201,7 @@ func TestGetRoadmap_FiltersByTeamID(t *testing.T) {
 
 	// Forecast history query, one row per project; no finished work returned here.
 	pool.ExpectQuery(`weeks_ago`).
-		WithArgs([]string{"p-1"}, pgxmock.AnyArg(), ForecastHistoryWeeks).
+		WithArgs([]string{"p-1"}, pgxmock.AnyArg(), forecast.HistoryWeeks).
 		WillReturnRows(pgxmock.NewRows([]string{"id", "history_start", "weeks_ago"}))
 
 	// The milestone follow-up query fires once project IDs have been

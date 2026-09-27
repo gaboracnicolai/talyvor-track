@@ -1,8 +1,9 @@
-import type { RoadmapProject } from "~/api/types";
+import type { ProjectForecast } from "~/api/types";
 
-// ForecastView is what a roadmap row says about when a project will
-// finish: a short line for the row, a longer explanation for its
-// tooltip, and whether the safe date runs past the project's target.
+// ForecastView is what a roadmap row or a cycle says about when its work
+// will finish: a short line, a longer explanation for its tooltip, and
+// whether the safe date runs past the target (a project's target date or
+// a cycle's end).
 export interface ForecastView {
   text: string;
   detail: string;
@@ -11,9 +12,20 @@ export interface ForecastView {
   safe?: Date;
 }
 
+export interface ForecastSubject {
+  forecast?: ProjectForecast;
+  target_date?: string;
+  issue_count: number;
+}
+
 // describeForecast turns the server's forecast into row copy. It returns
 // null when there is nothing worth saying (no forecast, or no issues).
-export function describeForecast(project: RoadmapProject): ForecastView | null {
+// owner is whose pace it is ("this project", "this team"); targetName
+// names the target in the tooltip ("target", "cycle end").
+export function describeForecast(
+  project: ForecastSubject,
+  { owner = "this project", targetName = "target" } = {},
+): ForecastView | null {
   const f = project.forecast;
   if (!f || project.issue_count === 0) return null;
   const pace = `${f.finished_in_history} finished in the last ${plural(f.history_weeks, "week")}`;
@@ -24,13 +36,13 @@ export function describeForecast(project: RoadmapProject): ForecastView | null {
     case "no_history":
       return {
         text: "No forecast yet",
-        detail: `Nothing in this project was finished in the last ${plural(f.history_weeks, "week")}, so there is no pace to project its ${plural(f.remaining, "open issue")} from.`,
+        detail: `Nothing was finished in ${owner} in the last ${plural(f.history_weeks, "week")}, so there is no pace to project ${plural(f.remaining, "open issue")} from.`,
         late: false,
       };
     case "too_far":
       return {
         text: "Over 5 years at this pace",
-        detail: `${plural(f.remaining, "open issue")} at this project's pace (${pace}).`,
+        detail: `${plural(f.remaining, "open issue")} at ${owner}'s pace (${pace}).`,
         late: !!project.target_date,
       };
     case "forecast": {
@@ -42,12 +54,12 @@ export function describeForecast(project: RoadmapProject): ForecastView | null {
       const safeText = safe ? `85% likely by ${formatDay(safe)}` : "85% date is over 5 years out";
       const targetText = target
         ? late
-          ? ` That is after the target of ${formatDay(target, false)}.`
-          : ` The target is ${formatDay(target, false)}.`
+          ? ` That is after the ${targetName} of ${formatDay(target, false)}.`
+          : ` The ${targetName} is ${formatDay(target, false)}.`
         : "";
       return {
         text: `Likely done ${formatDay(likely)}`,
-        detail: `${plural(f.remaining, "open issue")} at this project's pace (${pace}); ${safeText}.${targetText}`,
+        detail: `${plural(f.remaining, "open issue")} at ${owner}'s pace (${pace}); ${safeText}.${targetText}`,
         late,
         likely,
         safe,
