@@ -330,6 +330,10 @@ KNOWN_DEAD = {
         "INERT d677e876a 2026-08-27: the scoring summary counted issues and scores from different populations (count 1 -> 0, 28 commits ago)",
     ("w39-summary-empty-population-controls-m5x8.py", "34e1eec4a154"):
         "INERT d677e876a 2026-08-27: the scoring summary counted issues and scores from different populations (count 1 -> 0, 28 commits ago)",
+    ("w34-member-email-identity-controls-r8x2.py", "a1f70477041c"):
+        "DEAD B18.32 2026-09-27: authz now matches members.email lower-cased and trimmed, so the byte-equality resolver this arm canonicalised is gone and email_identity_measured_test.go (which pinned it) was replaced by email_identity_test.go",
+    ("w34-member-email-identity-controls-r8x2.py", "c6c9334a7c0a"):
+        "DEAD B18.32 2026-09-27: internal/member/email_identity_measured_test.go was replaced by email_identity_test.go, which asserts the case-insensitive rule directly",
 }
 
 
