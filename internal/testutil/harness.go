@@ -1,9 +1,10 @@
 // Package testutil is Track's real-Postgres integration-test harness.
 //
 // It is TEST INFRASTRUCTURE ONLY — it changes no production behavior. New(t)
-// provisions a fresh, isolated database, applies the FULL schema by invoking the
+// provisions a fresh, isolated database holding the FULL schema produced by the
 // production migration runner (internal/migrate over the embedded migrations — the
-// harness never hand-rolls or re-embeds schema), and returns a *pgxpool.Pool plus
+// harness never hand-rolls or re-embeds schema; it runs them once per schema version
+// into a template and copies that, see template.go), and returns a *pgxpool.Pool plus
 // seed helpers built on the real stores.
 //
 // Same env + graceful-skip contract as the migration-runner tests: without
@@ -27,11 +28,9 @@ import (
 
 	"github.com/talyvor/track/internal/customfield"
 	"github.com/talyvor/track/internal/issue"
-	"github.com/talyvor/track/internal/migrate"
 	"github.com/talyvor/track/internal/model"
 	"github.com/talyvor/track/internal/team"
 	"github.com/talyvor/track/internal/workspace"
-	"github.com/talyvor/track/migrations"
 )
 
 // safeIdent guards the database name interpolated into CREATE/DROP DATABASE.
@@ -56,16 +55,19 @@ type DB struct {
 	seq   atomic.Int64
 }
 
-// New provisions a fresh isolated database, applies all migrations via the production
-// runner, and returns a ready DB. FAILS (does not skip) when TRACK_TEST_DATABASE_URL is
-// unset — see RequireDatabaseURL for why.
+// New provisions a fresh isolated database copied from the migrated schema template (built
+// by the production runner), and returns a ready DB. FAILS (does not skip) when
+// TRACK_TEST_DATABASE_URL is unset — see RequireDatabaseURL for why.
 func New(t *testing.T) *DB {
 	t.Helper()
 	admin := RequireDatabaseURL(t)
 	ctx := context.Background()
 	name := "track_test_" + randToken(t) // unique per New() → parallel-safe
 
-	// 1. Create the isolated database from the admin connection.
+	// 1. Copy the migrated schema template into the isolated database. The template is built
+	//    once per schema version by the production migration runner (template.go), so every
+	//    test still gets exactly the schema `migrate up` produces — without re-running it.
+	tmpl := schemaTemplate(t, ctx, admin)
 	admConn, err := pgx.Connect(ctx, admin)
 	if err != nil {
 		t.Fatalf("testutil: admin connect: %v", err)
@@ -73,22 +75,10 @@ func New(t *testing.T) *DB {
 	if err := dropDB(ctx, admConn, name); err != nil { // idempotent pre-clean
 		t.Fatalf("testutil: pre-drop %s: %v", name, err)
 	}
-	if err := createDB(ctx, admConn, name); err != nil {
-		t.Fatalf("testutil: create %s: %v", name, err)
+	if _, err := admConn.Exec(ctx, createFromTemplateStmt(name, tmpl)); err != nil {
+		t.Fatalf("testutil: create %s from %s: %v", name, tmpl, err)
 	}
 	_ = admConn.Close(ctx)
-
-	// 2. Apply the real schema via the production migration runner — NOT a
-	//    re-embedded copy. A single conn so migrate's advisory lock holds.
-	migConn := connectTo(t, ctx, admin, name)
-	migs, err := migrate.Load(migrations.FS)
-	if err != nil {
-		t.Fatalf("testutil: load migrations: %v", err)
-	}
-	if _, err := migrate.Up(ctx, migConn, migs); err != nil {
-		t.Fatalf("testutil: migrate up: %v", err)
-	}
-	_ = migConn.Close(ctx)
 
 	// 3. Pool for the stores.
 	poolCfg, err := pgxpool.ParseConfig(admin)

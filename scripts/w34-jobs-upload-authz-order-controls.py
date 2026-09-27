@@ -116,7 +116,7 @@ AUTHZ = (
     "\t}\n"
 )
 PARSE = (
-    "\tif err := r.ParseMultipartForm(jobMaxUploadBytes); err != nil {\n"
+    "\tif err := r.ParseMultipartForm(h.maxUpload); err != nil {\n"
     '\t\twriteErr(w, http.StatusBadRequest, "BAD_UPLOAD", err.Error())\n'
     "\t\treturn\n"
     "\t}\n"
