@@ -174,10 +174,14 @@ func TestAnalytics_Resolution_WorkspaceScoped(t *testing.T) {
 func seedCostIssue(t *testing.T, d *testutil.DB, wsID, teamID, tag string, number int, cost float64) {
 	t.Helper()
 	if _, err := d.Pool.Exec(context.Background(),
-		`INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
+		`WITH iss AS (
+INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
 		                     creator_id, ai_cost_usd, ai_tokens, labels, updated_at)
 	     VALUES ($1,$2,$3::int, $4 || '-' || $3::int, $4 || ' title', 'done', 1,
-	             'costprobe', $5, 4242, ARRAY[$4 || '-label'], NOW())`,
+	             'costprobe', $5, 4242, ARRAY[$4 || '-label'], NOW())
+		    RETURNING id, workspace_id, ai_cost_usd, ai_tokens, updated_at)
+		INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, cost_usd, tokens, source, created_at)
+		SELECT 'scope-' || id, workspace_id, id, ai_cost_usd, ai_tokens, 'sync', updated_at FROM iss WHERE ai_cost_usd > 0`,
 		wsID, teamID, number, tag, cost); err != nil {
 		t.Fatalf("seed cost issue %s-%d: %v", tag, number, err)
 	}

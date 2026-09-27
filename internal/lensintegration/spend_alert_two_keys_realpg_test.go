@@ -11,16 +11,12 @@ import (
 	"github.com/talyvor/track/internal/testutil"
 )
 
-// W3.5, MEASURED AGAINST THE REAL SCHEMA RATHER THAN A MOCK.
+// W3.5 → B18.33, AGAINST THE REAL SCHEMA: the money and the alert go to the SAME issue.
 //
-// The mock-based tests next door can only show that the handler calls two functions. This one
-// shows that the two functions read two DIFFERENT COLUMNS of the same table, by putting a row
-// in each and watching the money and the alert go to different people.
-//
-// This test asserts TODAY'S behaviour on purpose. It is a characterisation test, not a red:
-// the decision about which column is right is a product call (see the comment in webhook.go),
-// and a decision is taken better against a pinned baseline than against a memory. If someone
-// changes the key, this test fails and its message says exactly what moved.
+// `issues` has two keys a feature string could match — `identifier` (ENG-1) and `lens_feature` (the
+// Lens tag). The credit has always matched lens_feature; the alert used to match identifier, so the
+// money went to one person and the alert to another. Now the alert follows the money. This puts a row
+// under each key and asserts both land on the issue whose lens_feature matched.
 
 const twoKeysSecret = "w35-two-keys-secret"
 
@@ -53,7 +49,7 @@ func seedIssueWithFeature(t *testing.T, d *testutil.DB, wsID, teamID, identifier
 	return out.ID, memberID
 }
 
-func TestSpendAlert_MoneyFollowsLensFeature_AlertFollowsIdentifier_RealPG(t *testing.T) {
+func TestSpendAlert_AlertFollowsTheMoney_RealPG(t *testing.T) {
 	d := testutil.New(t)
 	ctx := context.Background()
 	wsID := "ws-w35"
@@ -101,7 +97,7 @@ func TestSpendAlert_MoneyFollowsLensFeature_AlertFollowsIdentifier_RealPG(t *tes
 		t.Fatalf("the issue KEYED code-chat has ai_cost_usd = %v, want 0 — the credit does not match identifier", alertCost)
 	}
 
-	// THE ALERT: sent to the assignee of the issue whose IDENTIFIER matched — a different person.
+	// THE ALERT: sent to the assignee of the issue that was CHARGED, not the one keyed `code-chat`.
 	var gotMember, gotIssue string
 	var n int
 	if err := d.Pool.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE workspace_id=$1`, wsID).Scan(&n); err != nil {
@@ -115,16 +111,9 @@ func TestSpendAlert_MoneyFollowsLensFeature_AlertFollowsIdentifier_RealPG(t *tes
 		wsID).Scan(&gotMember, &gotIssue); err != nil {
 		t.Fatalf("read notification: %v", err)
 	}
-
-	if gotMember != alertAssignee || gotIssue != alert {
-		t.Fatalf("notification went to member %s / issue %s; expected the IDENTIFIER match "+
-			"(member %s / issue %s)", gotMember, gotIssue, alertAssignee, alert)
+	if gotMember != moneyAssignee || gotIssue != money {
+		t.Fatalf("notification went to member %s / issue %s; want the CHARGED issue's assignee "+
+			"(member %s / issue %s), not the issue merely keyed code-chat (member %s / issue %s)",
+			gotMember, gotIssue, moneyAssignee, money, alertAssignee, alert)
 	}
-	if gotMember == moneyAssignee {
-		t.Fatalf("the notification reached the assignee of the CREDITED issue — the two keys have " +
-			"been reconciled, and this test is the record of what they used to do. Update it and W3.5.")
-	}
-	t.Logf("MEASURED: $7.50 credited to %s (identifier ENG-1, lens_feature code-chat); "+
-		"the alert notified %s, the assignee of a DIFFERENT issue (identifier code-chat). "+
-		"One string, two columns, one function.", moneyAssignee, alertAssignee)
 }

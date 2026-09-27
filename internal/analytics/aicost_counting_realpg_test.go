@@ -105,11 +105,8 @@ package analytics_test
 // set. Neither error was visible by reading the harness; both surfaced only because the controls
 // carried predictions that could be missed.
 //
-// ⚠ NOT ASSERTED HERE, SAID RATHER THAN IMPLIED: the report's cohort. Every figure in
-// GetAICostTrends is still "the LIFETIME ai_cost_usd of issues TOUCHED in the window" rather than
-// "spend in the window" — engine.go says so at the leaderboard and names ai_spend_events as the
-// table that could answer the other question. This file pins the arithmetic over the cohort the
-// product defines; it does not endorse the cohort.
+// The report's window (spend charged in the window, from ai_spend_events) is asserted by
+// aicost_cohort_measured_realpg_test.go; this file pins the arithmetic over it.
 
 import (
 	"context"
@@ -126,11 +123,18 @@ import (
 func seedArithCostIssue(t *testing.T, d *testutil.DB, wsID, teamID string, n int,
 	cost float64, labels []string, createdSQL, updatedSQL string) {
 	t.Helper()
+	// The issue AND the ledger row the production writers would have written with it (both insert
+	// one ai_spend_events row per credit), charged at the issue's touch time — the report reads the
+	// ledger (B18.33).
 	_, err := d.Pool.Exec(context.Background(), `
-        INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
-                            creator_id, ai_cost_usd, ai_tokens, labels, created_at, updated_at)
-        VALUES ($1, $2, $3::int, 'AC-' || $3::int, 'aicost ' || $3::int, 'done', 1, 'acprobe',
-                $4, 424242, $5, `+createdSQL+`, `+updatedSQL+`)`,
+        WITH iss AS (
+            INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
+                                creator_id, ai_cost_usd, ai_tokens, labels, created_at, updated_at)
+            VALUES ($1, $2, $3::int, 'AC-' || $3::int, 'aicost ' || $3::int, 'done', 1, 'acprobe',
+                    $4, 424242, $5, `+createdSQL+`, `+updatedSQL+`)
+            RETURNING id, workspace_id, ai_cost_usd, updated_at)
+        INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, cost_usd, tokens, source, created_at)
+        SELECT 'arith-' || id, workspace_id, id, ai_cost_usd, 424242, 'sync', updated_at FROM iss WHERE ai_cost_usd > 0`,
 		wsID, teamID, n, cost, labels)
 	if err != nil {
 		t.Fatalf("seed cost issue %d (cost %v): %v", n, cost, err)

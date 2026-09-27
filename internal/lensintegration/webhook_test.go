@@ -31,6 +31,12 @@ func (r *recordingIssueLookup) GetByIdentifier(_ context.Context, ident, workspa
 	}
 	return nil, nil
 }
+func (r *recordingIssueLookup) ListByLensFeature(_ context.Context, feature, workspaceID string) ([]*model.Issue, error) {
+	if r.issue != nil && r.issue.LensFeature != "" && r.issue.LensFeature == feature && r.issue.WorkspaceID == workspaceID {
+		return []*model.Issue{r.issue}, nil
+	}
+	return nil, nil
+}
 func (r *recordingIssueLookup) RecordSpendEvent(_ context.Context, _, feature string, cost float64, _ int, ws, _ string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

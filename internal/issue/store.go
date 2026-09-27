@@ -771,6 +771,31 @@ func (s *Store) GetByIdentifier(ctx context.Context, identifier, workspaceID str
 	return out, nil
 }
 
+// ListByLensFeature returns the workspace's issues whose lens_feature is lensFeature — exactly the
+// issues RecordSpendEvent credits for a spend alert on that feature, so the alert can reach the
+// people whose issues were charged.
+func (s *Store) ListByLensFeature(ctx context.Context, lensFeature, workspaceID string) ([]*model.Issue, error) {
+	if workspaceID == "" || lensFeature == "" {
+		return nil, errors.New("issue: ListByLensFeature requires lens_feature and workspace_id")
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+issueColumns+` FROM issues WHERE lens_feature = $1 AND workspace_id = $2 ORDER BY created_at, id`,
+		lensFeature, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("issue: list by lens_feature: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.Issue
+	for rows.Next() {
+		i, err := scanIssue(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
 // attachFieldValues populates FieldValues on an issue if a fetcher is
 // wired. Errors from the fetcher are intentionally swallowed: a
 // transient failure reading custom fields shouldn't 500 the core

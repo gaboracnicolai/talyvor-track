@@ -99,10 +99,14 @@ const aicostRankedIssues = 21
 func seedRankedCostIssue(t *testing.T, d *testutil.DB, wsID, teamID string, n int, cost float64) {
 	t.Helper()
 	_, err := d.Pool.Exec(context.Background(), `
+        WITH iss AS (
         INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
                             creator_id, ai_cost_usd, ai_tokens, labels, created_at, updated_at)
         VALUES ($1, $2, $3::int, 'RANK-' || $3::int, 'ranked ' || $3::int, 'done', 1,
-                'rankprobe', $4, 1000, ARRAY['rank-label-' || $3::int], NOW(), NOW())`,
+                'rankprobe', $4, 1000, ARRAY['rank-label-' || $3::int], NOW(), NOW())
+            RETURNING id, workspace_id, ai_cost_usd, ai_tokens, updated_at)
+        INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, cost_usd, tokens, source, created_at)
+        SELECT 'rank-' || id, workspace_id, id, ai_cost_usd, ai_tokens, 'sync', updated_at FROM iss WHERE ai_cost_usd > 0`,
 		wsID, teamID, n, cost)
 	if err != nil {
 		t.Fatalf("seed ranked issue %d (cost %v): %v", n, cost, err)

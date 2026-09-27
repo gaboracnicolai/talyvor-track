@@ -14,7 +14,7 @@ import (
 // scenario.
 func mockLens(t *testing.T, paths map[string]string) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := paths[r.URL.Path]
 		if !ok {
 			http.NotFound(w, r)
