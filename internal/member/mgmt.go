@@ -61,16 +61,24 @@ func (s *Store) ListMembers(ctx context.Context, workspaceID string) ([]model.Me
 // AddMember inserts a member into workspaceID with an EXPLICIT role — the INSERT always
 // names the role and never relies on the DB default (lockout hazard a). name defaults to
 // the email (the gateway carries no name claim, exactly as workspace.CreateWithOwner
-// does). A UNIQUE(workspace_id, email) collision returns ErrMemberExists; an off-tier
+// does). An address the workspace already has, in any case or spacing, returns ErrMemberExists; an off-tier
 // role returns ErrInvalidRole.
 func (s *Store) AddMember(ctx context.Context, workspaceID, email, role string) (*model.Member, error) {
 	if !ValidRole(role) {
 		return nil, ErrInvalidRole
 	}
+	// The address is stored as typed, and refused when the workspace already has it in any
+	// case or spacing — "Ann@X.com" and "ann@x.com" are one member (authz matches them so).
 	m, err := scanMgmtMember(s.pool.QueryRow(ctx,
 		`INSERT INTO members (workspace_id, name, email, role)
-         VALUES ($1, $2, $2, $3) RETURNING `+mgmtColumns,
+         SELECT $1, $2, $2, $3
+          WHERE NOT EXISTS (SELECT 1 FROM members
+                             WHERE workspace_id = $1 AND lower(btrim(email)) = lower(btrim($2)))
+         RETURNING `+mgmtColumns,
 		workspaceID, email, role))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrMemberExists
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
