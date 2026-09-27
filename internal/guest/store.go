@@ -115,9 +115,9 @@ type Store struct {
 }
 
 // NewStore constructs the production store. secret is the HMAC key
-// used to sign access tokens — read from TRACK_GUEST_SECRET at boot.
-// Empty secrets derive a per-process random key so dev environments
-// still work; production deployments must set the env var.
+// used to sign access tokens — main passes ResolveSigningKey's key
+// (TRACK_GUEST_SECRET, or the one shared key stored in the database).
+// An empty secret still derives a per-process random key (tests only).
 func NewStore(pool *pgxpool.Pool, secret string) *Store {
 	var db pgxDB
 	if pool != nil {

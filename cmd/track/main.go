@@ -251,10 +251,17 @@ func main() {
 	featureBoardStore := featureboard.NewStore(pool)
 	featureBoardHandler := featureboard.NewHandler(featureBoardStore, issueStore)
 	// Guest store: invite + accept lives here; the access tokens are
-	// stateless HMAC-signed. TRACK_GUEST_SECRET seeds the HMAC key; empty
-	// generates a per-process random key (fine for dev, never prod) — see
-	// the fallback in guest.newStore and the entry in .env.example.
-	guestStore := guest.NewStore(pool, os.Getenv("TRACK_GUEST_SECRET"))
+	// stateless HMAC-signed. TRACK_GUEST_SECRET is the HMAC key when set;
+	// unset, every process shares one key generated once and stored in the
+	// database (B18.31), so guest links survive restarts and work across
+	// instances.
+	guestKey, guestKeySource, err := guest.ResolveSigningKey(ctx, pool, os.Getenv("TRACK_GUEST_SECRET"))
+	if err != nil {
+		slog.Error("guest: cannot resolve the guest-link signing key", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	slog.Info("guest: guest-link signing key", slog.String("source", guestKeySource))
+	guestStore := guest.NewStore(pool, guestKey)
 	guestHandler := guest.NewHandler(guestStore, issueStore,
 		os.Getenv("TRACK_INVITE_BASE_URL"))
 	workflowHandler := workflow.NewHandler(workflowEngine)
