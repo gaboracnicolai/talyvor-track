@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -190,4 +191,52 @@ func (s *JobStore) Get(ctx context.Context, jobID string) (*Job, error) {
 		j.ErrorSummary = *errSummary
 	}
 	return &j, nil
+}
+
+// FailedPayloadRetention is how long the uploaded file of a failed or partial import is kept, so its owner
+// can look at what went wrong and re-run it. A succeeded import's upload is deleted as soon as it finishes.
+const FailedPayloadRetention = 7 * 24 * time.Hour
+
+// DeletePayload removes a job's uploaded file. The runner calls it the moment a job succeeds.
+func (s *JobStore) DeletePayload(ctx context.Context, jobID, workspaceID string) error {
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM import_job_payloads p USING import_jobs j
+		  WHERE p.job_id = j.id AND j.id = $1 AND j.workspace_id = $2`, jobID, workspaceID); err != nil {
+		return fmt.Errorf("importer: delete payload: %w", err)
+	}
+	return nil
+}
+
+// PrunePayloads deletes every uploaded file whose import succeeded (a backstop for DeletePayload) and
+// every one whose import failed or partly failed more than FailedPayloadRetention before now. The job
+// rows — status, counts, warnings — are kept; only the uploaded bytes go. Returns how many were deleted.
+func (s *JobStore) PrunePayloads(ctx context.Context, now time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM import_job_payloads p USING import_jobs j
+		  WHERE p.job_id = j.id
+		    AND (j.status = 'succeeded'
+		         OR (j.status IN ('failed', 'partial') AND j.finished_at <= $1))`,
+		now.Add(-FailedPayloadRetention))
+	if err != nil {
+		return 0, fmt.Errorf("importer: prune payloads: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// StartPayloadPrune runs PrunePayloads every interval until ctx ends.
+func (s *JobStore) StartPayloadPrune(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n, err := s.PrunePayloads(ctx, time.Now()); err != nil {
+				slog.Warn("importer: payload prune failed", slog.String("err", err.Error()))
+			} else if n > 0 {
+				slog.Info("importer: deleted finished imports' uploaded files", slog.Int64("count", n))
+			}
+		}
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -198,7 +199,7 @@ func (s *Store) ListByIDs(ctx context.Context, ids []string) ([]model.Workspace,
 		return []model.Workspace{}, nil
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+workspaceColumns+` FROM workspaces WHERE id = ANY($1) ORDER BY created_at DESC`,
+		`SELECT `+workspaceColumns+` FROM workspaces WHERE id = ANY($1) AND deleted_at IS NULL ORDER BY created_at DESC`,
 		ids,
 	)
 	if err != nil {
@@ -292,10 +293,72 @@ func joinComma(parts []string) string {
 	return out
 }
 
-func (s *Store) Delete(ctx context.Context, id string) error {
-	// nosemgrep: operate-by-id-write-requires-workspace-scope -- self-scoping: id IS the caller's authorized workspace (handler passes authz.WorkspaceID). The workspace is the tenant root; there is no parent workspace to scope to. INVALIDATED IF the handler ever passes a non-authz id here (anything other than authz.WorkspaceID), OR the workspaces table gains a separate scoping column (then this DELETE must add AND <that_column> = $n).
-	_, err := s.pool.Exec(ctx, `DELETE FROM workspaces WHERE id = $1`, id)
-	return err
+// RestoreWindow is how long a deleted workspace can be restored intact. After it, PurgeExpired removes
+// the workspace and everything it owns.
+const RestoreWindow = 14 * 24 * time.Hour
+
+// ErrNotRestorable is Restore's answer for a workspace that is not deleted, or whose window has closed.
+var ErrNotRestorable = errors.New("workspace: not deleted, or its restore window has closed")
+
+const deletedColumns = workspaceColumns + `, deleted_at`
+
+func scanDeleted(s interface{ Scan(...any) error }) (*model.Workspace, error) {
+	var w model.Workspace
+	if err := s.Scan(&w.ID, &w.Name, &w.Slug, &w.LogoURL, &w.Plan, &w.CreatedAt, &w.UpdatedAt, &w.DeletedAt); err != nil {
+		return nil, err
+	}
+	if w.DeletedAt != nil {
+		until := w.DeletedAt.Add(RestoreWindow)
+		w.RestorableUntil = &until
+	}
+	return &w, nil
+}
+
+// Delete marks the workspace deleted. Nothing it owns is touched until the restore window closes, so
+// Restore brings it back exactly as it was. Deleting an already-deleted workspace keeps its first
+// deleted_at, so a repeated delete never extends the window.
+func (s *Store) Delete(ctx context.Context, id string) (*model.Workspace, error) {
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- self-scoping: id IS the caller's authorized workspace (handler passes authz.WorkspaceID). The workspace is the tenant root; there is no parent workspace to scope to. INVALIDATED IF the handler ever passes a non-authz id here (anything other than authz.WorkspaceID), OR the workspaces table gains a separate scoping column (then this UPDATE must add AND <that_column> = $n).
+	return scanDeleted(s.pool.QueryRow(ctx,
+		`UPDATE workspaces SET deleted_at = COALESCE(deleted_at, NOW()) WHERE id = $1 RETURNING `+deletedColumns, id))
+}
+
+// Restore undoes Delete while the restore window is open.
+func (s *Store) Restore(ctx context.Context, id string) (*model.Workspace, error) {
+	// nosemgrep: operate-by-id-write-requires-workspace-scope -- self-scoping: id IS the caller's authorized workspace (handler passes authz.WorkspaceID); same tenant-root reasoning as Delete. INVALIDATED IF the handler ever passes a non-authz id here (anything other than authz.WorkspaceID), OR the workspaces table gains a separate scoping column (then this UPDATE must add AND <that_column> = $n).
+	out, err := scanDeleted(s.pool.QueryRow(ctx,
+		`UPDATE workspaces SET deleted_at = NULL, updated_at = NOW()
+		 WHERE id = $1 AND deleted_at IS NOT NULL AND deleted_at > NOW() - make_interval(secs => $2)
+		 RETURNING `+deletedColumns, id, RestoreWindow.Seconds()))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotRestorable
+	}
+	return out, err
+}
+
+// ListDeletedByIDs returns the deleted workspaces among ids (the caller's owned workspaces), each with
+// when it was deleted and until when it can be restored.
+func (s *Store) ListDeletedByIDs(ctx context.Context, ids []string) ([]model.Workspace, error) {
+	out := []model.Workspace{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+deletedColumns+` FROM workspaces WHERE id = ANY($1) AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: list deleted: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		w, err := scanDeleted(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *w)
+	}
+	return out, rows.Err()
 }
 
 // ListIDs returns just the workspace IDs. Used by the Lens syncer to

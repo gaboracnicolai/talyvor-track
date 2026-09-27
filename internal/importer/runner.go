@@ -201,6 +201,15 @@ func (r *Runner) finish(ctx context.Context, job *Job, status string, imported, 
 			slog.Int("failed", failed),
 			slog.String("error_summary", errSummary),
 			slog.String("err", err.Error()))
+		return
+	}
+	// A succeeded import's uploaded file has done its job; it is not kept. (A failed or partial one is
+	// kept for FailedPayloadRetention — see JobStore.PrunePayloads, which also retries this delete.)
+	if status == JobSucceeded {
+		if err := r.jobs.DeletePayload(ctx, job.ID, job.WorkspaceID); err != nil {
+			slog.Warn("importer: deleting a succeeded import's uploaded file failed; the prune sweep retries it",
+				slog.String("job_id", job.ID), slog.String("err", err.Error()))
+		}
 	}
 }
 

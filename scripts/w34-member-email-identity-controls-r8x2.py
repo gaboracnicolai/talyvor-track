@@ -46,8 +46,8 @@ MGMT_NORMALISE = ("\t\tworkspaceID, email, role))\n",
                   "\t\tworkspaceID, strings.ToLower(strings.TrimSpace(email)), role))\n")
 MGMT_IMPORT = ('\t"errors"\n\t"fmt"\n', '\t"errors"\n\t"fmt"\n\t"strings"\n')
 # THE FIX, port 2: the resolver stops keying on byte equality.
-RESOLVER_CI = ("`SELECT workspace_id, id, role FROM members WHERE email = $1`, email)",
-               "`SELECT workspace_id, id, role FROM members WHERE LOWER(email) = LOWER($1)`, email)")
+RESOLVER_CI = ("WHERE m.email = $1`, email)",
+               "WHERE LOWER(m.email) = LOWER($1)`, email)")
 # VOID: the guest store's normalisation wrapped in itself. A real edit, arithmetically identity.
 # THE FIX, port 3: the GATEWAY producer canonicalises. workspace.CreateWithOwner interpolates the
 # IdP-supplied address twice, raw, into INSERT INTO members (name, email). This is the arm that was

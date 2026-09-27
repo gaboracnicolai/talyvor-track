@@ -1,5 +1,10 @@
 # The uploaded import file is kept forever
 
+> **Superseded by B18.30 (27 Sep 2026).** A succeeded import's upload is now deleted when it succeeds, a
+> failed or partial one 7 days after it finished (`importer.JobStore.PrunePayloads`), and a deleted
+> workspace's uploads go with the workspace 14 days after it is deleted (`internal/workspace/purge.go`).
+> What follows is the measurement from before that change.
+
 **Measured 2026-08-26 (W3.4, tab-r8kw) on `pgvector/pgvector:pg16` from zero, 26 migrations applied,
 through the shipped async runner and the real HTTP handlers. Nothing in this merge changes behaviour.**
 

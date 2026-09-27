@@ -21,6 +21,9 @@ type Membership struct {
 	WorkspaceID string
 	MemberID    string
 	Role        string
+	// Deleted is true while the workspace is deleted and not yet purged: the only route it answers
+	// is POST /v1/workspaces/{wsID}/restore.
+	Deleted bool
 }
 
 // Resolver resolves a gateway-verified email to its memberships. The PG impl queries the
@@ -213,6 +216,10 @@ func Middleware(resolver Resolver, exempt func(path string) bool) func(http.Hand
 					forbidden(w) // verified caller is not a member of the requested workspace
 					return
 				}
+				if m.Deleted && (r.Method != http.MethodPost || !isRestorePath(r.URL.Path)) {
+					workspaceDeleted(w)
+					return
+				}
 				ac.workspaceID, ac.memberID, ac.role, ac.hasWorkspace = m.WorkspaceID, m.MemberID, m.Role, true
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, ac)))
@@ -232,6 +239,18 @@ func workspaceIDFromPath(p string) string {
 		return parts[2] // "" for "/v1/workspaces" or "/v1/workspaces/" (the list/create routes)
 	}
 	return ""
+}
+
+// isRestorePath reports whether p is exactly /v1/workspaces/{wsID}/restore.
+func isRestorePath(p string) bool {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	return len(parts) == 4 && parts[0] == "v1" && parts[1] == "workspaces" && parts[3] == "restore"
+}
+
+func workspaceDeleted(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	_, _ = w.Write([]byte(`{"error":"this workspace was deleted; its owner can restore it within 14 days of deleting it","code":"WORKSPACE_DELETED"}`))
 }
 
 func membershipFor(ms []Membership, wsID string) (Membership, bool) {

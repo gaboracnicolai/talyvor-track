@@ -17,7 +17,9 @@ func NewPGResolver(pool *pgxpool.Pool) *PGResolver { return &PGResolver{pool: po
 
 func (r *PGResolver) MembershipsByEmail(ctx context.Context, email string) ([]Membership, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT workspace_id, id, role FROM members WHERE email = $1`, email)
+		`SELECT m.workspace_id, m.id, m.role, w.deleted_at IS NOT NULL
+		   FROM members m JOIN workspaces w ON w.id = m.workspace_id
+		  WHERE m.email = $1`, email)
 	if err != nil {
 		return nil, fmt.Errorf("authz: memberships by email: %w", err)
 	}
@@ -25,7 +27,7 @@ func (r *PGResolver) MembershipsByEmail(ctx context.Context, email string) ([]Me
 	var out []Membership
 	for rows.Next() {
 		var m Membership
-		if err := rows.Scan(&m.WorkspaceID, &m.MemberID, &m.Role); err != nil {
+		if err := rows.Scan(&m.WorkspaceID, &m.MemberID, &m.Role, &m.Deleted); err != nil {
 			return nil, fmt.Errorf("authz: scan membership: %w", err)
 		}
 		out = append(out, m)
