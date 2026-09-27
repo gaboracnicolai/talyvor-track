@@ -334,6 +334,18 @@ KNOWN_DEAD = {
         "DEAD B18.32 2026-09-27: authz now matches members.email lower-cased and trimmed, so the byte-equality resolver this arm canonicalised is gone and email_identity_measured_test.go (which pinned it) was replaced by email_identity_test.go",
     ("w34-member-email-identity-controls-r8x2.py", "c6c9334a7c0a"):
         "DEAD B18.32 2026-09-27: internal/member/email_identity_measured_test.go was replaced by email_identity_test.go, which asserts the case-insensitive rule directly",
+    ("w34-aicost-arithmetic-controls-9a7c.py", "b54d36755784"):
+        "DEAD B18.33 2026-09-27: GetAICostTrends reads ai_spend_events by charge date (W3.17) instead of issues.ai_cost_usd by updated_at; this arm mutated the old issues query, and aicost_counting_realpg_test.go now pins the same arithmetic over the ledger",
+    ("w34-aicost-arithmetic-controls-9a7c.py", "ec3f2095081b"):
+        "DEAD B18.33 2026-09-27: GetAICostTrends reads ai_spend_events by charge date (W3.17) instead of issues.ai_cost_usd by updated_at; this arm mutated the old issues query, and aicost_counting_realpg_test.go now pins the same arithmetic over the ledger",
+    ("w34-aicost-arithmetic-controls-9a7c.py", "15df5136ba81"):
+        "DEAD B18.33 2026-09-27: GetAICostTrends reads ai_spend_events by charge date (W3.17) instead of issues.ai_cost_usd by updated_at; this arm mutated the old issues query, and aicost_counting_realpg_test.go now pins the same arithmetic over the ledger",
+    ("w34-aicost-arithmetic-controls-9a7c.py", "1c77e258a458"):
+        "DEAD B18.33 2026-09-27: GetAICostTrends reads ai_spend_events by charge date (W3.17) instead of issues.ai_cost_usd by updated_at; this arm mutated the old issues query, and aicost_counting_realpg_test.go now pins the same arithmetic over the ledger",
+    ("w34-aicost-arithmetic-controls-9a7c.py", "3cc09066caab"):
+        "DEAD B18.33 2026-09-27: GetAICostTrends reads ai_spend_events by charge date (W3.17) instead of issues.ai_cost_usd by updated_at; this arm mutated the old issues query, and aicost_counting_realpg_test.go now pins the same arithmetic over the ledger",
+    ("w34-aicost-arithmetic-controls-9a7c.py", "a92501dea45a"):
+        "DEAD B18.33 2026-09-27: GetAICostTrends reads ai_spend_events by charge date (W3.17) instead of issues.ai_cost_usd by updated_at; this arm mutated the old issues query, and aicost_counting_realpg_test.go now pins the same arithmetic over the ledger",
 }
 
 

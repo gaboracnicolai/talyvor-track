@@ -156,6 +156,33 @@ func (s *Syncer) runOnce(ctx context.Context) {
 		)
 		return
 	}
+	// Sync only what the key can actually read (B18.33, W3.70): every workspace under an admin key,
+	// only the key's own workspace under a workspace key. Asking Lens for any other workspace returns
+	// the key's workspace's rows, which this loop used to record against the workspace it asked for.
+	id, err := s.client.Identity(ctx)
+	if err != nil {
+		slog.Warn("lensintegration: cannot tell which workspace the Lens key serves — nothing synced this run",
+			slog.String("err", err.Error()))
+		return
+	}
+	if !id.IsAdmin {
+		skipped := 0
+		keep := ids[:0:0]
+		for _, ws := range ids {
+			if ws == id.WorkspaceID {
+				keep = append(keep, ws)
+			} else {
+				skipped++
+			}
+		}
+		if skipped > 0 {
+			slog.Info("lensintegration: the Lens key is a workspace key — syncing only its own workspace",
+				slog.String("lens_key_workspace_id", id.WorkspaceID),
+				slog.Int("synced", len(keep)),
+				slog.Int("skipped", skipped))
+		}
+		ids = keep
+	}
 	for _, ws := range ids {
 		if ctx.Err() != nil {
 			return

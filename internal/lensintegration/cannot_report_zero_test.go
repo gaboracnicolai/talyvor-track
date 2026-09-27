@@ -42,7 +42,7 @@ func (zeroIssues) TopByAICost(context.Context, string, int) ([]model.Issue, erro
 // probe answers 200, every authenticated read 401s.
 func lensThatRefuses(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/api/health" {
 			w.WriteHeader(http.StatusOK) // Lens mounts this UNAUTHENTICATED
 			return
@@ -103,7 +103,7 @@ func TestCosts_TheFailureNamesWhatIsMissing(t *testing.T) {
 // Without this, a change that always reported "unreadable" would pass both tests above and make
 // the endpoint useless.
 func TestCosts_AWorkingLensStillReportsItsNumbers(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/api/health":
@@ -137,7 +137,7 @@ func TestHealthy_NonSuccessIsNotHealthy(t *testing.T) {
 		http.StatusNotFound,
 		http.StatusTooManyRequests,
 	} {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(code)
 		}))
 		if New(srv.URL, "k").Healthy(context.Background()) {
@@ -149,7 +149,7 @@ func TestHealthy_NonSuccessIsNotHealthy(t *testing.T) {
 
 // The control for that one: a 200 IS healthy.
 func TestHealthy_TwoHundredIsHealthy(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

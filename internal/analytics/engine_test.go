@@ -184,7 +184,7 @@ func TestGetAICostTrends_ReturnsDailyCostsAndProjection(t *testing.T) {
 	engine, pool := newMockEngine(t)
 	now := time.Now().UTC()
 	// 1. totals
-	pool.ExpectQuery(`SELECT COALESCE\(SUM\(ai_cost_usd\), 0\), COUNT\(\*\)`).
+	pool.ExpectQuery(`SELECT COALESCE\(SUM\(e.cost_usd\), 0\), COUNT\(DISTINCT e.issue_id\)`).
 		WithArgs("ws-1", 30).
 		WillReturnRows(pgxmock.NewRows([]string{"total", "count"}).AddRow(90.0, 30))
 	// 2. daily series
@@ -199,7 +199,7 @@ func TestGetAICostTrends_ReturnsDailyCostsAndProjection(t *testing.T) {
 	// exact, so dropping the predicate turns the call back into a one-argument query and this
 	// mismatch surfaces (the caller checks the Query error). It cannot tell WHICH rows come
 	// back, though — aicost_window_test.go does that, on real Postgres.
-	pool.ExpectQuery(`ORDER BY ai_cost_usd DESC LIMIT 10`).
+	pool.ExpectQuery(`ORDER BY SUM\(e.cost_usd\) DESC, i.id LIMIT 10`).
 		WithArgs("ws-1", 30).
 		WillReturnRows(pgxmock.NewRows([]string{"id", "identifier", "title", "cost", "tokens"}).
 			AddRow("i-1", "ENG-1", "expensive", 12.0, 8000))
@@ -209,7 +209,7 @@ func TestGetAICostTrends_ReturnsDailyCostsAndProjection(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"id", "name", "cost"}).
 			AddRow("team-1", "Engineering", 75.0))
 	// 5. by label
-	pool.ExpectQuery(`UNNEST\(labels\)`).
+	pool.ExpectQuery(`UNNEST\(i.labels\)`).
 		WithArgs("ws-1", 30).
 		WillReturnRows(pgxmock.NewRows([]string{"label", "cost"}).
 			AddRow("bug", 50.0).

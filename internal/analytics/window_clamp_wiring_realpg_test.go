@@ -68,10 +68,14 @@ func seedClampIssue(t *testing.T, d *testutil.DB, wsID, teamID string, n int, st
 	// this file taking a position on a question distribution_counting_realpg_test.go already owns.
 	age := fmt.Sprintf("NOW() - INTERVAL '%d days'", ageDays)
 	_, err := d.Pool.Exec(context.Background(), `
+        WITH iss AS (
         INSERT INTO issues (workspace_id, team_id, number, identifier, title, status, priority,
                             creator_id, labels, ai_cost_usd, ai_tokens, created_at, updated_at)
         VALUES ($1, $2, $3::int, 'WC-' || $3::int, 'clamp ' || $3::int, $4, 0, 'wcprobe',
-                ARRAY[]::text[], $5, 4242, `+age+`, `+age+`)`,
+                ARRAY[]::text[], $5, 4242, `+age+`, `+age+`)
+            RETURNING id, workspace_id, ai_cost_usd, ai_tokens, updated_at)
+        INSERT INTO ai_spend_events (event_key, workspace_id, issue_id, cost_usd, tokens, source, created_at)
+        SELECT 'clamp-' || id, workspace_id, id, ai_cost_usd, ai_tokens, 'sync', updated_at FROM iss WHERE ai_cost_usd > 0`,
 		wsID, teamID, n, status, cost)
 	if err != nil {
 		t.Fatalf("seed issue %d (%s, %dd old): %v", n, status, ageDays, err)

@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/talyvor/track/internal/model"
 	"github.com/talyvor/track/internal/notification"
 )
@@ -38,6 +40,7 @@ type deliveryDeduper interface {
 // interface so tests can substitute a counter mock.
 type issueLookup interface {
 	GetByIdentifier(ctx context.Context, identifier, workspaceID string) (*model.Issue, error)
+	ListByLensFeature(ctx context.Context, lensFeature, workspaceID string) ([]*model.Issue, error)
 	RecordSpendEvent(ctx context.Context, eventKey, lensFeature string, costUSD float64, tokens int, workspaceID, source string) (int, error)
 }
 
@@ -235,85 +238,60 @@ func (h *WebhookHandler) handleSpendAlert(ctx context.Context, p SpendAlertPaylo
 	// event_id dedup (ServeHTTP, above) sits in front and catches byte-varied replays
 	// this can't. The residual byte-identical-distinct-events collapse errs toward
 	// UNDER-count (safe for a cost number) and only applies to alerts with no event_id.
-	credited, err := h.issues.RecordSpendEvent(ctx, eventKey, p.Feature, p.CostUSD, 0, p.WorkspaceID, "webhook")
-	if err != nil {
+	if _, err := h.issues.RecordSpendEvent(ctx, eventKey, p.Feature, p.CostUSD, 0, p.WorkspaceID, "webhook"); err != nil {
 		slog.Warn("spend_alert: RecordSpendEvent failed",
 			slog.String("feature", p.Feature),
 			slog.String("err", err.Error()),
 		)
 	}
 
-	// Look up the issue to notify, SCOPED to the workspace the signed payload names. An
-	// identifier is unique per workspace only, so an unscoped lookup could notify — and
-	// broadcast the alert into the realtime room of — a different tenant's issue that
-	// merely shares the identifier.
-	//
-	// ⚠ THIS LINE AND THE RecordSpendEvent FOUR LINES ABOVE IT USE THE SAME STRING AS TWO
-	// DIFFERENT KEYS, AND `issues` HAS BOTH COLUMNS. The credit matches `lens_feature`; this
-	// matches `identifier`. They are different fields — ENG-42 versus the Lens feature tag —
-	// so whenever an issue's lens_feature is the tag the editor actually sends, the cost
-	// lands here and the alert reaches nobody. Which key is right is a product decision and
-	// is NOT taken here: an operator who configured an alert rule whose feature IS an issue
-	// identifier has a working notification today and would lose it. See queue item W3.5.
-	//
-	// ⚠ AND A MISS IS NOT "a notification without an assignee", which is what this comment
-	// used to claim: the Create below is gated on `issue != nil`, and so is the realtime
-	// fanout, so a miss sends NOTHING AT ALL. What IS fixed here is that the silence is no
-	// longer indistinguishable from a working alert — see the two warnings below. A miss
-	// stays a miss; nothing is defaulted to a nearest issue.
-	issue, lookupErr := h.issues.GetByIdentifier(ctx, p.Feature, p.WorkspaceID)
-	switch {
-	case lookupErr != nil:
-		// Previously discarded. A Postgres failure and a genuine no-match produced
-		// byte-identical behaviour, so an outage on this path was invisible.
+	// WHO HEARS ABOUT IT: THE PEOPLE WHOSE ISSUES WERE CHARGED (B18.33, W3.5). RecordSpendEvent
+	// above credits every issue whose lens_feature is the alert's feature, so the alert goes to those
+	// issues' assignees — it follows the money. Only when no issue carries that lens_feature is an
+	// issue whose IDENTIFIER equals the feature notified instead, so an operator who keyed an alert
+	// rule on an issue identifier keeps the notification they had. Both lookups are SCOPED to the
+	// workspace the signed payload names: an identifier is unique per workspace only, and an
+	// unscoped lookup could notify another tenant's issue. A miss stays a miss and sends nothing.
+	targets, lookupErr := h.alertTargets(ctx, p)
+	if lookupErr != nil {
 		slog.Warn("spend_alert: issue lookup failed — no notification and no realtime fanout were sent",
 			slog.String("workspace_id", p.WorkspaceID),
 			slog.String("feature", p.Feature),
 			slog.String("err", lookupErr.Error()),
 		)
-	case issue == nil && credited > 0:
-		// The one moment the handler can PROVE the two keys disagreed: the money landed on
-		// `credited` issue(s) by lens_feature, and the same string matched no identifier.
-		// Deliberately NOT warned when credited == 0 — that is an alert for a feature this
-		// workspace does not track at all, and reporting it would make every stray alert a
-		// false alarm about attribution.
-		slog.Warn("spend_alert: cost credited by lens_feature but the feature matched no issue IDENTIFIER — no notification and no realtime fanout were sent",
-			slog.String("workspace_id", p.WorkspaceID),
-			slog.String("feature", p.Feature),
-			slog.Int("issues_credited", credited),
-			slog.Float64("cost_usd", p.CostUSD),
-		)
 	}
 
-	if h.notifications != nil && issue != nil && issue.AssigneeID != nil {
-		_, err := h.notifications.Create(ctx, notification.Notification{
-			WorkspaceID: p.WorkspaceID,
-			MemberID:    *issue.AssigneeID,
-			Type:        "spend_alert",
-			Title:       fmt.Sprintf("AI spend alert: %s", p.Feature),
-			Body: fmt.Sprintf(
-				"%s has used $%.2f in AI tokens (threshold: $%.2f)",
-				p.Feature, p.CostUSD, p.Threshold,
-			),
-			IssueID: &issue.ID,
-		})
-		if err != nil {
-			slog.Warn("spend_alert: create notification failed",
-				slog.String("feature", p.Feature),
-				slog.String("err", err.Error()),
-			)
+	for _, issue := range targets {
+		if h.notifications != nil && issue.AssigneeID != nil {
+			_, err := h.notifications.Create(ctx, notification.Notification{
+				WorkspaceID: p.WorkspaceID,
+				MemberID:    *issue.AssigneeID,
+				Type:        "spend_alert",
+				Title:       fmt.Sprintf("AI spend alert: %s", p.Feature),
+				Body: fmt.Sprintf(
+					"%s has used $%.2f in AI tokens (threshold: $%.2f)",
+					p.Feature, p.CostUSD, p.Threshold,
+				),
+				IssueID: &issue.ID,
+			})
+			if err != nil {
+				slog.Warn("spend_alert: create notification failed",
+					slog.String("feature", p.Feature),
+					slog.String("err", err.Error()),
+				)
+			}
 		}
-	}
 
-	// Real-time fanout so anyone viewing the issue sees the alert
-	// without refreshing. ActorID empty — the actor is Lens itself.
-	if h.notifier != nil && issue != nil {
-		h.notifier.IssueUpdated(ctx, p.WorkspaceID, issue.TeamID, issue.ID, "", map[string]any{
-			"ai_cost_usd":   p.CostUSD,
-			"spend_alert":   true,
-			"threshold_usd": p.Threshold,
-			"alert_feature": p.Feature,
-		})
+		// Real-time fanout so anyone viewing the issue sees the alert
+		// without refreshing. ActorID empty — the actor is Lens itself.
+		if h.notifier != nil {
+			h.notifier.IssueUpdated(ctx, p.WorkspaceID, issue.TeamID, issue.ID, "", map[string]any{
+				"ai_cost_usd":   p.CostUSD,
+				"spend_alert":   true,
+				"threshold_usd": p.Threshold,
+				"alert_feature": p.Feature,
+			})
+		}
 	}
 	return nil
 }
@@ -350,4 +328,25 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(apiError{Error: msg, Code: code})
+}
+
+// alertTargets returns the issues a spend alert is about: every issue in the workspace whose
+// lens_feature is the alert's feature (the ones RecordSpendEvent charged), or, when there are none,
+// the one issue whose identifier is the feature. No match is (nil, nil).
+func (h *WebhookHandler) alertTargets(ctx context.Context, p SpendAlertPayload) ([]*model.Issue, error) {
+	charged, err := h.issues.ListByLensFeature(ctx, p.Feature, p.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(charged) > 0 {
+		return charged, nil
+	}
+	issue, err := h.issues.GetByIdentifier(ctx, p.Feature, p.WorkspaceID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && issue == nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []*model.Issue{issue}, nil
 }

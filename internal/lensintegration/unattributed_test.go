@@ -77,7 +77,7 @@ func stubByRequest(t *testing.T, rows []RequestSpend) *httptest.Server {
 	if err != nil {
 		t.Fatalf("stub encode: %v", err)
 	}
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return httptest.NewServer(asAdminLens(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}))

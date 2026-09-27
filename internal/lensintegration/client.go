@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -29,7 +30,25 @@ type Client struct {
 	lensURL    string
 	apiKey     string
 	httpClient *http.Client
+
+	idMu     sync.Mutex
+	identity *Identity // cached after the first successful GET /v1/auth/me; a key's workspace never changes
 }
+
+// Identity is which workspace Lens serves for this client's key, as Lens's GET /v1/auth/me reports it.
+//
+// ⚠ WHY TRACK ASKS (B18.33, W3.70). Lens honours ?workspace_id= only for an ADMIN key; for a
+// WORKSPACE key it serves the key's own workspace and ignores the parameter, with a 200 and nothing in
+// the body saying which workspace was served. The syncer asks for every Track workspace in turn, so
+// under a workspace key it used to record the key's workspace's spend against each of them (and the
+// Lens panel showed it to their users). Every workspace-scoped read now checks first.
+type Identity struct {
+	WorkspaceID string `json:"workspace_id"`
+	IsAdmin     bool   `json:"is_admin"`
+}
+
+// ErrWorkspaceNotServed is returned for a workspace this client's Lens key does not serve.
+var ErrWorkspaceNotServed = errors.New("lensintegration: the Lens key serves a different workspace")
 
 // SpendSummary mirrors the Lens /v1/api/spend/summary response shape.
 // Track doesn't need every field Lens emits — we project to the
@@ -124,7 +143,42 @@ func (c *Client) do(ctx context.Context, path string, out any) error {
 	return json.Unmarshal(body, out)
 }
 
+// Identity asks Lens which workspace this client's key serves. The answer is cached once it succeeds.
+func (c *Client) Identity(ctx context.Context) (Identity, error) {
+	c.idMu.Lock()
+	if c.identity != nil {
+		id := *c.identity
+		c.idMu.Unlock()
+		return id, nil
+	}
+	c.idMu.Unlock()
+	var id Identity
+	if err := c.do(ctx, "/v1/auth/me", &id); err != nil {
+		return Identity{}, err
+	}
+	c.idMu.Lock()
+	c.identity = &id
+	c.idMu.Unlock()
+	return id, nil
+}
+
+// Serves reports whether Lens answers for workspaceID under this key: an admin key serves every
+// workspace, a workspace key only its own. Any error means Track must not read that workspace's data.
+func (c *Client) Serves(ctx context.Context, workspaceID string) error {
+	id, err := c.Identity(ctx)
+	if err != nil {
+		return err
+	}
+	if id.IsAdmin || (id.WorkspaceID != "" && id.WorkspaceID == workspaceID) {
+		return nil
+	}
+	return ErrWorkspaceNotServed
+}
+
 func (c *Client) GetSpendSummary(ctx context.Context, workspaceID string, days int) (*SpendSummary, error) {
+	if err := c.Serves(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if days <= 0 {
 		days = 30
 	}
@@ -139,6 +193,9 @@ func (c *Client) GetSpendSummary(ctx context.Context, workspaceID string, days i
 }
 
 func (c *Client) GetSpendByFeature(ctx context.Context, workspaceID string, days int) ([]FeatureSpend, error) {
+	if err := c.Serves(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if days <= 0 {
 		days = 30
 	}
@@ -184,6 +241,9 @@ const byRequestMaxPages = 1000
 // completion (bounded pages). Same window semantics as GetSpendByFeature. Returns every request row in the
 // window so the syncer can land each one exactly-once by request_id.
 func (c *Client) GetSpendByRequest(ctx context.Context, workspaceID string, days int) ([]RequestSpend, error) {
+	if err := c.Serves(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if days <= 0 {
 		days = 30
 	}
@@ -210,6 +270,9 @@ func (c *Client) GetSpendByRequest(ctx context.Context, workspaceID string, days
 }
 
 func (c *Client) GetAnomalies(ctx context.Context, workspaceID string) ([]map[string]any, error) {
+	if err := c.Serves(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	q := url.Values{}
 	q.Set("workspace_id", workspaceID)
 	var out []map[string]any

@@ -1,6 +1,6 @@
 package analytics_test
 
-// AN INDEX IS A CLAIM ABOUT A QUERY, AND TWO OF THESE THREE CLAIMS ARE FALSE.
+// AN INDEX IS A CLAIM ABOUT A QUERY, AND NONE OF THESE THREE IS SCANNED BY THE ENGINE ANY MORE.
 //
 // migrations/0009_analytics.sql declares three partial indexes on `issues` and says in prose that
 // they "serve the three hot query shapes the engine runs":
@@ -13,8 +13,9 @@ package analytics_test
 // EVERY exported Engine method against real Postgres and reading pg_stat_user_indexes.idx_scan
 // either side — a plan I read off one hand-picked EXPLAIN would only measure the query I chose.
 //
-// THE RESULT: idx_issues_ai_cost is scanned. idx_issues_analytics and idx_issues_due are NOT
-// scanned by any engine method. For idx_issues_due the reason is visible in the SQL — the overdue
+// THE RESULT: idx_issues_analytics and idx_issues_due are NOT scanned by any engine method, and
+// since B18.33 neither is idx_issues_ai_cost — the AI-cost report reads the spend ledger through
+// idx_spend_events_workspace instead of ranking issues by their lifetime ai_cost_usd. For idx_issues_due the reason is visible in the SQL — the overdue
 // predicate lives inside a `COUNT(*) FILTER (...)` in GetWorkload, which Postgres applies AFTER
 // the scan, while the query's WHERE is `workspace_id = $1` alone. A partial index that omits the
 // rows the surrounding aggregate still needs cannot serve it, so the planner takes
@@ -69,7 +70,7 @@ var declaredIn0009 = map[string]string{
 // change this map — and the failure message says which way it moved.
 var scannedByTheEngine = map[string]bool{
 	"idx_issues_analytics": false,
-	"idx_issues_ai_cost":   true,
+	"idx_issues_ai_cost":   false, // B18.33: the AI-cost report reads ai_spend_events (idx_spend_events_workspace) now
 	"idx_issues_due":       false,
 }
 

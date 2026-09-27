@@ -1,10 +1,17 @@
 // Package workflow owns the per-team status pipeline.
 //
-// Default teams ship with the six built-in statuses (Backlog → Cancelled);
-// any team can add custom ones. Each status belongs to one of five
-// categories (backlog / unstarted / started / completed / cancelled) so
-// downstream reports can group "any started status" without knowing the
-// custom names a team picked.
+// Default teams ship with the six built-in statuses (Backlog → Cancelled),
+// and a team can store custom ones through the API. Each status belongs to
+// one of five categories (backlog / unstarted / started / completed /
+// cancelled).
+//
+// ⚠ THESE ROWS ARE NOT WHAT AN ISSUE'S STATUS IS (B18.33, W3.14). issues.status
+// holds model.IssueStatus — backlog · todo · in_progress · in_review · done ·
+// cancelled — which shares no value with the names seeded here, has no foreign
+// key to workflow_statuses, and is what analytics filters on. So a custom status
+// stored here is a row, not a status any issue can take, and no report groups by
+// these categories. Kept rather than deleted because teams' stored rows are
+// customer data; wiring issues to it is a product decision still open.
 package workflow
 
 import (
@@ -262,9 +269,9 @@ func (e *Engine) SeedDefaults(ctx context.Context, teamID string) error {
 // to another is sensible. The two illegal transitions are documented
 // in the spec; any other move is permitted.
 //
-// The signature returns error so callers can use it as a gate, but
-// the issue handler currently logs and proceeds — workflow correctness
-// is advisory in Phase 2.
+// It has NO production caller: nothing in the issue path calls it, so
+// the two illegal transitions it encodes are enforced nowhere (B18.33,
+// W3.14). Its tests call it directly.
 func (e *Engine) ValidateTransition(from, to WorkflowStatus) error {
 	if from.Category == CategoryCompleted && to.Category == CategoryBacklog {
 		return fmt.Errorf("workflow: cannot transition directly from completed to backlog (move through unstarted first)")

@@ -13,25 +13,13 @@ import (
 	"github.com/talyvor/track/internal/model"
 )
 
-// W3.5 — THE WEBHOOK USES ONE STRING AS TWO DIFFERENT KEYS, FOUR LINES APART.
+// W3.5 → B18.33 — A SPEND ALERT REACHES THE PEOPLE WHOSE ISSUES WERE CHARGED.
 //
-// handleSpendAlert passes p.Feature to both of these:
-//
-//	h.issues.RecordSpendEvent(…, p.Feature, …)  ->  issue.Store: WHERE lens_feature = $2
-//	h.issues.GetByIdentifier(ctx, p.Feature, …) ->  issue.Store: WHERE identifier   = $1
-//
-// `issues` has BOTH columns and they are different fields: `identifier` is ENG-42 and
-// `lens_feature` is the Lens feature tag (migrations 0002/0006; settable through the issue
-// update allowlist). So for the ordinary case — an issue whose lens_feature is the tag the
-// editor sends — THE COST LANDS AND THE ALERT REACHES NOBODY, and nothing anywhere says so.
-//
-// WHAT THESE TESTS DO AND DO NOT DECIDE. They do NOT change which column is queried. Which
-// key is right is a product call: an operator who configures an alert rule whose feature IS
-// an issue identifier gets a working notification today and would lose it. What is NOT a
-// product call is that the divergence is SILENT — RecordSpendEvent already returns the number
-// of issues it credited and handleSpendAlert throws it away, so the one moment where the
-// handler can PROVE the two keys disagreed is discarded. These tests pin that it must be loud.
-
+// handleSpendAlert credits every issue whose lens_feature is the alert's feature (RecordSpendEvent)
+// and notifies those same issues' assignees (ListByLensFeature). Only when no issue carries that
+// lens_feature does it fall back to the issue whose IDENTIFIER is the feature, so an operator who
+// keyed an alert rule on an issue identifier keeps the notification they had. A miss sends nothing
+// and says nothing; a failed lookup is warned about.
 // divergentLookup models the real store: two independent columns, and a lookup that can fail.
 type divergentLookup struct {
 	mu sync.Mutex
@@ -51,6 +39,16 @@ func (d *divergentLookup) GetByIdentifier(_ context.Context, ident, _ string) (*
 	}
 	if d.issue != nil && ident == d.identifier {
 		return d.issue, nil
+	}
+	return nil, nil
+}
+
+func (d *divergentLookup) ListByLensFeature(_ context.Context, feature, _ string) ([]*model.Issue, error) {
+	if d.lookupErr != nil {
+		return nil, d.lookupErr
+	}
+	if d.issue != nil && feature == d.lensFeature {
+		return []*model.Issue{d.issue}, nil
 	}
 	return nil, nil
 }
@@ -117,15 +115,15 @@ func divergePost(t *testing.T, wh *WebhookHandler, feature string) {
 	}
 }
 
-// RED (a): the money lands by lens_feature and NOTHING matches as an identifier. Today the
-// handler is completely silent — no notification, no fanout, and no log line. A spend alert
-// that reaches nobody is indistinguishable, from outside, from one that never fired.
-func TestSpendAlert_CreditedButNoIdentifierMatch_IsLoud(t *testing.T) {
+// The ordinary case: the issue is tagged with the feature the editor sends ("code-chat"), its
+// identifier is ENG-1. The alert reaches that issue's assignee and its realtime room, quietly.
+func TestSpendAlert_NotifiesTheIssueThatWasCharged(t *testing.T) {
 	sink := captureLogs(t)
+	assignee := "mem-1"
 	issues := &divergentLookup{
-		identifier:  "ENG-1",     // the issue's key in the tracker
-		lensFeature: "code-chat", // …and the tag the editor actually sends
-		issue:       &model.Issue{ID: "iss-1", Identifier: "ENG-1", WorkspaceID: "ws-1"},
+		identifier:  "ENG-1",
+		lensFeature: "code-chat",
+		issue:       &model.Issue{ID: "iss-1", Identifier: "ENG-1", WorkspaceID: "ws-1", AssigneeID: &assignee},
 		credited:    1,
 	}
 	notes := &recordingNotifications{}
@@ -134,33 +132,25 @@ func TestSpendAlert_CreditedButNoIdentifierMatch_IsLoud(t *testing.T) {
 
 	divergePost(t, wh, "code-chat")
 
-	// The behaviour itself is NOT changed by this test — it is pinned so the decision about
-	// which column is right is taken against a measured baseline rather than a memory.
-	if len(notes.created) != 0 {
-		t.Fatalf("notifications created = %d, want 0 — this is the baseline this item is about", len(notes.created))
+	if len(notes.created) != 1 || notes.created[0].MemberID != assignee || *notes.created[0].IssueID != "iss-1" {
+		t.Fatalf("notifications = %+v, want one for the charged issue's assignee", notes.created)
 	}
-	if notif.updates != 0 {
-		t.Fatalf("realtime fanouts = %d, want 0 — the fanout is gated on the SAME lookup", notif.updates)
+	if notif.updates != 1 {
+		t.Fatalf("realtime fanouts = %d, want 1 for the charged issue", notif.updates)
 	}
-
-	got := sink.matching("credited")
-	if len(got) != 1 {
-		t.Fatalf("WARN records naming the credit/notify divergence = %d, want exactly 1.\n"+
-			"RecordSpendEvent credited 1 issue by lens_feature and GetByIdentifier matched nothing, "+
-			"so the handler KNOWS the two keys disagreed and currently says nothing at all.", len(got))
+	if w := sink.matching(""); len(w) != 0 {
+		t.Fatalf("WARN records = %d, want 0 on the working path", len(w))
 	}
 }
 
-// CONTROL (b): the ordinary working case must stay quiet. Without this the guard above could
-// be satisfied by a handler that warns on every alert, which would be noise, not a signal.
-func TestSpendAlert_IdentifierMatches_StaysQuiet(t *testing.T) {
-	sink := captureLogs(t)
+// An operator who keyed the alert rule on an issue IDENTIFIER, with no issue tagged by that
+// lens_feature, keeps the notification they had.
+func TestSpendAlert_IdentifierRuleStillNotifies(t *testing.T) {
 	assignee := "mem-1"
 	issues := &divergentLookup{
 		identifier:  "ENG-1",
-		lensFeature: "ENG-1", // the operator who configured the rule with an issue key
+		lensFeature: "code-chat",
 		issue:       &model.Issue{ID: "iss-1", Identifier: "ENG-1", WorkspaceID: "ws-1", AssigneeID: &assignee},
-		credited:    1,
 	}
 	notes := &recordingNotifications{}
 	wh := NewWebhookHandler(divergeSecret, issues, notes, &recordingNotifier{})
@@ -168,52 +158,45 @@ func TestSpendAlert_IdentifierMatches_StaysQuiet(t *testing.T) {
 	divergePost(t, wh, "ENG-1")
 
 	if len(notes.created) != 1 {
-		t.Fatalf("notifications created = %d, want 1 — this path works today and must keep working", len(notes.created))
-	}
-	if got := sink.matching("credited"); len(got) != 0 {
-		t.Fatalf("WARN records = %d, want 0 — a handler that warns on the WORKING case is noise:\n  %v", len(got), got)
+		t.Fatalf("notifications created = %d, want 1 — the identifier-keyed rule must keep working", len(notes.created))
 	}
 }
 
-// CONTROL (c): nothing was credited AND nothing matched. That is an alert for a feature this
-// workspace does not track at all — uninteresting, and it must not be reported as a divergence,
-// or every stray alert becomes a false alarm about attribution.
-func TestSpendAlert_NothingCreditedAndNoMatch_IsNotADivergence(t *testing.T) {
+// An alert for a feature this workspace does not track reaches nobody and warns about nothing.
+func TestSpendAlert_NoMatch_SendsNothingQuietly(t *testing.T) {
 	sink := captureLogs(t)
-	issues := &divergentLookup{identifier: "ENG-1", lensFeature: "ENG-1", credited: 0}
-	wh := NewWebhookHandler(divergeSecret, issues, &recordingNotifications{}, &recordingNotifier{})
+	issues := &divergentLookup{identifier: "ENG-1", lensFeature: "code-chat"}
+	notes := &recordingNotifications{}
+	wh := NewWebhookHandler(divergeSecret, issues, notes, &recordingNotifier{})
 
 	divergePost(t, wh, "something-nobody-tracks")
 
-	if got := sink.matching("credited"); len(got) != 0 {
-		t.Fatalf("WARN records = %d, want 0 — nothing was credited, so nothing diverged:\n  %v", len(got), got)
+	if len(notes.created) != 0 {
+		t.Fatalf("notifications created = %d, want 0", len(notes.created))
+	}
+	if w := sink.matching(""); len(w) != 0 {
+		t.Fatalf("WARN records = %d, want 0 — an untracked feature is not an error", len(w))
 	}
 }
 
-// RED (d): the lookup's error is discarded (`issue, _ :=`). A Postgres failure and a genuine
-// no-match produce byte-identical behaviour — no notification, no fanout, no word — so an
-// outage on this path is invisible. The two must be distinguishable.
-func TestSpendAlert_LookupError_IsReportedSeparately(t *testing.T) {
+// A database error is not "no such issue": it is warned about, and nothing is sent.
+func TestSpendAlert_LookupError_IsReported(t *testing.T) {
 	sink := captureLogs(t)
 	issues := &divergentLookup{
 		identifier:  "ENG-1",
-		lensFeature: "ENG-1",
+		lensFeature: "code-chat",
 		lookupErr:   errors.New("connection refused"),
 		credited:    1,
 	}
-	wh := NewWebhookHandler(divergeSecret, issues, &recordingNotifications{}, &recordingNotifier{})
+	notes := &recordingNotifications{}
+	wh := NewWebhookHandler(divergeSecret, issues, notes, &recordingNotifier{})
 
-	divergePost(t, wh, "ENG-1")
+	divergePost(t, wh, "code-chat")
 
-	got := sink.matching("issue lookup failed")
-	if len(got) != 1 {
-		t.Fatalf("WARN records naming a FAILED lookup = %d, want exactly 1 — a database error "+
-			"currently looks exactly like 'no such issue'", len(got))
+	if got := sink.matching("issue lookup failed"); len(got) != 1 {
+		t.Fatalf("WARN records naming a failed lookup = %d, want exactly 1", len(got))
 	}
-	// …and it must NOT be reported as the attribution divergence, which is a different fact
-	// with a different fix.
-	if d := sink.matching("credited"); len(d) != 0 {
-		t.Fatalf("a failed lookup was ALSO reported as a key divergence (%d records) — it is not "+
-			"one: nothing is known about whether an identifier would have matched", len(d))
+	if len(notes.created) != 0 {
+		t.Fatalf("notifications created = %d after a failed lookup, want 0", len(notes.created))
 	}
 }

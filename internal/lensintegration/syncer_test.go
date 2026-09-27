@@ -53,7 +53,7 @@ func (f *fakeWorkspaces) ListIDs(context.Context) ([]string, error) { return f.i
 func byRequestBody(rows string) string { return `{"rows":` + rows + `,"next_cursor":""}` }
 
 func TestSyncFeatureSpend_LandsEachRequestRow(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, byRequestBody(`[
             {"request_id":"r1","feature":"ENG-1","cost_usd":1.10,"input_tokens":1000,"output_tokens":500,"ts":"2026-07-01T00:00:00Z"},
             {"request_id":"r2","feature":"ENG-2","cost_usd":2.20,"input_tokens":2000,"output_tokens":1000,"ts":"2026-07-01T00:00:01Z"}
@@ -104,7 +104,7 @@ func TestSyncFeatureSpend_LandsEachRequestRow(t *testing.T) {
 //
 // Both rules are asserted separately here so neither can change again behind a count.
 func TestSyncFeatureSpend_UntaggedRowIsRecorded_RequestIDLessRowIsNot(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(asAdminLens(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, byRequestBody(`[
             {"request_id":"r0","feature":"","cost_usd":99.99,"input_tokens":50000,"output_tokens":25000,"ts":"t"},
             {"request_id":"","feature":"ENG-9","cost_usd":50.00,"input_tokens":1,"output_tokens":1,"ts":"t"},
@@ -143,7 +143,7 @@ func TestSyncFeatureSpend_UntaggedRowIsRecorded_RequestIDLessRowIsNot(t *testing
 }
 
 func TestSyncFeatureSpend_HandlesLensUnavailableGracefully(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv := httptest.NewServer(asAdminLens(func(http.ResponseWriter, *http.Request) {}))
 	srv.Close() // closed server — calls will fail
 
 	client := New(srv.URL, "tlv_test")

@@ -557,8 +557,7 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 	// already hand-rolls `make([]map[string]any, 0, len(top))` for top_cost_issues alone. One place
 	// that covers both callers and all four fields beats a second copy of a partial defence.
 	//
-	// ⚠ THE COHORT IS UNTOUCHED. This changes the SHAPE of an empty answer and nothing about which
-	// rows are in it; the window predicate and maxWindowDays are the product decisions #93 wrote up.
+	// This only fixes the SHAPE of an empty answer; which rows are in it is decided below.
 	out := &AICostTrends{
 		DailyCosts:    []DailyCost{},
 		TopCostIssues: []IssueCost{},
@@ -566,16 +565,29 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 		CostByLabel:   []LabelCost{},
 	}
 
+	// ⚠ THE REPORT IS THE SPEND THAT HAPPENED IN THE WINDOW (B18.33, W3.17). Every figure below
+	// reads the append-only ledger, ai_spend_events, by each charge's OWN created_at — through
+	// idx_spend_events_workspace (workspace_id, created_at DESC), the index built for this query.
+	// It used to sum issues.ai_cost_usd (a LIFETIME running total) over issues whose updated_at fell
+	// in the window, so a title-only edit put an issue's whole lifetime spend into a 7-day report,
+	// on the day of the edit. The ledger holds every dollar either writer credits to an issue
+	// (RecordSpendEvent and RecordRequestSpend both insert a ledger row per credit, so an issue's
+	// ai_cost_usd is the SUM of its rows), which is why switching loses nothing. Only ATTRIBUTED
+	// rows (issue_id NOT NULL) are counted here; unattributed spend is reported beside this by
+	// issue.Store.UnattributedSpend, as before. avg_cost_per_issue divides by the issues that spent
+	// in the window.
+	const window = `e.created_at > NOW() - (INTERVAL '1 day' * $2::int)`
+
 	// Totals + averages — one row scan.
 	var (
 		total float64
 		count int
 	)
 	if err := e.pool.QueryRow(ctx, `
-        SELECT COALESCE(SUM(ai_cost_usd), 0), COUNT(*) FILTER (WHERE ai_cost_usd > 0)
-        FROM issues
-        WHERE workspace_id = $1
-          AND updated_at > NOW() - (INTERVAL '1 day' * $2::int)`,
+        SELECT COALESCE(SUM(e.cost_usd), 0), COUNT(DISTINCT e.issue_id) FILTER (WHERE e.cost_usd > 0)
+        FROM ai_spend_events e
+        WHERE e.workspace_id = $1 AND e.issue_id IS NOT NULL
+          AND `+window,
 		workspaceID, days,
 	).Scan(&total, &count); err != nil {
 		return nil, fmt.Errorf("analytics: cost totals: %w", err)
@@ -590,14 +602,14 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 		out.ProjectedMonthly = (total / float64(days)) * 30
 	}
 
-	// Daily series.
+	// Daily series — each charge on the day it was charged.
 	rows, err := e.pool.Query(ctx, `
-        SELECT date_trunc('day', updated_at) AS day,
-            COALESCE(SUM(ai_cost_usd), 0),
-            COUNT(*) FILTER (WHERE ai_cost_usd > 0)
-        FROM issues
-        WHERE workspace_id = $1
-          AND updated_at > NOW() - (INTERVAL '1 day' * $2::int)
+        SELECT date_trunc('day', e.created_at) AS day,
+            COALESCE(SUM(e.cost_usd), 0),
+            COUNT(DISTINCT e.issue_id) FILTER (WHERE e.cost_usd > 0)
+        FROM ai_spend_events e
+        WHERE e.workspace_id = $1 AND e.issue_id IS NOT NULL
+          AND `+window+`
         GROUP BY day
         ORDER BY day ASC`,
 		workspaceID, days,
@@ -615,33 +627,18 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 	}
 	rows.Close()
 
-	// Top-cost issues.
-	//
-	// THE SAME COHORT AS EVERY OTHER FIGURE IN THIS REPORT. This was the one sub-query of the five
-	// that took the workspace id alone, so an N-day report carried an ALL-TIME leaderboard beside
-	// an N-day total — and because it is not a subset of the total's cohort it could sum to more
-	// than the total printed next to it. Measured on real Postgres at days=7 for a workspace with
-	// one issue touched today ($101 lifetime) and one last touched 200 days ago ($50): total
-	// $101.00, leaderboard $151.00.
-	//
-	// The consumer is the agent surface rather than the page — frontend/src DECLARES the field
-	// (api/types.ts:430) and renders it nowhere; mcp.Server.toolGetAICosts reads it, and returns
-	// it stamped `"period_days": N`
-	// under a tool description that reads "cost breakdown for the last N days … top-5 most
-	// expensive issues".
-	//
-	// ⚠ THIS MAKES THE REPORT SELF-CONSISTENT, NOT TRUE. ai_cost_usd is a LIFETIME running total
-	// per issue and updated_at is the row's LAST TOUCH, so every figure here is still "the lifetime
-	// cost of issues touched in the window" rather than "the spend in the window". ai_spend_events
-	// carries each event's own created_at and an index on (workspace_id, created_at DESC) for
-	// exactly that question, and no query in this repo reads it. That is a decision about what
-	// total_cost_usd means, written up with its numbers rather than taken here.
+	// Top-cost issues — what each issue was charged IN THE WINDOW, from the same rows as the total,
+	// so the leaderboard can never sum to more than the total beside it. The consumer is the agent
+	// surface (mcp.Server.toolGetAICosts, "top-5 most expensive issues" for the last N days).
 	rows, err = e.pool.Query(ctx, `
-        SELECT id, identifier, title, ai_cost_usd, ai_tokens
-        FROM issues
-        WHERE workspace_id = $1 AND ai_cost_usd > 0
-          AND updated_at > NOW() - (INTERVAL '1 day' * $2::int)
-        ORDER BY ai_cost_usd DESC LIMIT 10`,
+        SELECT i.id, i.identifier, i.title, SUM(e.cost_usd), COALESCE(SUM(e.tokens), 0)
+        FROM ai_spend_events e
+        JOIN issues i ON i.id = e.issue_id AND i.workspace_id = e.workspace_id
+        WHERE e.workspace_id = $1
+          AND `+window+`
+        GROUP BY i.id, i.identifier, i.title
+        HAVING SUM(e.cost_usd) > 0
+        ORDER BY SUM(e.cost_usd) DESC, i.id LIMIT 10`,
 		workspaceID, days,
 	)
 	if err != nil {
@@ -657,15 +654,16 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 	}
 	rows.Close()
 
-	// Cost by team — JOIN issues.team_id to teams for the display name.
+	// Cost by team — the window's charges, grouped by the charged issue's team.
 	rows, err = e.pool.Query(ctx, `
-        SELECT t.id, t.name, COALESCE(SUM(i.ai_cost_usd), 0)
-        FROM issues i
+        SELECT t.id, t.name, COALESCE(SUM(e.cost_usd), 0)
+        FROM ai_spend_events e
+        JOIN issues i ON i.id = e.issue_id AND i.workspace_id = e.workspace_id
         JOIN teams t ON t.id = i.team_id
-        WHERE i.workspace_id = $1
-          AND i.updated_at > NOW() - (INTERVAL '1 day' * $2::int)
+        WHERE e.workspace_id = $1
+          AND `+window+`
         GROUP BY t.id, t.name
-        ORDER BY SUM(i.ai_cost_usd) DESC NULLS LAST`,
+        ORDER BY SUM(e.cost_usd) DESC NULLS LAST`,
 		workspaceID, days,
 	)
 	if err != nil {
@@ -681,17 +679,18 @@ func (e *Engine) GetAICostTrends(ctx context.Context, workspaceID string, days i
 	}
 	rows.Close()
 
-	// Cost by label — UNNEST the labels array.
+	// Cost by label — UNNEST the charged issue's labels.
 	rows, err = e.pool.Query(ctx, `
-        SELECT label, COALESCE(SUM(ai_cost_usd), 0)
+        SELECT label, COALESCE(SUM(cost_usd), 0)
         FROM (
-            SELECT UNNEST(labels) AS label, ai_cost_usd
-            FROM issues
-            WHERE workspace_id = $1
-              AND updated_at > NOW() - (INTERVAL '1 day' * $2::int)
+            SELECT UNNEST(i.labels) AS label, e.cost_usd
+            FROM ai_spend_events e
+            JOIN issues i ON i.id = e.issue_id AND i.workspace_id = e.workspace_id
+            WHERE e.workspace_id = $1
+              AND `+window+`
         ) t
         GROUP BY label
-        ORDER BY SUM(ai_cost_usd) DESC LIMIT 20`,
+        ORDER BY SUM(cost_usd) DESC LIMIT 20`,
 		workspaceID, days,
 	)
 	if err != nil {
