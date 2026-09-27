@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useRoadmap } from "~/hooks/useRoadmap";
 import { TimelineGrid } from "~/components/roadmap/TimelineGrid";
 import { ProjectRow } from "~/components/roadmap/ProjectRow";
+import { describeForecast } from "~/components/roadmap/forecast";
 import {
   columnCount,
   endFromStart,
@@ -140,13 +141,22 @@ function UnscheduledSection({ projects }: { projects: RoadmapProject[] }) {
 }
 
 function UnscheduledRow({ project }: { project: RoadmapProject }) {
-  // Carry the same shape as scheduled rows (left panel + AI cost
-  // badge) so the visual is consistent. Just no timeline bar.
+  // Carry the same shape as scheduled rows (left panel + forecast + AI
+  // cost badge) so the visual is consistent. Just no timeline bar.
+  const forecast = describeForecast(project);
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-xs">
       <div className="w-56 truncate font-medium">{project.name}</div>
       <div className="text-muted">{project.team_name}</div>
       <div className="ml-auto flex items-center gap-2">
+        {forecast ? (
+          <span
+            className={forecast.late ? "text-priority-urgent" : "text-muted"}
+            title={forecast.detail}
+          >
+            {forecast.text}
+          </span>
+        ) : null}
         <span className="text-muted">
           {project.completed_count}/{project.issue_count}
         </span>

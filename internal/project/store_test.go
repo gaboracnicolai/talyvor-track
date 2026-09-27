@@ -125,6 +125,11 @@ func TestGetRoadmap_ReturnsProjectsInDateRange(t *testing.T) {
 				0, &now, ptrTime(now.AddDate(0, 1, 0)), now, now,
 				"Engineering", int64(5), int64(5), float64(2.5)))
 
+	// Forecast history query, one row per project; no finished work returned here.
+	pool.ExpectQuery(`weeks_ago`).
+		WithArgs([]string{"p-1", "p-2"}, pgxmock.AnyArg(), ForecastHistoryWeeks).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "history_start", "weeks_ago"}))
+
 	// Per-project milestone rollup. The implementation issues one
 	// follow-up query, scoped to the project IDs collected above.
 	pool.ExpectQuery(`FROM milestones m`).
@@ -192,6 +197,11 @@ func TestGetRoadmap_FiltersByTeamID(t *testing.T) {
 			AddRow("p-1", "ws-1", team, "Roadmap A", "PRJ-A", "", "active",
 				0, &now, ptrTime(now.AddDate(0, 2, 0)), now, now,
 				"Engineering", int64(0), int64(0), float64(0)))
+
+	// Forecast history query, one row per project; no finished work returned here.
+	pool.ExpectQuery(`weeks_ago`).
+		WithArgs([]string{"p-1"}, pgxmock.AnyArg(), ForecastHistoryWeeks).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "history_start", "weeks_ago"}))
 
 	// The milestone follow-up query fires once project IDs have been
 	// gathered, even when the team has no milestones — return an

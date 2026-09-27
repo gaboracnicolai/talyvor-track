@@ -199,6 +199,19 @@ export interface RoadmapProject {
   completed_count: number;
   completion_pct: number;
   ai_cost_usd: number;
+  forecast?: ProjectForecast;
+}
+
+// ProjectForecast mirrors internal/project/forecast.go: when a project's
+// open work is likely (50%) and safely (85%) finished, projected from the
+// issues it finished over its last `history_weeks` weeks.
+export interface ProjectForecast {
+  status: "forecast" | "nothing_open" | "no_history" | "too_far";
+  remaining: number;
+  history_weeks: number;
+  finished_in_history: number;
+  likely?: string;
+  safe?: string;
 }
 
 export interface RoadmapResponse {

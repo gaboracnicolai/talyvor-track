@@ -21,6 +21,7 @@ type RoadmapProject struct {
 	CompletedCount int                `json:"completed_count"`
 	CompletionPct  float64            `json:"completion_pct"`
 	AICostUSD      float64            `json:"ai_cost_usd"`
+	Forecast       *Forecast          `json:"forecast,omitempty"`
 }
 
 // RoadmapMilestone is one diamond on the timeline. Embeds the
@@ -35,9 +36,10 @@ type RoadmapMilestone struct {
 
 // GetRoadmap returns every project whose [start_date, target_date]
 // overlaps [start, end] (or has no dates set — see "unscheduled"
-// fallback below) along with its milestones. Two queries total: one
-// for project rollups, one for milestones across every returned
-// project. No N+1 even at large workspace sizes.
+// fallback below) along with its milestones and its finish forecast.
+// Three queries total: one for project rollups, one for the completion
+// history behind every returned project's forecast, one for milestones
+// across every returned project. No N+1 even at large workspace sizes.
 //
 // teamID nil means "any team in the workspace"; a non-nil value adds
 // the AND p.team_id = $4 clause and shifts the args list.
@@ -110,6 +112,9 @@ func (s *Store) GetRoadmap(ctx context.Context, workspaceID string, teamID *stri
 	}
 	if len(projectIDs) == 0 {
 		return []RoadmapProject{}, nil
+	}
+	if err := s.attachForecasts(ctx, out, projectIDs, time.Now().UTC()); err != nil {
+		return nil, err
 	}
 
 	// Milestone rollup. Same shape as the project query — counts and
