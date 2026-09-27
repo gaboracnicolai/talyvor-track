@@ -37,10 +37,9 @@ services:
       # The ONLY signal is one slog.Info at boot. Must decode to exactly 32 bytes:
       # `openssl rand -base64 32`. Empty ⇒ live API import stays off, CSV import unaffected.
       - TRACK_INTEGRATION_ENCRYPTION_KEY=${TRACK_INTEGRATION_ENCRYPTION_KEY:-}
-      # Signs guest-access tokens. Unset ⇒ internal/guest/store.go mints a RANDOM per-process
-      # secret, so every guest token dies on restart and no two replicas accept each other's.
-      # The code's own comment says the operator must set it — and until this line existed there
-      # was no way to. Empty is still a working dev default, deliberately.
+      # Signs guest-access tokens. Unset ⇒ one key is generated once and stored in the database
+      # (internal/guest/signing_key.go), shared by every process and every restart. Set it only to
+      # hold the key yourself; changing it invalidates every outstanding guest link.
       - TRACK_GUEST_SECRET=${TRACK_GUEST_SECRET:-}
       # Bearer secret for the two gwExempt service endpoints Docs pulls: GET /v1/service/members
       # and GET /v1/service/workspaces. Unset ⇒ Track boots and both 401 EVERYTHING, which reads
