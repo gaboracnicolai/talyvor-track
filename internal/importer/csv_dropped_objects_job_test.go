@@ -38,6 +38,7 @@ func countRows(t *testing.T, d *testutil.DB, table, wsID string) int {
 }
 
 func TestJobRow_JiraCSV_TheDroppedObjectsReachTheJobRow(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 
 	t.Run("one line per object column, with its own count", func(t *testing.T) {

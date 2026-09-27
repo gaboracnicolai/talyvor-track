@@ -94,6 +94,7 @@ func countWarningsMentioning(job *importer.Job, needle string) int {
 }
 
 func TestJobRow_CSV_TheUnreadObjectReferencesReachTheJobRow(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 
 	t.Run("linear reports all four, once each", func(t *testing.T) {

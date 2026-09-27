@@ -17,6 +17,7 @@ import (
 // at the cap is accepted. The cap is injected small so the branch is cheap to reach (B18.34); the
 // production value is asserted separately so the injection cannot hide a changed bound.
 func TestJobHandler_AnUploadOverTheCapIsRefused(t *testing.T) {
+	t.Parallel()
 	if got := NewJobHandler(nil).maxUpload; got != 64<<20 {
 		t.Fatalf("production upload cap = %d bytes, want 64 MiB (%d)", got, 64<<20)
 	}

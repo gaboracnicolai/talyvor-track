@@ -58,6 +58,7 @@ func issueIDOf(t *testing.T, d *testutil.DB, wsID, identifier string) string {
 }
 
 func TestJobRow_CSV_TheDroppedIssueLinksReachTheJobRow(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 
 	t.Run("jira reports one line per link column, with the issue count", func(t *testing.T) {

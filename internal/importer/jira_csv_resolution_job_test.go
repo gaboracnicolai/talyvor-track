@@ -58,6 +58,7 @@ func readIssueStatusByTitle(t *testing.T, d *testutil.DB, wsID string) map[strin
 }
 
 func TestJobRow_JiraCSV_AbandonedWorkLandsCancelledAndUndatedInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

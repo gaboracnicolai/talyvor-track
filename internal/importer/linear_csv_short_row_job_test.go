@@ -57,6 +57,7 @@ func TestJobRow_LinearCSV_ShortRowFixturePremise(t *testing.T) {
 //
 // BEFORE: {status:"failed", imported:0, skipped:0, failed:2}, zero rows in `issues`.
 func TestJobRow_LinearCSV_AnExportThatOmitsItsTrailingFieldImports(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -97,6 +98,7 @@ func TestJobRow_LinearCSV_AnExportThatOmitsItsTrailingFieldImports(t *testing.T)
 // what four earlier merges on this item were about. If the truncation shifted the row, these would
 // be the first columns to go wrong, and a title-only assertion could not see it.
 func TestJobRow_LinearCSV_TheShortRowKeepsTheDatesLinearSupplied(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -133,6 +135,7 @@ func TestJobRow_LinearCSV_TheShortRowKeepsTheDatesLinearSupplied(t *testing.T) {
 // An import that quietly read a truncated column as empty would be the structural-zero class this
 // package reports everywhere else.
 func TestJobRow_LinearCSV_TheShortRowIsReportedInTheJobWarnings(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

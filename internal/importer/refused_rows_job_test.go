@@ -96,6 +96,7 @@ func doneIssue(key, summary string) string {
 // third is refused because a human owns that identifier. The refusal must reach the column that
 // exists for it and must NOT be counted as a failure.
 func TestJobRow_RefusedRowIsCountedAsRefusedNotFailed(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	tm := refusalTeam(t, d, ws.ID, "ENG")
@@ -146,6 +147,7 @@ func TestJobRow_RefusedRowIsCountedAsRefusedNotFailed(t *testing.T) {
 // import that landed nothing must not start reading as clean just because the counters got honest.
 // This test is the guard on the half I did NOT decide.
 func TestJobRow_AllRowsRefused(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	tm := refusalTeam(t, d, ws.ID, "ENG")
@@ -234,6 +236,7 @@ func TestRun_UpsertErrorClassification(t *testing.T) {
 // fails: an empty title, refused by the mapper's own errEmptyTitle. Nothing here was relaxed; the
 // example was swapped for one that is still an example.
 func TestJobRow_GenuineFailureStaysInFailed(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

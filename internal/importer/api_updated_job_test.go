@@ -260,6 +260,7 @@ func TestLinearQuery_AsksForUpdatedAt(t *testing.T) {
 // ── JIRA API ──────────────────────────────────────────────────────────────────────────────────
 
 func TestJobRow_JiraAPI_ImportedIssueKeepsTheDateJiraLastUpdatedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, updated := apiUpdatedInstants()
 	wsID, _ := runJiraAPICreatedImport(t, d, jiraIssueAPIUpdatedJSON("PROJ-1", "widget alpha untouched for months",
@@ -275,6 +276,7 @@ func TestJobRow_JiraAPI_ImportedIssueKeepsTheDateJiraLastUpdatedIt(t *testing.T)
 }
 
 func TestJobRow_JiraAPI_AStaleImportDoesNotOutrankTodaysWork(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -289,6 +291,7 @@ func TestJobRow_JiraAPI_AStaleImportDoesNotOutrankTodaysWork(t *testing.T) {
 }
 
 func TestJobRow_JiraAPI_MissingUpdatedIsReportedNotDefaulted(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, _ := apiUpdatedInstants()
 	_, jobID := runJiraAPICreatedImport(t, d,
@@ -329,6 +332,7 @@ func TestJobRow_JiraAPI_MissingUpdatedIsReportedNotDefaulted(t *testing.T) {
 // ── LINEAR API ────────────────────────────────────────────────────────────────────────────────
 
 func TestJobRow_LinearAPI_ImportedIssueKeepsTheDateLinearLastUpdatedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, updated := apiUpdatedInstants()
 	node := linNodeUpdatedAt(linNodeCreated("ENG-1", "Todo", "unstarted", "",
@@ -344,6 +348,7 @@ func TestJobRow_LinearAPI_ImportedIssueKeepsTheDateLinearLastUpdatedIt(t *testin
 }
 
 func TestJobRow_LinearAPI_AStaleImportDoesNotOutrankTodaysWork(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -359,6 +364,7 @@ func TestJobRow_LinearAPI_AStaleImportDoesNotOutrankTodaysWork(t *testing.T) {
 }
 
 func TestJobRow_LinearAPI_NullUpdatedAtIsReportedNotDefaulted(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	created, _ := apiUpdatedInstants()
 	node := linNodeUpdatedAt(linNodeCreated("ENG-1", "Todo", "unstarted", "",

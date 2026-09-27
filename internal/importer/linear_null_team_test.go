@@ -212,6 +212,7 @@ func runLinearNullTeamImport(t *testing.T, d *testutil.DB, teamKey, page string)
 }
 
 func TestJobRow_LinearAPI_ANullTeamDoesNotRecordASucceededImport(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	jobID := runLinearNullTeamImport(t, d, "ENG", linearNullTeam)
 
@@ -238,6 +239,7 @@ func TestJobRow_LinearAPI_ANullTeamDoesNotRecordASucceededImport(t *testing.T) {
 // THE CONTROL AT THE JOB LEVEL, and it is the one that decides whether this change is a report or
 // an alarm. A team that resolved and holds nothing must still record a clean, successful import.
 func TestJobRow_LinearAPI_AnEmptyTeamStillRecordsASucceededImport(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	jobID := runLinearNullTeamImport(t, d, "ENG", linearEmptyTeam)
 

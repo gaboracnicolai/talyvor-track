@@ -153,6 +153,7 @@ func issuesIn(t *testing.T, d *testutil.DB, wsID string) []importedIssue {
 // TestPaddedCells_LandTheSameIssuesAsACleanExport is the `get` half. Two workspaces, the same two
 // issues, one export padded and one not: what reaches the issues table must be indistinguishable.
 func TestPaddedCells_LandTheSameIssuesAsACleanExport(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	clean := d.Workspace(t)
 	cleanTeam := d.Team(t, clean.ID)
@@ -196,6 +197,7 @@ func TestPaddedCells_LandTheSameIssuesAsACleanExport(t *testing.T) {
 // twice — once from a tool that pads and once from one that does not — must end with one backlog,
 // not two.
 func TestPaddedIdentifier_UpsertsOntoTheRowItAlreadyWrote(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -222,6 +224,7 @@ func TestPaddedIdentifier_UpsertsOntoTheRowItAlreadyWrote(t *testing.T) {
 // turns "   " into "" and therefore what makes the refusal happen at all; without it the guard
 // stops guarding and a blank-titled issue lands in the customer's backlog.
 func TestWhitespaceOnlyTitle_IsRefusedNotImported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -264,6 +267,7 @@ func TestWhitespaceOnlyTitle_IsRefusedNotImported(t *testing.T) {
 // transports because the two mappers name their title column differently (`Title` vs
 // `Summary`+`Title` fallback) even though they share one columnIndex.
 func TestPaddedHeader_StillFindsEveryColumn(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		sourceType string

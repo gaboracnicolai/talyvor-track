@@ -22,6 +22,7 @@ const shippedWorkCSV = "Summary,Description,Status,Priority,Labels\n" +
 	"A real backlog item,d,Backlog,Low,bug\n"
 
 func TestJobRow_CarriesTheWarnings(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -64,6 +65,7 @@ func TestJobRow_CarriesTheWarnings(t *testing.T) {
 // The other direction, so the column cannot pass by always being full: a fully recognised import
 // stores an EMPTY array, never NULL (the column is NOT NULL and Get must not invent a nil).
 func TestJobRow_CleanImportStoresEmptyWarnings(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -113,6 +115,7 @@ func TestJobRow_CleanImportStoresEmptyWarnings(t *testing.T) {
 // longer reports the run as clean. This test pins BOTH halves so a future merge that starts
 // mapping "Deployed" has to come here and say so.
 func TestJobRow_FinishedIssuesStillLandAsBacklogButAreReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

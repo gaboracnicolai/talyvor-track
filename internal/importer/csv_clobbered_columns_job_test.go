@@ -104,6 +104,7 @@ func warningMentioning(job *importer.Job, needle string) string {
 // which is the outcome the queue entry asks for — and the warnings below are then describing
 // something that no longer occurs. Delete them together, not separately.
 func TestJobRow_JiraCSV_ANarrowerReimportEmptiesTheClobberedColumns(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -133,6 +134,7 @@ func TestJobRow_JiraCSV_ANarrowerReimportEmptiesTheClobberedColumns(t *testing.T
 // ─── the report ─────────────────────────────────────────────────────────────
 
 func TestJobRow_JiraCSV_ANarrowerReimportIsReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -174,6 +176,7 @@ func TestJobRow_JiraCSV_ANarrowerReimportIsReported(t *testing.T) {
 }
 
 func TestJobRow_LinearCSV_ANarrowerReimportIsReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -197,6 +200,7 @@ func TestJobRow_LinearCSV_ANarrowerReimportIsReported(t *testing.T) {
 
 // A FIRST import of the narrow export overwrites nothing: there is no stored row.
 func TestJobRow_JiraCSV_AFirstNarrowImportIsNotReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -215,6 +219,7 @@ func TestJobRow_JiraCSV_AFirstNarrowImportIsNotReported(t *testing.T) {
 // A re-import of an export that DOES carry both columns overwrites them with what the provider
 // actually said, which is the behaviour the conflict arm is for.
 func TestJobRow_JiraCSV_AWideReimportIsNotReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

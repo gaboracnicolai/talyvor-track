@@ -27,6 +27,7 @@ func jiraAPIPage(issues ...string) string {
 // none of which mapJiraStatus knows. Today all four are `backlog` rows in Postgres. After this
 // merge the rows carry what Jira actually said, and the job row names the path that decided it.
 func TestJobRow_JiraAPI_CategoryResolvesTheStatusInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -103,6 +104,7 @@ func TestJobRow_JiraAPI_CategoryResolvesTheStatusInPostgres(t *testing.T) {
 // the line an operator reads to learn that the category code did not run on their tenant, and it is
 // the whole reason the read is not silent.
 func TestJobRow_JiraAPI_NoCategoryIsReportedNotHidden(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

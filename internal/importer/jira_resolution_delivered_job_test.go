@@ -34,6 +34,7 @@ const jiraCSVDeliveredRows = "Summary,Description,Status,Priority,Resolution,Res
 	"Abandoned row,d,Closed,High,Won't Fix,23/Mar/2026 4:59 PM\n"
 
 func TestJobRow_JiraCSV_FixedIsNotReportedAndStillLandsDelivered(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

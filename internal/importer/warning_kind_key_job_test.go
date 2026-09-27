@@ -40,6 +40,7 @@ func jiraCSVWithFreeTextStatusCategory(n int) string {
 }
 
 func TestJobRow_AFreeTextStatusCategoryDoesNotUnboundTheWarningsColumn(t *testing.T) {
+	t.Parallel()
 	const rows = 400
 	d := testutil.New(t)
 	ctx := context.Background()
@@ -104,6 +105,7 @@ func TestJobRow_AFreeTextStatusCategoryDoesNotUnboundTheWarningsColumn(t *testin
 // different Track statuses stay two findings with their own counts, because Mapped is still in the
 // group key and the category is what decides it.
 func TestJobRow_ResolvableCategoriesStillReportSeparatelyWithTheirCounts(t *testing.T) {
+	t.Parallel()
 	const per = 5
 	d := testutil.New(t)
 	ctx := context.Background()

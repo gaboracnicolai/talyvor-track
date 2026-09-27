@@ -105,6 +105,7 @@ func readIssueTitle(t *testing.T, d *testutil.DB, wsID, identifier string) strin
 // the policy for a colliding key turns out to be, a job that put ZERO issues in the team it was
 // asked to fill must not say `succeeded imported=2`.
 func TestJobRow_AnImportIntoAnotherTeamDoesNotReportRowsThatTeamNeverGot(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	teamA := d.Team(t, ws.ID)
@@ -133,6 +134,7 @@ func TestJobRow_AnImportIntoAnotherTeamDoesNotReportRowsThatTeamNeverGot(t *test
 // importer declined to write is #71's Refused (the job's `skipped`), never `failed` — that split is
 // the whole of dcfbaa3 and this refusal must not re-create the state it ended.
 func TestJobRow_AnImportIntoAnotherTeamCountsTheRowsAsRefused(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	teamA := d.Team(t, ws.ID)
@@ -156,6 +158,7 @@ func TestJobRow_AnImportIntoAnotherTeamCountsTheRowsAsRefused(t *testing.T) {
 // to name the thing they can act on. "already exists" sends someone to look for a duplicate; the
 // truth is that the issue is in another team of the same workspace and this import did not move it.
 func TestJobRow_AnImportIntoAnotherTeamSaysWHICHTeamHasTheIssue(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	teamA := d.Team(t, ws.ID)
@@ -183,6 +186,7 @@ func TestJobRow_AnImportIntoAnotherTeamSaysWHICHTeamHasTheIssue(t *testing.T) {
 // TestJobRow_ACollidingKeyFromAnotherProviderDoesNotOverwriteTheOtherTeamsIssues is the data half.
 // The three columns the conflict arm clobbers are the three an unrelated project overwrites.
 func TestJobRow_ACollidingKeyFromAnotherProviderDoesNotOverwriteTheOtherTeamsIssues(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	teamA := d.Team(t, ws.ID)
@@ -218,6 +222,7 @@ func TestJobRow_ACollidingKeyFromAnotherProviderDoesNotOverwriteTheOtherTeamsIss
 // A re-import into THE SAME TEAM still updates the row it already wrote. This is #98/#99's whole
 // merge and the reason both CSV transports read their key column.
 func TestJobRow_AReimportIntoTheSameTeamStillUpdates(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)
@@ -243,6 +248,7 @@ func TestJobRow_AReimportIntoTheSameTeamStillUpdates(t *testing.T) {
 // #71's OWN refusal keeps its own sentence. A human-created issue whose key an import collides with
 // is a different refusal from this one and the operator has to be able to tell them apart.
 func TestJobRow_TheNativeCollisionRefusalKeepsItsOwnSentence(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -283,6 +289,7 @@ func TestJobRow_TheNativeCollisionRefusalKeepsItsOwnSentence(t *testing.T) {
 // branches — an order every test above is blind to, because in all of them the human's issue and
 // the import share a team. C6 flips that order and this is the only thing that moves.
 func TestJobRow_AHumanIssueInAnotherTeamIsStillTheNativeRefusal(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -310,6 +317,7 @@ func TestJobRow_AHumanIssueInAnotherTeamIsStillTheNativeRefusal(t *testing.T) {
 // does exist in two workspaces at once — which is the ordinary state, not an exotic one. C7 drops
 // the scope and this is the only thing that moves.
 func TestJobRow_TheRefusalMessageNamesNoOtherWorkspacesTeam(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	other := d.Workspace(t)
 	otherTeam := d.Team(t, other.ID)

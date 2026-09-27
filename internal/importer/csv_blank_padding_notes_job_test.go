@@ -108,6 +108,7 @@ func countedIn(warnings []string, column string) int {
 }
 
 func TestBlankPaddingCell_IsNotCountedAsAPopulatedColumn(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -160,6 +161,7 @@ func TestBlankPaddingCell_IsNotCountedAsAPopulatedColumn(t *testing.T) {
 // on purpose: a gate that reported NOTHING would satisfy every "not 2" assertion above. A trim that
 // swallowed real values would be a worse bug than the one this file guards.
 func TestBlankPaddingCell_TheGoodRowIsStillReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

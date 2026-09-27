@@ -59,6 +59,7 @@ func TestJobRow_JiraCSV_WideRowFixturePremise(t *testing.T) {
 // BEFORE: {status:"succeeded", imported:1, failed:0} and a warnings column that never mentioned the
 // row, while `issues.description` held the string "label2".
 func TestJobRow_JiraCSV_AWideRowIsReportedToTheOperator(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -105,6 +106,7 @@ func TestJobRow_JiraCSV_AWideRowIsReportedToTheOperator(t *testing.T) {
 // TestJobRow_JiraCSV_AnExactWidthImportCarriesNoRowShapeWarning is the must-stay-green companion at
 // the job layer. Without it, a note that fired on every import would satisfy the assertions above.
 func TestJobRow_JiraCSV_AnExactWidthImportCarriesNoRowShapeWarning(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ws := d.Workspace(t)
 	team := d.Team(t, ws.ID)

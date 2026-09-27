@@ -82,6 +82,7 @@ func runJiraCSVTwoDigitYearImport(t *testing.T, d *testutil.DB, body string) str
 
 // TestJobRow_JiraCSVTwoDigitYear_KeepsTheDateJiraOpenedIt is the column half.
 func TestJobRow_JiraCSVTwoDigitYear_KeepsTheDateJiraOpenedIt(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, created, _, _ := jiraCSVTwoDigitYearFixture()
@@ -102,6 +103,7 @@ func TestJobRow_JiraCSVTwoDigitYear_KeepsTheDateJiraOpenedIt(t *testing.T) {
 // TestJobRow_JiraCSVTwoDigitYear_ResolvedAndDueLand is the pair the column half cannot infer:
 // completed_at and due_date are the two the analytics surfaces select on.
 func TestJobRow_JiraCSVTwoDigitYear_ResolvedAndDueLand(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, _, resolved, due := jiraCSVTwoDigitYearFixture()
@@ -134,6 +136,7 @@ func TestJobRow_JiraCSVTwoDigitYear_ResolvedAndDueLand(t *testing.T) {
 // one that shows the compound silence: with BOTH dates refused the issue is not merely wrong in
 // the report, it is absent from it.
 func TestJobRow_JiraCSVTwoDigitYear_CycleTimeIsReported(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	body, _, _, _ := jiraCSVTwoDigitYearFixture()

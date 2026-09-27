@@ -66,6 +66,7 @@ func runLinearCSVDueDateImport(t *testing.T, d *testutil.DB, wsID, teamID, body 
 
 // TestJobRow_LinearCSV_ImportedIssueKeepsTheDateLinearSaidItWasDue — the column half.
 func TestJobRow_LinearCSV_ImportedIssueKeepsTheDateLinearSaidItWasDue(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -106,6 +107,7 @@ func TestJobRow_LinearCSV_ImportedIssueKeepsTheDateLinearSaidItWasDue(t *testing
 // about whose plan wins. If this test goes red, the decision was made — check it was made on
 // purpose.
 func TestJobRow_LinearCSV_ARepeatedImportDoesNotMoveTheDueDate(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

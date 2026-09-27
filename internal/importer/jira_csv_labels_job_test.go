@@ -62,6 +62,7 @@ func readIssueLabelsByTitle(t *testing.T, d *testutil.DB, wsID string) map[strin
 }
 
 func TestJobRow_JiraCSV_EveryRepeatedLabelColumnLandsInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -121,6 +122,7 @@ func TestJobRow_JiraCSV_EveryRepeatedLabelColumnLandsInPostgres(t *testing.T) {
 // column still round-trips its comma-joined cell, and an export with NO Labels column writes an
 // empty array rather than a NULL the read path would have to special-case.
 func TestJobRow_JiraCSV_SingleAndAbsentLabelColumnsAreUnchanged(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -161,6 +163,7 @@ func TestJobRow_JiraCSV_SingleAndAbsentLabelColumnsAreUnchanged(t *testing.T) {
 // "a zero from an instrument that read nothing" class. This records, in the test output, that the
 // rows really were written and read back through the real schema.
 func TestJobRow_JiraCSV_LabelsHarnessReallyReachesPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

@@ -43,6 +43,7 @@ func adfJobIssue(key, adf string) string {
 }
 
 func TestJobRow_JiraAPI_ALinkedURLIsInThePostgresSearchIndex(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)

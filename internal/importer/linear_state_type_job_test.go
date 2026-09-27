@@ -29,6 +29,7 @@ func linearAPIPage(nodes ...string) string { return linPage(false, "", nodes...)
 // reports itself clean — #72's "data loss reported as success", on the provider this item has left
 // untouched through four merges.
 func TestJobRow_LinearAPI_StateTypeResolvesTheStatusInPostgres(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
@@ -105,6 +106,7 @@ func TestJobRow_LinearAPI_StateTypeResolvesTheStatusInPostgres(t *testing.T) {
 // That line is the only thing that distinguishes "this code did not run" from "your states all
 // resolved", and it is the entire reason the read is not silent.
 func TestJobRow_LinearAPI_NoStateTypeIsReportedNotHidden(t *testing.T) {
+	t.Parallel()
 	d := testutil.New(t)
 	ctx := context.Background()
 	ws := d.Workspace(t)
