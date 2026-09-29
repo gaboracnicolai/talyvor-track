@@ -22,6 +22,8 @@ services:
       - TRACK_LENS_MINT_KEY=${TRACK_LENS_MINT_KEY:-}
       - TRACK_LENS_WEBHOOK_SECRET=${TRACK_LENS_WEBHOOK_SECRET:-}
       - TRACK_LENS_DASHBOARD_URL=${TRACK_LENS_DASHBOARD_URL:-}
+      # The model the AI actions ask Lens for; empty = claude-haiku-4-5 (internal/ai DefaultModel).
+      - TRACK_AI_MODEL=${TRACK_AI_MODEL:-}
       - TRACK_GITHUB_WEBHOOK_SECRET=${TRACK_GITHUB_WEBHOOK_SECRET:-}
       # ⚠ THE THREE BELOW WERE READ BY THE PROCESS AND DECLARED NOWHERE. Same mechanism as the
       # secrets above: this service has an explicit `environment:` list and no `env_file:`, so a

@@ -288,6 +288,7 @@ func main() {
 	// engine. issueStore doubles as the full-text fallback for
 	// semantic search; pool is needed for the issue_embeddings table.
 	aiEngine := ai.New(lensClient, issueStore, pool, cfg.LensMintKey)
+	aiEngine.UseModel(cfg.AIModel)
 	aiHandler := ai.NewHandler(aiEngine, issueStore)
 
 	// Automation engine. Slack notifier is the only side-channel —

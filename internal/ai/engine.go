@@ -67,6 +67,11 @@ type fullTextSearcher interface {
 	Search(ctx context.Context, workspaceID, query string, limit int) ([]model.Issue, error)
 }
 
+// DefaultModel is the Anthropic model Track's AI actions — triage, duplicate detection and thread
+// summaries — ask Lens for. B23.11: they asked for "claude-haiku-4-6", which does not exist, so
+// every one of them failed. TRACK_AI_MODEL overrides it (see UseModel).
+const DefaultModel = "claude-haiku-4-5"
+
 type Engine struct {
 	lens        lensAccess
 	creds       tokenProvider
@@ -76,6 +81,7 @@ type Engine struct {
 	// is used by lenscreds, never by this struct.
 	mintKey    string
 	httpClient *http.Client
+	model      string
 
 	// Thread summary cache: issueID → cached entry. Bounded by the
 	// number of long threads in the workspace, which is small in
@@ -138,7 +144,16 @@ func newEngineWithMint(lens lensAccess, creds tokenProvider, issueSearch fullTex
 		pool:         db,
 		mintKey:      mintKey,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		model:        DefaultModel,
 		summaryCache: make(map[string]cachedSummary),
+	}
+}
+
+// UseModel sets the model the AI actions ask Lens for (TRACK_AI_MODEL); an empty name keeps
+// DefaultModel.
+func (e *Engine) UseModel(name string) {
+	if name = strings.TrimSpace(name); name != "" {
+		e.model = name
 	}
 }
 
@@ -317,7 +332,7 @@ func (e *Engine) TriageIssue(ctx context.Context, issue model.Issue) (*TriageRes
 		return nil, ErrAIUnavailable
 	}
 	user := issue.Title + "\n\n" + issue.Description
-	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, "claude-haiku-4-6", triageSystemPrompt, user, 512)
+	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, e.model, triageSystemPrompt, user, 512)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +385,7 @@ Return [] if no candidate describes the same problem.`
 	user := fmt.Sprintf("New issue:\n%s\n\n%s\n\nExisting issues:\n%s",
 		issue.Title, issue.Description, candidateList.String())
 
-	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, "claude-haiku-4-6", system, user, 1024)
+	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, e.model, system, user, 1024)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +467,7 @@ func (e *Engine) SummarizeThread(ctx context.Context, issue model.Issue, comment
 }`
 	user := "Issue: " + issue.Title + "\n\nThread:\n" + thread.String()
 
-	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, "claude-haiku-4-6", system, user, 1024)
+	raw, err := e.callAnthropicViaLens(ctx, issue.WorkspaceID, issue.Identifier, e.model, system, user, 1024)
 	if err != nil {
 		return nil, err
 	}

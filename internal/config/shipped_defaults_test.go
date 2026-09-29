@@ -98,6 +98,7 @@ func TestShippedDefaults_AnEmptyEnvironmentProducesExactlyThis(t *testing.T) {
 		{"LensMintKey", c.LensMintKey, "", "empty ⇒ no per-workspace token minting"},
 		{"LensWebhookSecret", c.LensWebhookSecret, "", "empty ⇒ unsigned alerts are not accepted"},
 		{"LensDashboardURL", c.LensDashboardURL, "", "empty ⇒ no lens_url link is emitted at all"},
+		{"AIModel", c.AIModel, "", "empty ⇒ the AI actions ask Lens for ai.DefaultModel (claude-haiku-4-5)"},
 		{"RedisURL", c.RedisURL, "", "empty ⇒ ignored, because HAEnabled is false"},
 		{"MemberSyncSecret", c.MemberSyncSecret, "", "empty ⇒ /v1/service/members 401s everything"},
 	}

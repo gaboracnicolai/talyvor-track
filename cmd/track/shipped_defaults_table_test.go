@@ -42,6 +42,7 @@ var recordedDefaults = map[string]recordedDefault{
 	"internal/importer/job_handler.go::jobMaxUploadBytes":  {"64 << 20", "upload cap on the async import job. census: UNPINNED"},
 
 	// ── OPERATOR-FACING.
+	"internal/ai/engine.go::DefaultModel":           {`"claude-haiku-4-5"`, "MODEL triage, duplicate detection and thread summaries ask Lens for when TRACK_AI_MODEL is unset; a name Lens does not serve fails all three (B23.11). census: PINNED (TestTheAIActionsAskLensForAModelItServes)"},
 	"internal/guest/handler.go::inviteBaseURL#1":    {`"http://localhost:5173"`, "the prefix stitched into EVERY invite link when TRACK_INVITE_BASE_URL is unset — it is emitted to a human. census: UNPINNED"},
 	"internal/importer/linear.go::defaultLinearURL": {`"https://api.linear.app/graphql"`, "the HOST this service talks to when none is configured. census: PINNED (TestLinearDefaultEndpoint_IsPinned)"},
 	"internal/importer/linear.go::url#1":            {"defaultLinearURL", "wiring: the constant above is what an unconfigured client uses"},

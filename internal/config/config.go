@@ -43,6 +43,9 @@ type Config struct {
 	// be two values that must agree with nothing comparing them. So the destination is
 	// declared, or there is no link. TRACK_LENS_DASHBOARD_URL.
 	LensDashboardURL string
+	// AIModel is the model Track's AI actions ask Lens for; empty means ai.DefaultModel.
+	// TRACK_AI_MODEL.
+	AIModel string
 
 	// LensWebhookFreshness (SEC-7) is the max age of a Lens spend alert's signed
 	// emitted_at; an older alert is rejected by the webhook (a replay guard for
@@ -136,6 +139,7 @@ func Load() (*Config, error) {
 		LensMintKey:          os.Getenv("TRACK_LENS_MINT_KEY"),
 		LensWebhookSecret:    os.Getenv("TRACK_LENS_WEBHOOK_SECRET"),
 		LensDashboardURL:     strings.TrimSpace(os.Getenv("TRACK_LENS_DASHBOARD_URL")),
+		AIModel:              strings.TrimSpace(os.Getenv("TRACK_AI_MODEL")),
 		GatewayAuthSecret:    os.Getenv("GATEWAY_AUTH_SECRET"),
 		HAEnabled:            parseBool(os.Getenv("TRACK_HA_ENABLED")),
 		RedisURL:             os.Getenv("TRACK_REDIS_URL"),
