@@ -326,3 +326,76 @@ func TestEstimateIssueCost_ReturnsReasonableEstimates(t *testing.T) {
 		})
 	}
 }
+
+// modelCheckingLens is a Lens that, like the real one, refuses a model it does not serve, and
+// answers each of the three AI actions with a well-formed reply. It records the models asked for.
+func modelCheckingLens(t *testing.T, serves string, asked *[]string) *httptest.Server {
+	t.Helper()
+	return lensMock(t, map[string]http.HandlerFunc{
+		"/v1/proxy/anthropic/v1/messages": func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Model  string `json:"model"`
+				System string `json:"system"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			*asked = append(*asked, body.Model)
+			if body.Model != serves {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":"unknown model: `+body.Model+`"}`)
+				return
+			}
+			switch {
+			case strings.Contains(body.System, "triage"):
+				_, _ = io.WriteString(w, anthropicResp(`{"suggested_priority":2,"suggested_labels":["bug"],"summary":"s","confidence":0.8}`))
+			case strings.Contains(body.System, "duplicate"):
+				_, _ = io.WriteString(w, anthropicResp(`[{"issue_id":"i-old","similarity":0.9}]`))
+			default:
+				_, _ = io.WriteString(w, anthropicResp(`{"summary":"s","key_points":["k"],"next_action":"n","sentiment":"neutral"}`))
+			}
+		},
+	})
+}
+
+func runTheThreeAIActions(t *testing.T, engine *Engine) {
+	t.Helper()
+	ctx := context.Background()
+	if got, err := engine.TriageIssue(ctx, model.Issue{ID: "i-1", Identifier: "ENG-1", Title: "t"}); err != nil || got == nil {
+		t.Fatalf("triage: %v / %+v", err, got)
+	}
+	dups, err := engine.FindDuplicates(ctx, model.Issue{Identifier: "ENG-2", Title: "t"},
+		[]model.Issue{{ID: "i-old", Identifier: "ENG-3", Title: "t"}})
+	if err != nil || len(dups) != 1 {
+		t.Fatalf("duplicates: %v / %+v", err, dups)
+	}
+	comments := make([]model.Comment, 12)
+	for i := range comments {
+		comments[i] = model.Comment{Body: "c"}
+	}
+	if got, err := engine.SummarizeThread(ctx, model.Issue{ID: "i-4", Identifier: "ENG-4", Title: "t"}, comments); err != nil || got == nil {
+		t.Fatalf("summary: %v / %+v", err, got)
+	}
+}
+
+// B23.11 — triage, duplicates and thread summaries each ask Lens for a model it serves, and each
+// returns a result through a Lens that refuses any other.
+func TestTheAIActionsAskLensForAModelItServes(t *testing.T) {
+	var asked []string
+	srv := modelCheckingLens(t, "claude-haiku-4-5", &asked)
+	runTheThreeAIActions(t, New(lensintegration.New(srv.URL, "tlv_test"), nil, nil, testMintKey))
+	if len(asked) != 3 {
+		t.Fatalf("Lens was asked %d times (%v), want once per action", len(asked), asked)
+	}
+}
+
+// B23.11 — TRACK_AI_MODEL (UseModel) changes the model all three ask for; an empty one keeps the default.
+func TestUseModelOverridesTheModelTheAIActionsAskFor(t *testing.T) {
+	var asked []string
+	srv := modelCheckingLens(t, "claude-sonnet-4-6", &asked)
+	engine := New(lensintegration.New(srv.URL, "tlv_test"), nil, nil, testMintKey)
+	engine.UseModel("  ")
+	if engine.model != DefaultModel {
+		t.Fatalf("an empty override changed the model to %q", engine.model)
+	}
+	engine.UseModel("claude-sonnet-4-6")
+	runTheThreeAIActions(t, engine)
+}
