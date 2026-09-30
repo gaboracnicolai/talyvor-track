@@ -365,6 +365,15 @@ func (e *Engine) FindDuplicates(ctx context.Context, issue model.Issue, candidat
 	if !e.IsAvailable() {
 		return nil, ErrAIUnavailable
 	}
+	// The issue is its team's newest, so a recency window holds it; offered, it is named as its
+	// own duplicate (B17.18).
+	others := make([]model.Issue, 0, len(candidates))
+	for _, c := range candidates {
+		if issue.ID == "" || c.ID != issue.ID {
+			others = append(others, c)
+		}
+	}
+	candidates = others
 	if len(candidates) == 0 {
 		return nil, nil
 	}
@@ -399,20 +408,26 @@ Return [] if no candidate describes the same problem.`
 		return nil, fmt.Errorf("ai: duplicates parse: %w (raw: %q)", err, raw)
 	}
 
-	// Index candidates by ID so we can return Identifier + Title.
-	byID := make(map[string]model.Issue, len(candidates))
+	// Index candidates by ID and by identifier so we can return Identifier + Title: the model
+	// names a candidate by either, and claude-haiku-4-5 mostly by the identifier (B17.18).
+	byID := make(map[string]model.Issue, 2*len(candidates))
 	for _, c := range candidates {
 		byID[c.ID] = c
+		if c.Identifier != "" {
+			byID[c.Identifier] = c
+		}
 	}
 	var out []DuplicateCandidate
+	named := make(map[string]bool, len(matches))
 	for _, m := range matches {
 		if m.Similarity < duplicateThreshold {
 			continue
 		}
 		c, ok := byID[m.IssueID]
-		if !ok {
+		if !ok || named[c.ID] {
 			continue
 		}
+		named[c.ID] = true
 		out = append(out, DuplicateCandidate{
 			IssueID:    c.ID,
 			Identifier: c.Identifier,
