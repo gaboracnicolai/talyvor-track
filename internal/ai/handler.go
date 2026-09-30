@@ -117,11 +117,12 @@ func (h *Handler) FindDuplicates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Pull a recency-ordered candidate window so we don't ship the
-	// entire issue tree to the LLM. 20 is plenty for triage.
+	// entire issue tree to the LLM. 20 is plenty for triage; one more,
+	// because the window holds the issue itself and FindDuplicates drops it.
 	candidates, _ := h.issues.List(r.Context(), issue.IssueFilter{
 		WorkspaceID: wsID,
 		TeamID:      iss.TeamID,
-		Limit:       20,
+		Limit:       21,
 		OrderBy:     "created_at",
 		OrderDir:    "desc",
 	})

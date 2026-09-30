@@ -161,6 +161,42 @@ func TestFindDuplicates_ReturnsCandidatesAboveThreshold(t *testing.T) {
 	}
 }
 
+// B17.18: claude-haiku-4-5 names a candidate by its identifier ("ENG-100") far more often than by
+// its id — 4 answers in 5, measured on the prompt below — and the window holds the issue itself,
+// since it is the team's newest. So the twin must be found by identifier, and the issue never
+// offered, nor named, as its own duplicate.
+func TestFindDuplicates_NamesTheTwinByIdentifierAndNeverTheIssueItself(t *testing.T) {
+	var prompt string
+	srv := lensMock(t, map[string]http.HandlerFunc{
+		"/v1/proxy/anthropic/v1/messages": func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			prompt = string(b)
+			_, _ = io.WriteString(w, anthropicResp("```json\n"+`[
+                {"issue_id":"ENG-200","similarity":1.0},
+                {"issue_id":"ENG-100","similarity":0.95}
+            ]`+"\n```"))
+		},
+	})
+	lens := lensintegration.New(srv.URL, "tlv_test")
+	engine := New(lens, nil, nil, testMintKey)
+
+	self := model.Issue{ID: "i-new", Identifier: "ENG-200", Title: "Checkout times out when the cart holds 50 items"}
+	candidates := []model.Issue{
+		self,
+		{ID: "i-old-1", Identifier: "ENG-100", Title: "Checkout for tester times out when the cart holds 50 items"},
+	}
+	got, err := engine.FindDuplicates(context.Background(), self, candidates)
+	if err != nil {
+		t.Fatalf("FindDuplicates: %v", err)
+	}
+	if len(got) != 1 || got[0].IssueID != "i-old-1" || got[0].Identifier != "ENG-100" {
+		t.Fatalf("got %+v, want only ENG-100 (i-old-1)", got)
+	}
+	if strings.Contains(prompt, "i-new") {
+		t.Errorf("the issue was offered to the model as its own candidate: %s", prompt)
+	}
+}
+
 func TestFindDuplicates_ReturnsEmptyWhenNoDuplicates(t *testing.T) {
 	srv := lensMock(t, map[string]http.HandlerFunc{
 		"/v1/proxy/anthropic/v1/messages": func(w http.ResponseWriter, _ *http.Request) {
