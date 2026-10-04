@@ -1,8 +1,10 @@
 # Talyvor Track
 
-**AI-native issue tracker — the only issue tracker that shows you what your AI development actually costs.**
+**AI-native issue tracker — see what your AI development costs, issue by issue, including the work your agents do.**
 
 Track is a fast, keyboard-first issue tracker built around one idea: if your team is using LLMs (Claude, Codex, custom agents) to write code, you should be able to see how much that costs *per issue* — not just on a billing dashboard, not just at the org level. Tracker rows show LLM spend the way Jira shows story points.
+
+That includes your agents' AI work. When an agent's model call goes through Talyvor Lens tagged with the issue it is working on (`X-Talyvor-Issue: ENG-42`, or `X-Talyvor-Feature: ENG-42` when tagging by hand), its spend lands on that issue next to your team's — so you can see what an agent cost to close a ticket, not just that it closed it.
 
 It integrates natively with [Talyvor Lens](https://github.com/gaboracnicolai/talyvor-lens) for cost attribution and exposes an MCP server so AI agents can create, update, and triage issues without leaving the terminal.
 
