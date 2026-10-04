@@ -389,6 +389,10 @@ var routesWithNoSPACaller = map[string]string{
 	"POST /v1/workspaces/{}/teams/{}/cycles/{}/complete":       "NO CALLER ANYWHERE IN THE ESTATE",
 	"POST /v1/workspaces/{}/teams/{}/cycles/{}/suggest-issues": "NO CALLER ANYWHERE IN THE ESTATE",
 	"POST /v1/workspaces/{}/teams/{}/statuses":                 "NO CALLER ANYWHERE IN THE ESTATE",
+	"DELETE /v1/workspaces/{}/issue-boards/{}":                 "talyvor-suite BFF — B27.30, DELETE /api/track/boards/{id} (turn a board link off)",
+	"GET /v1/public/issue-boards/{}":                           "talyvor-suite BFF — B27.30, GET /api/public/boards/{token} (the signed-out board page)",
+	"GET /v1/workspaces/{}/issue-boards":                       "talyvor-suite BFF — B27.30, GET /api/track/boards (the workspace's live links)",
+	"POST /v1/workspaces/{}/issue-boards":                      "talyvor-suite BFF — B27.30, POST /api/track/boards (turn a board link on)",
 }
 
 func TestRoutesWithNoSPACallerAreTheKnownSet(t *testing.T) {

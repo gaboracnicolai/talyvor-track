@@ -192,12 +192,14 @@ var exemptRoutes = map[string]string{
 	"Post /v1/public/boards/{wsSlug}/{boardSlug}/posts":                 "ANONYMOUS WRITE. Same b.public filter, plus board.AllowAnonymous: a board that has not opted in requires an author email.",
 	"Post /v1/public/boards/{wsSlug}/{boardSlug}/posts/{postID}/vote":   "ANONYMOUS WRITE. Same b.public filter.",
 	"Delete /v1/public/boards/{wsSlug}/{boardSlug}/posts/{postID}/vote": "ANONYMOUS WRITE. Same b.public filter.",
+	"Get /v1/public/issue-boards/{token}":                               "ANONYMOUS BY DESIGN (B27.30), READ-ONLY. issueboard.Store.Public resolves the token with `sh.revoked_at IS NULL` and `w.deleted_at IS NULL`, and answers only identifier, title, status, priority and updated_at of that workspace's issues (or one project's).",
 }
 
 // totalRoutes is recorded so the census cannot silently start covering a fraction of the tree.
 // +1 B18.30: POST /v1/workspaces/{wsID}/restore
 // +1 B18.36: GET /v1/workspaces/{wsID}/teams/{teamID}/cycles/{id}/plan
-const totalRoutes = 138
+// +4 B27.30: the issue-board links (list, create, revoke) and GET /v1/public/issue-boards/{token}
+const totalRoutes = 142
 
 func exemptSubset(t *testing.T) []string {
 	t.Helper()
