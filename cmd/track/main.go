@@ -44,6 +44,7 @@ import (
 	"github.com/talyvor/track/internal/importer"
 	"github.com/talyvor/track/internal/integrations"
 	"github.com/talyvor/track/internal/issue"
+	"github.com/talyvor/track/internal/issueboard"
 	"github.com/talyvor/track/internal/label"
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/mcp"
@@ -250,6 +251,8 @@ func main() {
 	// issue" admin action can spawn a Track issue from a post.
 	featureBoardStore := featureboard.NewStore(pool)
 	featureBoardHandler := featureboard.NewHandler(featureBoardStore, issueStore)
+	// B27.30 — read-only issue boards behind a link (anonymous read under /v1/public/).
+	issueBoardHandler := issueboard.NewHandler(issueboard.NewStore(pool))
 	// Guest store: invite + accept lives here; the access tokens are
 	// stateless HMAC-signed. TRACK_GUEST_SECRET is the HMAC key when set;
 	// unset, every process shares one key generated once and stored in the
@@ -505,6 +508,7 @@ func main() {
 		scoringHandler.Mount(r)
 		guestHandler.Mount(r)
 		featureBoardHandler.Mount(r)
+		issueBoardHandler.Mount(r)
 
 		// Inbound webhook from Lens. Validated via HMAC-SHA256 of the
 		// request body with the shared secret — see

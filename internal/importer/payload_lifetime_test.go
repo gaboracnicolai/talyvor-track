@@ -174,7 +174,7 @@ func TestMeasured_TheWorkspaceChildTablesThatRefuseADelete(t *testing.T) {
 	}
 	wantCascade := []string{
 		"custom_fields", "feature_boards", "feature_posts", "guest_invites", "guests",
-		"issue_scores", "issue_templates",
+		"issue_board_shares", "issue_scores", "issue_templates",
 	}
 
 	if strings.Join(restrict, ",") != strings.Join(wantRestrict, ",") {
