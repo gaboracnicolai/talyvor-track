@@ -1,0 +1,102 @@
+# Test-only Envoy front proxy for deploy/helm/kind-test.sh. Routes by Host:
+# track.local -> the track Service, docs.local -> the docs Service. Published on
+# NodePort 30080, which the kind config maps to the host.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy
+data:
+  envoy.yaml: |
+    static_resources:
+      listeners:
+        - name: http
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 10000 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress
+                    route_config:
+                      virtual_hosts:
+                        - name: track
+                          domains: ["track.local", "track.local:*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route: { cluster: track }
+                        - name: docs
+                          domains: ["docs.local", "docs.local:*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route: { cluster: docs }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: track
+          type: STRICT_DNS
+          connect_timeout: 2s
+          load_assignment:
+            cluster_name: track
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: track.talyvor.svc.cluster.local, port_value: 3000 }
+        - name: docs
+          type: STRICT_DNS
+          connect_timeout: 2s
+          load_assignment:
+            cluster_name: docs
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: docs.talyvor.svc.cluster.local, port_value: 4000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: envoy
+  template:
+    metadata:
+      labels:
+        app: envoy
+    spec:
+      containers:
+        - name: envoy
+          # The Envoy edge-infra's edge-proxy chart pins (deploy/local/lib.sh).
+          image: envoyproxy/envoy:v1.30.0@sha256:d7d501253a93f0b5fce8e0d3a24f3bef67372c50ed7ea922279c72fc1200be58
+          ports:
+            - containerPort: 10000
+          readinessProbe:
+            tcpSocket:
+              port: 10000
+            periodSeconds: 2
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy
+      volumes:
+        - name: config
+          configMap:
+            name: envoy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+spec:
+  type: NodePort
+  selector:
+    app: envoy
+  ports:
+    - port: 10000
+      targetPort: 10000
+      nodePort: 30080

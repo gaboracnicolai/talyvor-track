@@ -1,0 +1,111 @@
+# Default values for the Talyvor Track chart.
+# Default install = ONE replica, EXTERNAL Postgres, secrets by reference,
+# migrations applied by an init container.
+
+# -- Number of replicas. Migrations take a Postgres advisory lock, so more
+# than one replica migrating at once is safe.
+replicaCount: 1
+
+image:
+  # -- Published by .github/workflows/ci.yaml (build-image) on every push to main.
+  repository: ghcr.io/gaboracnicolai/talyvor-track
+  # -- `latest` or a 40-char commit sha. A production install should pin the sha.
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling private images (list of {name: ...}).
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  # -- Defaults to the fullname when create is true.
+  name: ""
+  annotations: {}
+
+# -- The port Track listens on (TRACK_LISTEN_ADDR is set from it).
+containerPort: 3000
+
+service:
+  type: ClusterIP
+  port: 3000
+  annotations: {}
+
+# -- Non-secret settings, rendered as plain env vars. Example:
+#   TRACK_LOG_LEVEL: info
+#   TRACK_LENS_URL: http://lens:8080
+env: {}
+
+secret:
+  # -- Name of a pre-existing Secret to read env from. RECOMMENDED. When empty,
+  # Track reads "<fullname>-env", which you create unless secret.create is true.
+  # It must hold TRACK_DATABASE_URL and GATEWAY_AUTH_SECRET (>= 16 chars,
+  # `openssl rand -hex 32`); every other TRACK_* secret is optional.
+  existingSecret: ""
+  # -- DEV/TEST ONLY: create the Secret from secret.data. Leave false in production.
+  create: false
+  # -- DEV/TEST ONLY: key/value pairs for the created Secret.
+  data: {}
+
+migrations:
+  # -- Run `track migrate up` in an init container before the server starts.
+  # Set false to run migrations yourself.
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- The image's `track` user is uid 100 / gid 101.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+  fsGroup: 101
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+# /livez is always 200 while serving; /readyz pings Postgres and turns 503 on
+# shutdown, so a draining or DB-less pod leaves the Service.
+probes:
+  liveness:
+    enabled: true
+    path: /livez
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

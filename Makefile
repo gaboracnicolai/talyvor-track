@@ -3,7 +3,7 @@
 # `make up` brings the full stack online; `make dev` runs the backend
 # and frontend directly on the host for fast iteration.
 
-.PHONY: up down dev test vet build tidy run frontend-dev frontend-build logs clean
+.PHONY: up down dev test vet build tidy run frontend-dev frontend-build logs clean helm-lint helm-kind
 
 up:
 	docker compose up -d
@@ -43,3 +43,11 @@ logs:
 
 clean:
 	rm -rf bin/ frontend/dist/
+
+# The Track and Docs Helm charts (deploy/helm). helm-kind installs both on a
+# throwaway kind cluster behind Envoy and checks each /healthz through it.
+helm-lint:
+	helm lint --strict deploy/helm/track deploy/helm/docs
+
+helm-kind:
+	deploy/helm/kind-test.sh

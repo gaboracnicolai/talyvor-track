@@ -1,0 +1,73 @@
+name: Charts
+
+# Lints the Track and Docs Helm charts, then installs both on a throwaway kind
+# cluster behind Envoy and checks that each /healthz answers 200 through it
+# (deploy/helm/kind-test.sh). Track is built from the commit under test; Docs is
+# talyvor-docs' published `latest`, which moves without a commit here, so the
+# job also runs nightly.
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/helm/**'
+      # Everything the Track image is built from.
+      - 'Dockerfile'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'migrations/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/charts.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/helm/**'
+      - 'Dockerfile'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'migrations/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/charts.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: charts-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The same pinned, checksum-verified versions as edge-infra's kind-e2e.
+      - name: Install kind, kubectl, helm (pinned + checksum-verified)
+        env:
+          KIND_VERSION: v0.31.0
+          KIND_SHA256: eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa
+          KUBECTL_VERSION: v1.35.0
+          KUBECTL_SHA256: a2e984a18a0c063279d692533031c1eff93a262afcc0afdc517375432d060989
+          HELM_VERSION: v4.2.0
+          HELM_SHA256: 97dbeb971be4ac4b27e3839976d9564c0fb35c6f3b1da89dd1e292d236af4096
+        run: |
+          set -euo pipefail
+          curl -fsSL -o kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum -c -
+          sudo install -m 0755 kind /usr/local/bin/kind
+          curl -fsSL -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
+          sudo install -m 0755 kubectl /usr/local/bin/kubectl
+          curl -fsSL -o helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tar.gz" | sha256sum -c -
+          tar -xzf helm.tar.gz linux-amd64/helm
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          kind version; kubectl version --client; helm version
+      - name: helm lint --strict
+        run: make helm-lint
+      - name: Track and Docs /healthz through Envoy on kind
+        run: make helm-kind

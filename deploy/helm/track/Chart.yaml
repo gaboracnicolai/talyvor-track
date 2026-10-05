@@ -1,0 +1,25 @@
+apiVersion: v2
+name: track
+description: |
+  Talyvor Track — issues, projects and cycles. Default install = one replica
+  against an external Postgres (with the pgvector extension available), secrets
+  supplied by reference, and `track migrate up` run as an init container before
+  the server starts.
+type: application
+
+# Chart version — bump on any chart change (SemVer).
+version: 0.1.0
+
+# CI publishes two kinds of image tag, `latest` and the commit sha; there are no
+# semver image tags, so values.yaml defaults image.tag to `latest` rather than
+# to this field.
+appVersion: "0.1.0"
+
+home: https://github.com/gaboracnicolai/talyvor-track
+sources:
+  - https://github.com/gaboracnicolai/talyvor-track
+maintainers:
+  - name: Talyvor Platform
+keywords:
+  - talyvor
+  - track

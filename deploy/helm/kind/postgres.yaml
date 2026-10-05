@@ -1,0 +1,64 @@
+# Test-only Postgres for deploy/helm/kind-test.sh: one pgvector server holding
+# a `track` and a `docs` database. No volume — the cluster is thrown away.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+data:
+  10-databases.sql: |
+    CREATE DATABASE track;
+    CREATE DATABASE docs;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          # The same image Track's CI tests against: migration 0007 needs `vector`.
+          image: pgvector/pgvector:pg16
+          env:
+            - name: POSTGRES_USER
+              value: talyvor
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: password
+          ports:
+            - containerPort: 5432
+          # Over TCP on purpose: the image's first-boot init server listens on
+          # the unix socket only, so a socket probe goes ready before the init
+          # scripts have run and the real server has started.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "talyvor"]
+            periodSeconds: 2
+          volumeMounts:
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
