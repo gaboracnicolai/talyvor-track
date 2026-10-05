@@ -497,7 +497,12 @@ func main() {
 		// internal/member/workspaces.go for why a full-deployment dump is acceptable HERE and not on
 		// the sibling roster read.
 		member.NewWorkspacesHandler(member.NewStore(pool), cfg.MemberSyncSecret).Mount(r)
-		member.NewMgmtHandler(member.NewStore(pool)).Mount(r) // multi-member: owner-gated /v1/workspaces/{wsID}/members (list/add/change-role/remove)
+		// B32.70: with Lens deployed, an add past the plan's seats is refused with Lens's words.
+		mgmtStore := member.NewStore(pool)
+		if lensClient.IsConfigured() {
+			mgmtStore = mgmtStore.WithSeats(lensClient)
+		}
+		member.NewMgmtHandler(mgmtStore).Mount(r) // multi-member: owner-gated /v1/workspaces/{wsID}/members (list/add/change-role/remove)
 		if integrationHandler != nil {
 			integrationHandler.Mount(r) // T8 Build C.1: POST /integrations + GET /integrations/{provider}
 		}
