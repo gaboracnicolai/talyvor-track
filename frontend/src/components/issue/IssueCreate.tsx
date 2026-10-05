@@ -56,12 +56,11 @@ export function IssueCreate({ open, onClose, initialTemplate }: IssueCreateProps
   );
 
   const submit = async () => {
+    // Enter and the button share this path, so a second Enter while the
+    // first create is in flight must not file the issue twice.
+    if (createMutation.isPending) return;
     if (!title.trim()) {
       toast("Title is required", "warn");
-      return;
-    }
-    if (!chosenTeam) {
-      toast("No team selected", "error");
       return;
     }
     for (const f of requiredFields) {
@@ -76,10 +75,13 @@ export function IssueCreate({ open, onClose, initialTemplate }: IssueCreateProps
       // we still send field_values so the user's overrides are
       // honoured even if the template changes between dialog open
       // and submit.
-      await createMutation.mutateAsync({
+      // No team yet (the teams list is still loading) is not a refusal:
+      // the server files into the workspace's sole team, and says so when
+      // there is no single team to choose.
+      const created = await createMutation.mutateAsync({
         title: title.trim(),
         description: description.trim(),
-        team_id: chosenTeam,
+        team_id: chosenTeam || undefined,
         creator_id: memberId,
         priority: (template?.default_priority ?? 0) as 0 | 1 | 2 | 3 | 4,
         status: (template?.default_status ?? "todo") as
@@ -97,6 +99,7 @@ export function IssueCreate({ open, onClose, initialTemplate }: IssueCreateProps
       setDescription("");
       setFieldValues({});
       setTemplate(null);
+      toast(`Created ${created.identifier || created.title}`, "success");
       onClose();
     } catch {
       // toast is fired by the hook's onError
@@ -113,13 +116,24 @@ export function IssueCreate({ open, onClose, initialTemplate }: IssueCreateProps
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+            // The title is one line, so Enter means "create". An IME still
+            // composing uses Enter to pick a character, not to submit.
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            }
           }}
         />
         <textarea
           placeholder="Description (markdown supported)"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
           className="h-32 w-full resize-none rounded-md border border-border bg-bg px-3 py-2 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent"
         />
         {requiredFields.length > 0 ? (
