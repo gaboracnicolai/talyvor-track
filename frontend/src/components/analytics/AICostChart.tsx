@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import { Sparkles } from "lucide-react";
 import type { AICostTrends } from "~/api/types";
+import { chart } from "~/components/ui/chartTheme";
 
 interface AICostChartProps {
   trends: AICostTrends;
@@ -47,21 +48,17 @@ export function AICostChart({ trends }: AICostChartProps) {
         <AreaChart data={data}>
           <defs>
             <linearGradient id="aiCostFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f0a030" stopOpacity={0.4} />
-              <stop offset="100%" stopColor="#f0a030" stopOpacity={0} />
+              <stop offset="0%" stopColor={chart.primary} stopOpacity={0.4} />
+              <stop offset="100%" stopColor={chart.primary} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="#1d2230" strokeDasharray="3 3" />
-          <XAxis dataKey="date" stroke="#7a8294" fontSize={10} />
-          <YAxis stroke="#7a8294" fontSize={10} />
+          <CartesianGrid stroke={chart.grid} strokeDasharray="3 3" />
+          <XAxis dataKey="date" stroke={chart.axis} fontSize={10} />
+          <YAxis stroke={chart.axis} fontSize={10} />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "#13161c",
-              border: "1px solid #1d2230",
-              fontSize: 12,
-            }}
+            contentStyle={chart.tooltip}
           />
-          <Area type="monotone" dataKey="Cost" stroke="#f0a030" fill="url(#aiCostFill)" />
+          <Area type="monotone" dataKey="Cost" stroke={chart.primary} fill="url(#aiCostFill)" />
         </AreaChart>
       </ResponsiveContainer>
     </div>

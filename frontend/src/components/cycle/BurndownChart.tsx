@@ -9,6 +9,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import type { BurndownReport } from "~/api/types";
+import { chart } from "~/components/ui/chartTheme";
 
 interface BurndownChartProps {
   report: BurndownReport;
@@ -36,22 +37,18 @@ export function BurndownChart({ report }: BurndownChartProps) {
       </div>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={data}>
-          <CartesianGrid stroke="#1d2230" strokeDasharray="3 3" />
-          <XAxis dataKey="date" stroke="#7a8294" fontSize={10} />
-          <YAxis stroke="#7a8294" fontSize={10} />
+          <CartesianGrid stroke={chart.grid} strokeDasharray="3 3" />
+          <XAxis dataKey="date" stroke={chart.axis} fontSize={10} />
+          <YAxis stroke={chart.axis} fontSize={10} />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "#13161c",
-              border: "1px solid #1d2230",
-              fontSize: 12,
-            }}
+            contentStyle={chart.tooltip}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Line type="monotone" dataKey="Remaining" stroke="#f0a030" strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="Remaining" stroke={chart.primary} strokeWidth={2} dot={false} />
           <Line
             type="monotone"
             dataKey="Ideal"
-            stroke="#7a8294"
+            stroke={chart.axis}
             strokeDasharray="5 5"
             strokeWidth={1}
             dot={false}

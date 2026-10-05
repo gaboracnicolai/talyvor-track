@@ -154,7 +154,7 @@ function CheckboxEditor({
       onClick={() => onChange(checked ? "false" : "true")}
       className={clsx(
         "flex h-5 w-5 items-center justify-center rounded border",
-        checked ? "border-accent bg-accent text-bg" : "border-border bg-bg",
+        checked ? "border-accent bg-accent text-on-accent" : "border-border bg-bg",
       )}
     >
       {checked ? <Check size={12} strokeWidth={3} /> : null}

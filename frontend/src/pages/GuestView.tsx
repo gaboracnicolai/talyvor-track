@@ -6,6 +6,7 @@ import { PriorityIcon } from "~/components/issue/PriorityIcon";
 import { AICostBadge } from "~/components/issue/AICostBadge";
 import { FooterBranding } from "./InviteAccept";
 import type { Issue } from "~/api/types";
+import { TrackBrand } from "~/components/ui/Brand";
 
 interface GuestViewProps {
   workspaceID: string;
@@ -37,10 +38,7 @@ export function GuestViewPage({ workspaceID, projectID }: GuestViewProps) {
     <div className="flex min-h-screen flex-col bg-bg text-text">
       <header className="flex items-center justify-between border-b border-border bg-surface px-4 py-3">
         <div className="flex items-center gap-2">
-          <div className="flex h-6 w-6 items-center justify-center rounded bg-accent text-bg">
-            <span className="font-mono text-xs font-bold">T</span>
-          </div>
-          <span className="text-sm font-semibold">Talyvor Track</span>
+          <TrackBrand />
         </div>
         <span className="text-[10px] uppercase tracking-wider text-muted">Guest access</span>
       </header>

@@ -8,6 +8,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import type { CycleVelocity } from "~/api/types";
+import { chart } from "~/components/ui/chartTheme";
 
 interface VelocityChartProps {
   cycles: CycleVelocity[];
@@ -24,18 +25,14 @@ export function VelocityChart({ cycles }: VelocityChartProps) {
   return (
     <ResponsiveContainer width="100%" height={240}>
       <BarChart data={data}>
-        <CartesianGrid stroke="#1d2230" strokeDasharray="3 3" />
-        <XAxis dataKey="name" stroke="#7a8294" fontSize={10} />
-        <YAxis stroke="#7a8294" fontSize={10} />
+        <CartesianGrid stroke={chart.grid} strokeDasharray="3 3" />
+        <XAxis dataKey="name" stroke={chart.axis} fontSize={10} />
+        <YAxis stroke={chart.axis} fontSize={10} />
         <Tooltip
-          contentStyle={{
-            backgroundColor: "#13161c",
-            border: "1px solid #1d2230",
-            fontSize: 12,
-          }}
+          contentStyle={chart.tooltip}
         />
-        <Bar dataKey="Completed" stackId="a" fill="#22c55e" />
-        <Bar dataKey="Remaining" stackId="a" fill="#3d4250" />
+        <Bar dataKey="Completed" stackId="a" fill={chart.positive} />
+        <Bar dataKey="Remaining" stackId="a" fill={chart.rest} />
       </BarChart>
     </ResponsiveContainer>
   );

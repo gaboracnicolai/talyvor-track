@@ -16,6 +16,7 @@ import { projectsApi } from "~/api/projects";
 import { useWorkspace } from "~/hooks/useWorkspace";
 import type { Route } from "~/App";
 import { Avatar } from "~/components/ui/Avatar";
+import { TrackBrand } from "~/components/ui/Brand";
 
 interface SidebarProps {
   route: Route;
@@ -52,10 +53,7 @@ export function Sidebar({ route, onNavigate }: SidebarProps) {
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-surface md:flex">
       <div className="flex h-12 items-center gap-2 border-b border-border px-4">
-        <div className="flex h-6 w-6 items-center justify-center rounded bg-accent text-bg">
-          <span className="font-mono text-xs font-bold">T</span>
-        </div>
-        <span className="text-sm font-semibold">Talyvor Track</span>
+        <TrackBrand />
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2">
@@ -66,7 +64,7 @@ export function Sidebar({ route, onNavigate }: SidebarProps) {
               onClick={() => onNavigate(r)}
               className={clsx(
                 "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm",
-                route === r ? "bg-bg text-text" : "text-muted hover:bg-bg hover:text-text",
+                route === r ? "bg-accent-tint text-accent" : "text-muted hover:bg-bg hover:text-text",
               )}
             >
               <Icon size={14} />
