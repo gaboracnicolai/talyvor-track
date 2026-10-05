@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/talyvor/track/internal/authz"
+	"github.com/talyvor/track/internal/lensintegration"
 )
 
 // MgmtHandler serves the owner-gated member-management API at
@@ -117,11 +118,18 @@ func (h *MgmtHandler) Add(w http.ResponseWriter, r *http.Request) {
 		role = authz.RoleMember
 	}
 	m, err := h.store.AddMember(r.Context(), wsID, in.Email, role)
+	var refusal *lensintegration.SeatRefusal
 	switch {
 	case errors.Is(err, ErrInvalidRole):
 		writeErr(w, http.StatusBadRequest, "INVALID_ROLE", err.Error())
 	case errors.Is(err, ErrMemberExists):
 		writeErr(w, http.StatusConflict, "MEMBER_EXISTS", err.Error())
+	case errors.As(err, &refusal):
+		// Lens's words, unchanged: they name LENS_PLAN_GATES, the plan and the plan that would allow the add.
+		writeJSON(w, http.StatusPaymentRequired, map[string]any{"error": refusal.Message, "code": "PLAN_SEATS",
+			"plan": refusal.Plan, "limit": refusal.Limit, "allows": refusal.Allows})
+	case errors.Is(err, ErrSeatsUnchecked):
+		writeErr(w, http.StatusServiceUnavailable, "SEATS_UNCHECKED", err.Error())
 	case err != nil:
 		writeErr(w, http.StatusInternalServerError, "ADD_FAILED", err.Error())
 	default:

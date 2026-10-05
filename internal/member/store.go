@@ -29,9 +29,23 @@ type WorkspaceMember struct {
 	MemberID string `json:"member_id"`
 }
 
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool  *pgxpool.Pool
+	seats SeatChecker // nil when Track runs without Lens: no plan, so no seats to check
+}
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// SeatChecker answers whether a workspace's plan takes n members (lensintegration.Client.CheckSeats).
+type SeatChecker interface {
+	CheckSeats(ctx context.Context, workspaceID string, members int) error
+}
+
+// WithSeats makes AddMember ask c before every add. Removing a member is never gated.
+func (s *Store) WithSeats(c SeatChecker) *Store {
+	s.seats = c
+	return s
+}
 
 // ListWorkspaceMembers returns one workspace's members, projected to
 // (email, role, member_id), ordered by email. Mirrors the mcp membersStore
