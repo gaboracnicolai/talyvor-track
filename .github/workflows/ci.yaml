@@ -276,6 +276,8 @@ jobs:
         run: cd frontend && npm ci
       - name: Typecheck
         run: cd frontend && npm run typecheck
+      - name: Test
+        run: cd frontend && npm test
       # The SPA's request surface — verb, path, query keys, body fields — regenerated from the
       # TypeScript type checker and diffed against the committed JSON.
       #
