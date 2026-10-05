@@ -1,3 +1,12 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/talyvor-logo-dark.svg">
+    <img alt="Talyvor — AI work that compounds" src="docs/brand/talyvor-logo-light.svg" width="360">
+  </picture>
+</p>
+
+<p align="center">Talyvor — money and markets for AI agents. AI work that compounds.</p>
+
 # Talyvor Track
 
 **AI-native issue tracker — see what your AI development costs, issue by issue, including the work your agents do.**
