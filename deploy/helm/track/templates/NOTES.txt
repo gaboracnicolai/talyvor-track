@@ -1,0 +1,11 @@
+Talyvor Track is installed as {{ include "track.fullname" . }} in {{ .Release.Namespace }}.
+
+It reads its secrets from the Secret "{{ include "track.secretName" . }}"
+(TRACK_DATABASE_URL and GATEWAY_AUTH_SECRET are required).
+
+Check it answers:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "track.fullname" . }} {{ .Values.service.port }}
+  curl http://localhost:{{ .Values.service.port }}/healthz
+
+Every /v1 request must arrive through the edge gateway with x-gateway-auth;
+/healthz, /livez and /readyz answer without it.

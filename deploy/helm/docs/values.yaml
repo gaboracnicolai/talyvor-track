@@ -1,0 +1,98 @@
+# Default values for the Talyvor Docs chart.
+# Default install = ONE replica, EXTERNAL Postgres, secrets by reference.
+
+# -- Number of replicas. Boot-time migrations take a Postgres advisory lock,
+# so replicas starting together are safe.
+replicaCount: 1
+
+image:
+  # -- Published by talyvor-docs' CI on every push to its main.
+  repository: ghcr.io/gaboracnicolai/talyvor-docs
+  # -- `latest` or a 40-char commit sha. A production install should pin the sha.
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling private images (list of {name: ...}).
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  # -- Defaults to the fullname when create is true.
+  name: ""
+  annotations: {}
+
+# -- The port Docs listens on (DOCS_LISTEN_ADDR is set from it).
+containerPort: 4000
+
+service:
+  type: ClusterIP
+  port: 4000
+  annotations: {}
+
+# -- Non-secret settings, rendered as plain env vars. Example:
+#   DOCS_LOG_LEVEL: info
+#   DOCS_TRACK_URL: http://track:3000
+#   DOCS_ALLOWED_ORIGINS: https://app.example.com
+env: {}
+
+secret:
+  # -- Name of a pre-existing Secret to read env from. RECOMMENDED. When empty,
+  # Docs reads "<fullname>-env", which you create unless secret.create is true.
+  # It must hold DOCS_DATABASE_URL and GATEWAY_AUTH_SECRET (>= 16 chars,
+  # `openssl rand -hex 32`); every other DOCS_* secret is optional.
+  existingSecret: ""
+  # -- DEV/TEST ONLY: create the Secret from secret.data. Leave false in production.
+  create: false
+  # -- DEV/TEST ONLY: key/value pairs for the created Secret.
+  data: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- The image's `docs` user is uid/gid 10001.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+# /healthz never touches the database; /readyz pings it.
+probes:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

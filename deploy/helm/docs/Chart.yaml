@@ -1,0 +1,28 @@
+apiVersion: v2
+name: docs
+description: |
+  Talyvor Docs — the team's documents and wiki. Default install = one replica
+  against an external Postgres (with the pgvector extension available) and
+  secrets supplied by reference. Docs applies its own migrations at boot, under
+  an advisory lock, before it serves a request.
+
+  This chart lives in talyvor-track beside the Track chart (B28.212); the image
+  it deploys is built and published by talyvor-docs.
+type: application
+
+# Chart version — bump on any chart change (SemVer).
+version: 0.1.0
+
+# talyvor-docs publishes `latest` and the commit sha only, so values.yaml
+# defaults image.tag to `latest` rather than to this field.
+appVersion: "0.1.0"
+
+home: https://github.com/gaboracnicolai/talyvor-docs
+sources:
+  - https://github.com/gaboracnicolai/talyvor-docs
+  - https://github.com/gaboracnicolai/talyvor-track
+maintainers:
+  - name: Talyvor Platform
+keywords:
+  - talyvor
+  - docs

@@ -1,0 +1,11 @@
+Talyvor Docs is installed as {{ include "docs.fullname" . }} in {{ .Release.Namespace }}.
+
+It reads its secrets from the Secret "{{ include "docs.secretName" . }}"
+(DOCS_DATABASE_URL and GATEWAY_AUTH_SECRET are required).
+
+Check it answers:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "docs.fullname" . }} {{ .Values.service.port }}
+  curl http://localhost:{{ .Values.service.port }}/healthz
+
+Every /v1 request must arrive through the edge gateway with x-gateway-auth;
+/healthz and /readyz answer without it.
