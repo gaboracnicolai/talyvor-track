@@ -30,7 +30,7 @@ export function MilestoneMarker({ milestone, x }: MilestoneMarkerProps) {
       <polygon
         points={`0,-${size} ${size},0 0,${size} -${size},0`}
         fill={fill}
-        stroke="#0c0e12"
+        stroke="var(--tv-canvas)"
         strokeWidth={1}
       />
       <title>{tooltip}</title>

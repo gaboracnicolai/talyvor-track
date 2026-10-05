@@ -6,6 +6,7 @@ import { PostCard } from "~/components/board/PostCard";
 import { SubmitForm } from "~/components/board/SubmitForm";
 import { FooterBranding } from "./InviteAccept";
 import type { FeaturePost, FeaturePostStatus } from "~/api/types";
+import { BrandMark } from "~/components/ui/Brand";
 
 interface PublicBoardProps {
   wsSlug: string;
@@ -139,9 +140,7 @@ export function PublicBoardPage({ wsSlug, boardSlug }: PublicBoardProps) {
     <div className="flex min-h-screen flex-col bg-bg text-text">
       <header className="border-b border-border bg-surface px-6 py-4">
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-bg">
-            <span className="font-mono text-sm font-bold">T</span>
-          </div>
+          <BrandMark className="h-7 w-7 shrink-0" />
           <div className="flex-1">
             <h1 className="text-lg font-semibold">
               {board.data?.board.name ?? "Loading…"}

@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { guestsApi } from "~/api/guests";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { TrackBrand } from "~/components/ui/Brand";
 
 interface InviteAcceptProps {
   token: string;
@@ -40,10 +41,7 @@ export function InviteAcceptPage({ token, onAccepted }: InviteAcceptProps) {
     <div className="flex min-h-screen items-center justify-center bg-bg text-text">
       <div className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-surface p-6 shadow-xl">
         <div className="flex h-8 items-center gap-2">
-          <div className="flex h-6 w-6 items-center justify-center rounded bg-accent text-bg">
-            <span className="font-mono text-xs font-bold">T</span>
-          </div>
-          <span className="text-sm font-semibold">Talyvor Track</span>
+          <TrackBrand />
         </div>
 
         {invite.isLoading ? (

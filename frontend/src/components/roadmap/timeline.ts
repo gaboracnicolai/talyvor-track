@@ -100,28 +100,34 @@ function tickLabel(d: Date, zoom: ZoomLevel): string {
 }
 
 // projectColor picks a bar fill based on the project's lifecycle
-// status. Matches the colour tokens used elsewhere in the app.
+// status, from the brand tokens. The project name is drawn in ink on
+// top of the bar, so the status colour is mixed toward the raised
+// surface to keep that text readable.
 export function projectColor(status: string): string {
   switch (status) {
     case "completed":
-      return "#22c55e";
+      return tokenOnRaised("positive");
     case "planned":
     case "upcoming":
-      return "#5b6471";
+      return tokenOnRaised("label");
     case "cancelled":
-      return "#9ca3af";
+      return tokenOnRaised("ink-muted");
     default:
-      return "#3b82f6"; // active / in-progress
+      return tokenOnRaised("accent"); // active / in-progress
   }
+}
+
+function tokenOnRaised(token: string): string {
+  return `color-mix(in srgb, var(--tv-${token}) 45%, var(--tv-raised))`;
 }
 
 // milestoneColor picks a fill for the diamond marker based on the
 // milestone status. Overdue (target_date < today AND not completed)
 // is computed by the caller because it needs both fields.
 export function milestoneColor(status: string, overdue: boolean): string {
-  if (status === "completed") return "#22c55e";
-  if (overdue) return "#ef4444";
-  return "#7a8294";
+  if (status === "completed") return "var(--tv-positive)";
+  if (overdue) return "var(--tv-critical)";
+  return "var(--tv-ink-muted)";
 }
 
 // Row layout constants. Shared so column headers and rows align.

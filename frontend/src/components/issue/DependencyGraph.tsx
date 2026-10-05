@@ -58,10 +58,10 @@ export function DependencyGraph({ issueID, depth = 3 }: DependencyGraphProps) {
         <defs>
           {/* One marker per edge colour so arrowheads match their
               line. Pre-defined here so paint cost is fixed. */}
-          <ArrowMarker id="arrow-grey" color="#7a8294" />
-          <ArrowMarker id="arrow-red" color="#ef4444" />
-          <ArrowMarker id="arrow-purple" color="#a78bfa" />
-          <ArrowMarker id="arrow-green" color="#22c55e" />
+          <ArrowMarker id="arrow-grey" color="var(--tv-ink-muted)" />
+          <ArrowMarker id="arrow-red" color="var(--tv-critical)" />
+          <ArrowMarker id="arrow-purple" color="var(--tv-caution)" />
+          <ArrowMarker id="arrow-green" color="var(--tv-positive)" />
         </defs>
         <g transform={`translate(${(width * (1 - scale)) / 2}, ${(height * (1 - scale)) / 2}) scale(${scale})`}>
           {layout.edges.map((e, i) => {
@@ -97,7 +97,7 @@ export function DependencyGraph({ issueID, depth = 3 }: DependencyGraphProps) {
                 <circle
                   r={isRoot ? 22 : 16}
                   fill={statusColor(n.status)}
-                  stroke={isHighlighted ? "#f0a030" : isRoot ? "#f0a030" : "#1d2230"}
+                  stroke={isHighlighted || isRoot ? "var(--tv-accent)" : "var(--tv-line-strong)"}
                   strokeWidth={isHighlighted || isRoot ? 2 : 1}
                 />
                 <text
@@ -220,35 +220,32 @@ function computeLayout(nodes: GraphNode[], edges: GraphEdge[], rootID: string) {
   return { nodes: positioned, edges: layoutEdges };
 }
 
+// statusColor fills a node with its status token, mixed toward the
+// raised surface so the identifier drawn on it in ink stays readable.
 function statusColor(status: string): string {
-  switch (status) {
-    case "backlog":
-      return "#3d4250";
-    case "todo":
-      return "#5b6471";
-    case "in_progress":
-    case "in_review":
-      return "#3b82f6";
-    case "done":
-      return "#22c55e";
-    case "cancelled":
-      return "#9ca3af";
-    default:
-      return "#3d4250";
-  }
+  const token =
+    {
+      backlog: "ink-muted",
+      todo: "label",
+      in_progress: "accent",
+      in_review: "caution",
+      done: "positive",
+      cancelled: "critical",
+    }[status] ?? "ink-muted";
+  return `color-mix(in srgb, var(--tv-${token}) 35%, var(--tv-raised))`;
 }
 
 function edgeStroke(type: RelationType): string {
   switch (type) {
     case "blocks":
     case "blocked_by":
-      return "#ef4444";
+      return "var(--tv-critical)";
     case "duplicates":
-      return "#a78bfa";
+      return "var(--tv-caution)";
     case "clones":
-      return "#22c55e";
+      return "var(--tv-positive)";
     default:
-      return "#7a8294";
+      return "var(--tv-ink-muted)";
   }
 }
 

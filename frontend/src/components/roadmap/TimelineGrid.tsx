@@ -35,7 +35,7 @@ export function TimelineGrid({ cfg, height }: TimelineGridProps) {
       >
         {ticks.map((t, i) => (
           <g key={i}>
-            <line x1={t.x} x2={t.x} y1={0} y2={HEADER_HEIGHT} stroke="#1d2230" />
+            <line x1={t.x} x2={t.x} y1={0} y2={HEADER_HEIGHT} stroke="var(--tv-line)" />
             <text
               x={t.x + 6}
               y={HEADER_HEIGHT - 10}
@@ -59,7 +59,7 @@ export function TimelineGrid({ cfg, height }: TimelineGridProps) {
             top: 0,
             width: 1,
             height,
-            background: "#ef4444",
+            background: "var(--tv-critical)",
             zIndex: 5,
           }}
         />
