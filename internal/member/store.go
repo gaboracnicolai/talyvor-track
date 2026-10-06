@@ -36,9 +36,10 @@ type Store struct {
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// SeatChecker answers whether a workspace's plan takes n members (lensintegration.Client.CheckSeats).
+// SeatChecker answers whether the plan of the Lens workspace lensWorkspaceID takes n members
+// (lensintegration.Seats.CheckSeats).
 type SeatChecker interface {
-	CheckSeats(ctx context.Context, workspaceID string, members int) error
+	CheckSeats(ctx context.Context, lensWorkspaceID string, members int) error
 }
 
 // WithSeats makes AddMember ask c before every add. Removing a member is never gated.

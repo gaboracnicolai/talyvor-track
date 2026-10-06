@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/talyvor/track/internal/authz"
+	"github.com/talyvor/track/internal/gatewayauth"
 	"github.com/talyvor/track/internal/lensintegration"
 )
 
@@ -117,7 +118,10 @@ func (h *MgmtHandler) Add(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = authz.RoleMember
 	}
-	m, err := h.store.AddMember(r.Context(), wsID, in.Email, role)
+	// The seats asked about are those of the Lens workspace the gateway names (B32.73); none, and the add is
+	// refused as unchecked.
+	id, _ := gatewayauth.IdentityFrom(r.Context())
+	m, err := h.store.AddMember(r.Context(), wsID, id.LensWorkspace, in.Email, role)
 	var refusal *lensintegration.SeatRefusal
 	switch {
 	case errors.Is(err, ErrInvalidRole):

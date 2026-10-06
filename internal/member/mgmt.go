@@ -66,9 +66,10 @@ func (s *Store) ListMembers(ctx context.Context, workspaceID string) ([]model.Me
 // names the role and never relies on the DB default (lockout hazard a). name defaults to
 // the email (the gateway carries no name claim, exactly as workspace.CreateWithOwner
 // does). An address the workspace already has, in any case or spacing, returns ErrMemberExists; an off-tier
-// role returns ErrInvalidRole. With a SeatChecker, the plan is asked first with the count the workspace would
-// have, and its refusal (a *lensintegration.SeatRefusal) is returned unchanged with nothing written.
-func (s *Store) AddMember(ctx context.Context, workspaceID, email, role string) (*model.Member, error) {
+// role returns ErrInvalidRole. With a SeatChecker, the plan of lensWorkspaceID — the Lens workspace the caller's
+// plan is billed under, never workspaceID, which Track minted — is asked first with the count the workspace
+// would have, and its refusal (a *lensintegration.SeatRefusal) is returned unchanged with nothing written.
+func (s *Store) AddMember(ctx context.Context, workspaceID, lensWorkspaceID, email, role string) (*model.Member, error) {
 	if !ValidRole(role) {
 		return nil, ErrInvalidRole
 	}
@@ -95,7 +96,7 @@ func (s *Store) AddMember(ctx context.Context, workspaceID, email, role string) 
 		if exists {
 			return nil, ErrMemberExists
 		}
-		if err := s.seats.CheckSeats(ctx, workspaceID, n+1); err != nil {
+		if err := s.seats.CheckSeats(ctx, lensWorkspaceID, n+1); err != nil {
 			var refusal *lensintegration.SeatRefusal
 			if errors.As(err, &refusal) {
 				return nil, refusal
