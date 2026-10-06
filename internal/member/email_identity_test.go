@@ -59,10 +59,10 @@ func TestMemberEmail_AddMemberRefusesASecondSpelling(t *testing.T) {
 	ws := newAcmeWorkspace(t, d, "acme-add", "owner@acme.com")
 	ms := member.NewStore(d.Pool)
 
-	if _, err := ms.AddMember(ctx, ws.ID, "Bob@Acme.com", "member"); err != nil {
+	if _, err := ms.AddMember(ctx, ws.ID, "", "Bob@Acme.com", "member"); err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
-	if _, err := ms.AddMember(ctx, ws.ID, " bob@acme.com", "owner"); !errors.Is(err, member.ErrMemberExists) {
+	if _, err := ms.AddMember(ctx, ws.ID, "", " bob@acme.com", "owner"); !errors.Is(err, member.ErrMemberExists) {
 		t.Errorf("AddMember of a second spelling = %v, want ErrMemberExists", err)
 	}
 	var n int

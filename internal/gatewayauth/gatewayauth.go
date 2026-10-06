@@ -27,6 +27,9 @@ const (
 	HeaderUserID      = "X-User-Id"      // JWT sub — auth-system user id (NOT Track's member.id)
 	HeaderUserTeams   = "X-User-Teams"   // JWT teams claim, comma-separated
 	HeaderAuthIss     = "X-Auth-Iss"     // JWT issuer
+	// HeaderLensWorkspace is the caller's Lens workspace — the one its plan is billed under (B32.73). The suite
+	// BFF sets it from the session; Track mints its own workspace ids, so they are never the Lens one.
+	HeaderLensWorkspace = "X-Lens-Workspace"
 )
 
 // MinSecretLen is the shortest shared secret this boundary will defend. It mirrors the
@@ -45,6 +48,8 @@ type Identity struct {
 	UserID string
 	Teams  string
 	Issuer string
+	// LensWorkspace is the Lens workspace the caller's plan is billed under; empty when the gateway sent none.
+	LensWorkspace string
 }
 
 type ctxKey struct{}
@@ -117,6 +122,8 @@ func Middleware(secret string, exempt func(path string) bool) func(http.Handler)
 				UserID: r.Header.Get(HeaderUserID),
 				Teams:  r.Header.Get(HeaderUserTeams),
 				Issuer: r.Header.Get(HeaderAuthIss),
+
+				LensWorkspace: r.Header.Get(HeaderLensWorkspace),
 			}
 			next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
 		})

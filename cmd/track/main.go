@@ -46,6 +46,7 @@ import (
 	"github.com/talyvor/track/internal/issue"
 	"github.com/talyvor/track/internal/issueboard"
 	"github.com/talyvor/track/internal/label"
+	"github.com/talyvor/track/internal/lenscreds"
 	"github.com/talyvor/track/internal/lensintegration"
 	"github.com/talyvor/track/internal/mcp"
 	"github.com/talyvor/track/internal/member"
@@ -497,10 +498,16 @@ func main() {
 		// internal/member/workspaces.go for why a full-deployment dump is acceptable HERE and not on
 		// the sibling roster read.
 		member.NewWorkspacesHandler(member.NewStore(pool), cfg.MemberSyncSecret).Mount(r)
-		// B32.70: with Lens deployed, an add past the plan's seats is refused with Lens's words.
+		// B32.70: with Lens deployed, an add past the plan's seats is refused with Lens's words. B32.73: the plan
+		// asked about is the Lens workspace's the gateway names, with a token minted for it; no mint key, and
+		// every add is refused as unchecked rather than let through.
 		mgmtStore := member.NewStore(pool)
 		if lensClient.IsConfigured() {
-			mgmtStore = mgmtStore.WithSeats(lensClient)
+			var seatTokens lensintegration.TokenSource
+			if cfg.LensMintKey != "" {
+				seatTokens = lenscreds.New(lensClient.BaseURL(), cfg.LensMintKey)
+			}
+			mgmtStore = mgmtStore.WithSeats(lensintegration.NewSeats(lensClient, seatTokens))
 		}
 		member.NewMgmtHandler(mgmtStore).Mount(r) // multi-member: owner-gated /v1/workspaces/{wsID}/members (list/add/change-role/remove)
 		if integrationHandler != nil {
