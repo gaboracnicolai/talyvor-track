@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -56,10 +57,27 @@ type Config struct {
 	// GatewayAuthSecret is Track's copy of the edge gateway's transit-proof secret
 	// (edge-infra GATEWAY_AUTH_SECRET). The auth middleware constant-time-compares the
 	// inbound x-gateway-auth header against it to prove a request transited the gateway
-	// before any gateway-injected identity header is trusted. REQUIRED, fail-closed:
-	// Track refuses to start without it — starting without it would mean trusting
-	// spoofable identity headers.
+	// before any gateway-injected identity header is trusted. REQUIRED, fail-closed, unless
+	// transit assertions are configured (below): Track refuses to start without it —
+	// starting without it would mean trusting spoofable identity headers.
 	GatewayAuthSecret string
+
+	// Signed transit assertions (B28.442). Behind edge-infra's gateway, x-gateway-auth is no
+	// longer the shared secret: auth-service signs a 30s EdDSA JWT per request and publishes
+	// its public key. Setting EITHER of these switches Track to verifying that assertion
+	// (gatewayauth.TransitMiddleware), and GatewayAuthSecret is then neither required nor
+	// consulted. Both empty ⇒ the shared-secret check above, as before.
+	//   TRACK_TRANSIT_JWKS_URL — where auth-service publishes the JWKS
+	//     (http://auth-service.<ns>:9090/.well-known/transit-jwks.json); fetched again when
+	//     an assertion names a key Track does not hold.
+	//   TRACK_TRANSIT_JWKS — the gateway's public key inline: that JWKS document, or a PEM
+	//     public key. For when :9090 is closed to Track by auth-service's networkPolicy.
+	// Parsed at boot into TransitKeys, so a malformed key fails here, not on the first request.
+	TransitJWKSURL string
+	TransitKeys    gatewayauth.StaticTransitKeys
+	// TransitIssuer is the iss the assertions must carry: auth-service's TRANSIT_ISSUER.
+	// TRACK_TRANSIT_ISSUER; default "edge-gateway".
+	TransitIssuer string
 
 	// High-availability realtime fan-out (T13). HAEnabled (TRACK_HA_ENABLED) is
 	// strictly opt-in and OFF by default — when off, Track runs as a single
@@ -147,12 +165,32 @@ func Load() (*Config, error) {
 		LensDashboardURL:     strings.TrimSpace(os.Getenv("TRACK_LENS_DASHBOARD_URL")),
 		AIModel:              strings.TrimSpace(os.Getenv("TRACK_AI_MODEL")),
 		GatewayAuthSecret:    os.Getenv("GATEWAY_AUTH_SECRET"),
+		TransitJWKSURL:       strings.TrimSpace(os.Getenv("TRACK_TRANSIT_JWKS_URL")),
+		TransitIssuer:        getEnv("TRACK_TRANSIT_ISSUER", gatewayauth.DefaultTransitIssuer),
 		HAEnabled:            parseBool(os.Getenv("TRACK_HA_ENABLED")),
 		RedisURL:             os.Getenv("TRACK_REDIS_URL"),
 		LensWebhookFreshness: getEnvDuration("TRACK_LENS_WEBHOOK_FRESHNESS", 5*time.Minute),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("%w: TRACK_DATABASE_URL", ErrMissingEnv)
+	}
+	if v := strings.TrimSpace(os.Getenv("TRACK_TRANSIT_JWKS")); v != "" {
+		if c.TransitJWKSURL != "" {
+			return nil, fmt.Errorf("%w: set TRACK_TRANSIT_JWKS or TRACK_TRANSIT_JWKS_URL, not both", ErrMissingEnv)
+		}
+		keys, err := gatewayauth.ParseTransitKeys(v)
+		if err != nil {
+			return nil, fmt.Errorf("%w: TRACK_TRANSIT_JWKS: %v", ErrMissingEnv, err)
+		}
+		c.TransitKeys = keys
+	}
+	if c.TransitJWKSURL != "" {
+		if u, err := url.Parse(c.TransitJWKSURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("%w: TRACK_TRANSIT_JWKS_URL must be an http(s) URL", ErrMissingEnv)
+		}
+	}
+	if c.TransitEnabled() {
+		return c.loadOptional()
 	}
 	// Fail closed: the auth trust boundary depends on this secret. Unset or shorter
 	// than the gateway's minimum → refuse to start rather than run insecure.
@@ -167,6 +205,17 @@ func Load() (*Config, error) {
 			"repo and is permanently compromised — it is in git history, so it cannot be made "+
 			"secret again. Generate a fresh value: openssl rand -hex 32", ErrMissingEnv)
 	}
+	return c.loadOptional()
+}
+
+// TransitEnabled reports whether Track verifies signed transit assertions rather than
+// comparing x-gateway-auth to GatewayAuthSecret.
+func (c *Config) TransitEnabled() bool {
+	return c.TransitJWKSURL != "" || len(c.TransitKeys) > 0
+}
+
+// loadOptional reads the settings that do not depend on how the gateway proves transit.
+func (c *Config) loadOptional() (*Config, error) {
 	// Integration token-encryption key — OPTIONAL, but if provided it must decode to exactly 32 bytes.
 	// Fail-LOUD at boot on a misconfigured key (wrong length / not base64), never a broken-crypto surprise at
 	// first use. Absent ⇒ IntegrationEncryptionKey stays nil ⇒ the integration store is disabled.

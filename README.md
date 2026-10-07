@@ -121,6 +121,11 @@ from-zero database with the workspace, member and team seeded:
   port can *claim* to be you, only something that transited the gateway can prove it. There is
   no default and there never will be: an earlier one was shipped in this repo's compose file
   and is now permanently rejected, because git history cannot be un-published.
+- **Behind edge-infra's gateway** the transit proof is not a shared secret: the gateway signs a
+  30-second, single-use assertion for each request. Give Track the gateway's public key with
+  `TRACK_TRANSIT_JWKS_URL` (or `TRACK_TRANSIT_JWKS`) and it accepts a request only with an
+  assertion minted for that method, host and path, for the `X-User-Id` it carries, and only once;
+  the identity then comes from the signed assertion. See `.env.example`.
 - **`X-User-Email`** is the workspace-member join key. It must already be a member of the
   `workspace_id` you are importing into; an unknown address is `403`, not an implicit invite.
 

@@ -454,7 +454,24 @@ func main() {
 		// NOTE: /v1/ws is intentionally NOT exempt — it must pass gwAuth+wsAuthz so ServeWS can authorize
 		// the requested workspace from the verified context (was an unauthenticated cross-tenant leak).
 	}
-	gwAuth := gatewayauth.Middleware(cfg.GatewayAuthSecret, gwExempt)
+	var gwAuth func(http.Handler) http.Handler
+	if cfg.TransitEnabled() {
+		// B28.442: behind edge-infra's gateway the proof is a signed, single-use assertion
+		// verified against the gateway's public key, not the shared secret.
+		var keys gatewayauth.TransitKeys = cfg.TransitKeys
+		if cfg.TransitJWKSURL != "" {
+			jwks := gatewayauth.NewJWKSURLKeys(cfg.TransitJWKSURL, nil)
+			if err := jwks.Refresh(ctx); err != nil {
+				slog.Warn("gatewayauth: transit JWKS not reachable at boot; fetching again on the first request",
+					"url", cfg.TransitJWKSURL, "err", err)
+			}
+			keys = jwks
+		}
+		gwAuth = gatewayauth.TransitMiddleware(gatewayauth.NewTransitVerifier(keys, cfg.TransitIssuer), gwExempt)
+		slog.Info("gatewayauth: verifying signed transit assertions", "issuer", cfg.TransitIssuer, "jwks_url", cfg.TransitJWKSURL)
+	} else {
+		gwAuth = gatewayauth.Middleware(cfg.GatewayAuthSecret, gwExempt)
+	}
 	wsAuthz := authz.Middleware(authz.NewPGResolver(pool), gwExempt)
 
 	// MCP (T11b): behind the SAME chain as /v1 — a request reaches a tool only with a valid

@@ -1,0 +1,6 @@
+{
+  "_minted_by": "edge-infra auth-service/src/transit.rs (origin/main 85c16af), TransitSigner::from_pkcs8(<fresh Ed25519 key>, \"edge-gateway\", 30).sign_at(Vouch{sub: \"auth0|alice\", amr: \"jwt\", idp: \"https://idp.example.com/\", email: \"alice@corp.com\", teams: [eng, ops], method: \"GET\", host: \"track.example.com\", path: \"/v1/workspaces?limit=5\"}, iat). The private key was discarded.",
+  "iat": 1790000000,
+  "jwks": {"keys":[{"alg":"EdDSA","crv":"Ed25519","kid":"ePr3pXKmgtJDhC6W","kty":"OKP","use":"sig","x":"czOQ__Wvb2To8xRFthTRVzbbEFkHo-7yR9S4Hl5ZrpA"}]},
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSIsImtpZCI6ImVQcjNwWEttZ3RKRGhDNlcifQ.eyJpc3MiOiJlZGdlLWdhdGV3YXkiLCJzdWIiOiJhdXRoMHxhbGljZSIsImFtciI6Imp3dCIsImlkcCI6Imh0dHBzOi8vaWRwLmV4YW1wbGUuY29tLyIsImVtYWlsIjoiYWxpY2VAY29ycC5jb20iLCJ0ZWFtcyI6WyJlbmciLCJvcHMiXSwiaHRtIjoiR0VUIiwiaHR1IjoidHJhY2suZXhhbXBsZS5jb20vdjEvd29ya3NwYWNlcz9saW1pdD01IiwiaWF0IjoxNzkwMDAwMDAwLCJleHAiOjE3OTAwMDAwMzAsImp0aSI6IlNVek9BQkQ3NXRnV3FuS0xtd0I4RFEifQ.X7F_jzLvwOJgaU_TI0JKhf7Hg7w92kDpWUJygWB3n4SyKRWwMIB6QC8JblU2Vi2VgQWW_6XFuKTjZGy1BhPaDg"
+}
