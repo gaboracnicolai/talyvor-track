@@ -67,3 +67,24 @@ func TestLoad_LensDashboardURL(t *testing.T) {
 		t.Errorf("dashboard URL = %q, want the trimmed value", c.LensDashboardURL)
 	}
 }
+
+// B28.442: behind edge-infra's gateway Track is given the gateway's public key instead of the
+// shared secret, and boots without GATEWAY_AUTH_SECRET.
+func TestLoad_TransitJWKS_ReplacesTheSharedSecret(t *testing.T) {
+	t.Setenv("TRACK_DATABASE_URL", "postgres://x")
+	t.Setenv("GATEWAY_AUTH_SECRET", "")
+	t.Setenv("TRACK_TRANSIT_JWKS_URL", "")
+	t.Setenv("TRACK_TRANSIT_JWKS", `{"keys":[{"alg":"EdDSA","crv":"Ed25519","kid":"ePr3pXKmgtJDhC6W","kty":"OKP","use":"sig","x":"czOQ__Wvb2To8xRFthTRVzbbEFkHo-7yR9S4Hl5ZrpA"}]}`)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load with TRACK_TRANSIT_JWKS and no shared secret: %v", err)
+	}
+	if !cfg.TransitEnabled() || cfg.TransitKeys["ePr3pXKmgtJDhC6W"] == nil {
+		t.Fatalf("transit keys not loaded: %v", cfg.TransitKeys)
+	}
+
+	t.Setenv("TRACK_TRANSIT_JWKS", "not a key")
+	if _, err := config.Load(); !errors.Is(err, config.ErrMissingEnv) {
+		t.Errorf("malformed TRACK_TRANSIT_JWKS: err=%v, want ErrMissingEnv at boot", err)
+	}
+}

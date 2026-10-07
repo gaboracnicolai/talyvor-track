@@ -31,6 +31,8 @@ var recordedDefaults = map[string]recordedDefault{
 
 	// ── SECURITY BOUNDS.
 	"internal/gatewayauth/gatewayauth.go::MinSecretLen":      {"16", "shortest gateway transit secret the auth boundary will defend. census: PINNED"},
+	"internal/gatewayauth/transit.go::DefaultTransitIssuer":  {`"edge-gateway"`, "iss a transit assertion must carry: auth-service's TRANSIT_ISSUER default. Changing it refuses every assertion from a gateway left on its default. census: PINNED (config shipped-defaults row)"},
+	"internal/gatewayauth/transit.go::issuer#1":              {"DefaultTransitIssuer", "wiring"},
 	"internal/config/config.go::MinMemberSyncSecretLen":      {"16", "minimum strength of the token gating EVERY tenant's roster. census: PINNED"},
 	"internal/config/config.go::IntegrationEncryptionKeyLen": {"32", "AES-256 key length for per-workspace provider tokens. census: PINNED (W3.43's coupling test)"},
 

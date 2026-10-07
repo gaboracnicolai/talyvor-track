@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/talyvor/track/internal/config"
+	"github.com/talyvor/track/internal/gatewayauth"
 )
 
 // shipped_defaults_test.go — WHAT THIS PROCESS IS CONFIGURED AS WHEN THE OPERATOR SETS NOTHING.
@@ -102,6 +103,9 @@ func TestShippedDefaults_AnEmptyEnvironmentProducesExactlyThis(t *testing.T) {
 		{"RedisURL", c.RedisURL, "", "empty ⇒ ignored, because HAEnabled is false"},
 		{"MemberSyncSecret", c.MemberSyncSecret, "", "empty ⇒ /v1/service/members 401s everything"},
 		{"MetricsToken", c.MetricsToken, "", "empty ⇒ /metrics 401s everything"},
+		{"TransitJWKSURL", c.TransitJWKSURL, "", "empty ⇒ x-gateway-auth is checked against GATEWAY_AUTH_SECRET"},
+		{"TransitKeys", c.TransitKeys, gatewayauth.StaticTransitKeys(nil), "nil ⇒ no transit key held; the shared secret is the proof"},
+		{"TransitIssuer", c.TransitIssuer, "edge-gateway", "auth-service's TRANSIT_ISSUER default; unused unless transit assertions are configured"},
 	}
 
 	seen := map[string]bool{}
