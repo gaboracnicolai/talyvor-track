@@ -20,16 +20,18 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
       - name: Tenancy + workspace-authz IDOR regression locks
         run: |
-          python -m pip install --quiet semgrep
+          # PINNED BY DIGEST. This was an unpinned `pip install semgrep`, so every run
+          # scanned with whatever version PyPI served that day — a new release could turn
+          # the lock green (or red) without a commit here. Same pattern as talyvor-code's
+          # gitleaks pin. semgrep/semgrep:1.178.0 at time of pinning.
           # cmd/ IS IN SCOPE. The scan used to cover internal/ only, which left
           # cmd/track/main.go — the file that defines gwExempt, i.e. WHICH ROUTES SKIP
           # AUTHENTICATION, and which has no test files at all — outside the lock.
-          semgrep scan --config .semgrep/ --error --metrics=off internal/ cmd/
+          docker run --rm -v "$PWD:/src" -w /src \
+            semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b \
+            semgrep scan --config .semgrep/ --error --metrics=off internal/ cmd/
 
   # ORG-LEVEL CLASS GUARD, not a Track guard. talyvor-docs and talyvor-track independently
   # shipped the identical defect — a compose file supplying a real default for
