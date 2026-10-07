@@ -101,6 +101,7 @@ func TestShippedDefaults_AnEmptyEnvironmentProducesExactlyThis(t *testing.T) {
 		{"AIModel", c.AIModel, "", "empty ⇒ the AI actions ask Lens for ai.DefaultModel (claude-haiku-4-5)"},
 		{"RedisURL", c.RedisURL, "", "empty ⇒ ignored, because HAEnabled is false"},
 		{"MemberSyncSecret", c.MemberSyncSecret, "", "empty ⇒ /v1/service/members 401s everything"},
+		{"MetricsToken", c.MetricsToken, "", "empty ⇒ /metrics 401s everything"},
 	}
 
 	seen := map[string]bool{}

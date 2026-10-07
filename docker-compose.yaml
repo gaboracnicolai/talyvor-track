@@ -48,6 +48,9 @@ services:
       # to Docs as "Track has no members". Optional, but >= MinMemberSyncSecretLen when set —
       # boot-fail-closed, since it gates every tenant's roster.
       - TRACK_MEMBER_SYNC_SECRET=${TRACK_MEMBER_SYNC_SECRET:-}
+      # Bearer token for GET /metrics (its counters carry workspace ids). Unset ⇒ /metrics 401s
+      # every request. >= 16 chars when set, or Track refuses to boot.
+      - TRACK_METRICS_TOKEN=${TRACK_METRICS_TOKEN:-}
       # Track's copy of the edge gateway transit-proof secret — the root of the entire
       # auth boundary: whoever knows it can present ANY identity to Track.
       #

@@ -405,10 +405,10 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
-	r.Handle("/metrics", metrics.Handler())
+	r.Handle("/metrics", metrics.Handler(cfg.MetricsToken)) // bearer-only: the counters carry workspace ids
 
 	// T14 liveness/readiness probes. Top-level and unauthenticated — like
-	// /healthz and /metrics — so a load balancer can always reach them. The
+	// /healthz — so a load balancer can always reach them. The
 	// static /healthz above is left untouched for backward-compat; these are
 	// additive. /readyz pings Postgres, so during a DB outage it reports 503 and
 	// the LB drains this instance instead of routing traffic to a broken one.

@@ -94,6 +94,12 @@ type Config struct {
 	//   - Every pull is audit-logged (event=service_member_pull, workspace_id + count);
 	//     a leaked-token mass-enumeration is detectable there.
 	MemberSyncSecret string
+
+	// MetricsToken is the bearer token a Prometheus scraper presents to GET /metrics
+	// (TRACK_METRICS_TOKEN). The issue counters there carry workspace and team ids, so the
+	// page is never public. OPTIONAL: unset ⇒ /metrics 401s every request. If SET it must
+	// be >= gatewayauth.MinSecretLen, failing at boot rather than serving behind a guessable token.
+	MetricsToken string
 }
 
 // MinMemberSyncSecretLen mirrors GATEWAY_AUTH_SECRET's minimum — this token gates the
@@ -179,6 +185,10 @@ func Load() (*Config, error) {
 	c.MemberSyncSecret = os.Getenv("TRACK_MEMBER_SYNC_SECRET")
 	if c.MemberSyncSecret != "" && len(c.MemberSyncSecret) < MinMemberSyncSecretLen {
 		return nil, fmt.Errorf("%w: TRACK_MEMBER_SYNC_SECRET, if set, must be >= %d chars (it gates every tenant's member roster)", ErrMissingEnv, MinMemberSyncSecretLen)
+	}
+	c.MetricsToken = os.Getenv("TRACK_METRICS_TOKEN")
+	if c.MetricsToken != "" && len(c.MetricsToken) < gatewayauth.MinSecretLen {
+		return nil, fmt.Errorf("%w: TRACK_METRICS_TOKEN, if set, must be >= %d chars (/metrics carries workspace ids)", ErrMissingEnv, gatewayauth.MinSecretLen)
 	}
 	return c, nil
 }
