@@ -20,18 +20,20 @@ func NewHandler(store *Store) *Handler { return &Handler{store: store} }
 // at /timer/* so they're easy to grep when debugging "why isn't my
 // timer running"; the per-issue list lives under the issue resource
 // to mirror Linear/Jira URL shape.
+//
+// The routes are registered flat, never under r.Route("/workspaces/{wsID}", ...): a chi Mount on
+// that exact pattern takes every method on it, so the workspace handler's GET/PATCH/DELETE
+// /workspaces/{wsID} and POST /workspaces/{wsID}/restore answered a plain 404 (B17.109).
 func (h *Handler) Mount(r chi.Router) {
-	r.Route("/workspaces/{wsID}", func(r chi.Router) {
-		r.Get("/timer", h.GetTimer)
-		r.Post("/timer/start", h.StartTimer)
-		r.Post("/timer/stop", h.StopTimer)
+	r.Get("/workspaces/{wsID}/timer", h.GetTimer)
+	r.Post("/workspaces/{wsID}/timer/start", h.StartTimer)
+	r.Post("/workspaces/{wsID}/timer/stop", h.StopTimer)
 
-		r.Post("/time-entries", h.LogTime)
-		r.Delete("/time-entries/{id}", h.Delete)
+	r.Post("/workspaces/{wsID}/time-entries", h.LogTime)
+	r.Delete("/workspaces/{wsID}/time-entries/{id}", h.Delete)
 
-		r.Get("/issues/{id}/time-entries", h.ListIssueEntries)
-		r.Get("/time-summary", h.WorkspaceSummary)
-	})
+	r.Get("/workspaces/{wsID}/issues/{id}/time-entries", h.ListIssueEntries)
+	r.Get("/workspaces/{wsID}/time-summary", h.WorkspaceSummary)
 }
 
 type apiError struct {
