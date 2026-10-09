@@ -65,14 +65,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.6), and W6.34 learned this from CI rather
+          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.9), and W6.34 learned this from CI rather
           # than from a doc: golangci-lint REFUSES to run when it was built with a Go older than
           # the module's targeted version — "the Go language version (go1.25) used to build
           # golangci-lint is lower than the targeted Go version (1.26.6)". actions/setup-go also
           # exports GOTOOLCHAIN=local, so go.mod's toolchain directive is NOT auto-fetched here:
           # this pin is what the job actually runs, and the tests therefore exercise the runtime
           # the release is built with. internal/migrate/toolchain_pin_test.go enforces the lockstep.
-          go-version: "1.26.6"
+          go-version: "1.26.9"
           cache: true
       # Format gate. There was none: golangci-lint v2 moved formatters OUT of `linters:`,
       # so .golangci.yml (which has no `formatters:` block) checked no formatting at all
@@ -120,12 +120,12 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.6). govulncheck grades the STDLIB against
+          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.9). govulncheck grades the STDLIB against
           # the toolchain it runs under, so a pin ABOVE go.mod's would assess a runtime this
           # repo does not ship and could report green over a vulnerable binary; a pin BELOW it
           # reports vulns nothing ships. internal/migrate/toolchain_pin_test.go enforces the
           # floor half of that lockstep across every go-version pin in this file.
-          go-version: "1.26.6"
+          go-version: "1.26.9"
           cache: false
       - name: govulncheck
         run: |
@@ -161,14 +161,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.6), and W6.34 learned this from CI rather
+          # ⚠ MUST EQUAL go.mod's `toolchain` (go1.26.9), and W6.34 learned this from CI rather
           # than from a doc: golangci-lint REFUSES to run when it was built with a Go older than
           # the module's targeted version — "the Go language version (go1.25) used to build
           # golangci-lint is lower than the targeted Go version (1.26.6)". actions/setup-go also
           # exports GOTOOLCHAIN=local, so go.mod's toolchain directive is NOT auto-fetched here:
           # this pin is what the job actually runs, and the tests therefore exercise the runtime
           # the release is built with. internal/migrate/toolchain_pin_test.go enforces the lockstep.
-          go-version: "1.26.6"
+          go-version: "1.26.9"
           cache: true
       - name: go vet
         run: go vet ./...
@@ -301,6 +301,21 @@ jobs:
           fi
       - name: Build
         run: cd frontend && npm run build
+
+  # B28.455 — fails on any known-vulnerable frontend dependency in frontend/package-lock.json.
+  # npm has no ignore list, so the script reads package.json "auditIgnore" (GHSA → reason).
+  # It reads the lockfile only, so there is no install step.
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+      - name: npm audit
+        run: cd frontend && node scripts/npm-audit.mjs
 
   build-image:
     runs-on: ubuntu-latest

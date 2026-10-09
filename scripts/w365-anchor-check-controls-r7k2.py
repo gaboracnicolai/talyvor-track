@@ -128,8 +128,8 @@ def main() -> int:
         # ── B1..B4: the anchor check must be able to fail ─────────────────────────────────
         CASES = [
             ("B1 a job grows a SECOND go-version pin", CI,
-             '          go-version: "1.26.6"\n          cache: false\n',
-             '          go-version: "1.26.6"\n          go-version: "1.26.6"\n          cache: false\n',
+             '          go-version: "1.26.9"\n          cache: false\n',
+             '          go-version: "1.26.9"\n          go-version: "1.26.9"\n          cache: false\n',
              True, "the exact way V7 went inert, now scoped so it names the job"),
             ("B2 a pinned job is renamed", CI, "\n  vuln:\n", "\n  vulnerability:\n", True,
              "a job that no longer exists must RAISE, not resolve to something arbitrary"),
