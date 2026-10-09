@@ -40,6 +40,12 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
-    "vitest": "^3.2.7"
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "postcss-selector-parser": "^7.1.6"
+  },
+  "auditIgnore": {
+    "GHSA-vfj7-8cjw-p6xm": "braces <=3.0.3 (via tailwindcss 3 > chokidar, fast-glob > micromatch): no patched braces release exists (3.0.3 is the latest); the fix npm offers is tailwindcss 4, a rewrite of the styling config. Build-time only. Drop this when braces ships a fix."
   }
 }
