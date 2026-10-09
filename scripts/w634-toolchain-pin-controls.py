@@ -93,11 +93,11 @@ LCK = "TestCIGoVersionPinsAreAtLeastTheToolchainFloor"
 
 CONTROLS = [
     ("V1 the toolchain directive deleted", GOMOD,
-     "\ntoolchain go1.26.6\n", "\n",
+     "\ntoolchain go1.26.9\n", "\n",
      PIN, WHY, "removing the pin silently restores eight reachable stdlib advisories"),
 
     ("V2 the pin lowered below the floor", GOMOD,
-     "toolchain go1.26.6", "toolchain go1.26.5",
+     "toolchain go1.26.9", "toolchain go1.26.5",
      PIN, WHY, "1.26.5 leaves GO-2026-{6218,6091,6090,6089,6088,5972,5026} reachable"),
 
     # V3's first version set `toolchain go1.27.1` in go.mod. That release does not exist, so the go
